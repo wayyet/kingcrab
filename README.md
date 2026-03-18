@@ -60,7 +60,7 @@ For the exact compatibility matrix, see [COMPATIBILITY.md](COMPATIBILITY.md).
 OpenClaw.NET now has two related selectors:
 
 - `Runtime.Mode`: `aot`, `jit`, or `auto`
-- `Runtime.Orchestrator`: `native` everywhere, or `maf` only in the MAF-enabled artifacts
+- `Runtime.Orchestrator`:  `maf`  the MAF-enabled artifacts
 
 In practice:
 
