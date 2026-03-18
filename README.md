@@ -341,41 +341,6 @@ Across both lanes, unsupported surfaces fail fast with explicit diagnostics inst
 
 The `/doctor` report includes per-plugin load diagnostics, and the repo now includes hermetic bridge tests plus a pinned public smoke manifest for mainstream packages. For the exact matrix and TypeScript requirements such as `jiti`, see **[Plugin Compatibility Guide](COMPATIBILITY.md)**.
 
-## Semantic Kernel interop (optional)
-
-OpenClaw.NET is not a replacement for Semantic Kernel. If you're already using `Microsoft.SemanticKernel`, OpenClaw can act as the **production gateway/runtime host** (auth, rate limits, channels, OTEL, policy) around your SK code.
-
-Supported integration patterns today:
-- **Wrap your SK orchestration as an OpenClaw tool**: keep SK in-process, expose a single "entrypoint" tool the OpenClaw agent can call.
-- **Host SK-based agents behind the OpenClaw gateway**: use OpenClaw for Internet-facing concerns (WebSocket, `/v1/*`, Telegram/Twilio/WhatsApp), while your SK logic stays in your app/tool layer.
-
-More details and AOT/trimming notes: see `SEMANTIC_KERNEL.md`.
-
-Conceptual example (tool wrapper):
-```csharp
-// Your tool can instantiate and call Semantic Kernel. OpenClaw policies still apply
-// to *when* this tool runs, who can call it, and how often.
-public sealed class SemanticKernelTool : ITool
-{
-    public string Name => "sk_example";
-    public string Description => "Example SK-backed tool.";
-    public string ParameterSchema => "{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"}},\"required\":[\"text\"]}";
-
-    public async ValueTask<string> ExecuteAsync(string argumentsJson, CancellationToken ct)
-    {
-        // Parse argsJson, then run SK here (Kernel builder + plugin invocation).
-        throw new NotImplementedException();
-    }
-}
-```
-
-Notes:
-- **NativeAOT**: Semantic Kernel usage may require additional trimming/reflection configuration. Keep SK interop optional so the core gateway/runtime remains NativeAOT-friendly.
-
-Available:
-- `src/OpenClaw.SemanticKernelAdapter` — optional adapter library that exposes SK functions as OpenClaw tools.
-- `samples/OpenClaw.SemanticKernelInteropHost` — runnable sample host demonstrating `/v1/responses` without requiring external LLM access.
-
 ## Telegram Webhook channel
 
 ### Setup
