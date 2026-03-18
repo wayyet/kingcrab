@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>OpenClaw.Channels</RootNamespace>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OpenClaw.Core\OpenClaw.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="MailKit" Version="4.15.1" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.3" />
+  </ItemGroup>
+</Project>
