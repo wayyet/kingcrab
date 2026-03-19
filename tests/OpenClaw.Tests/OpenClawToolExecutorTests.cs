@@ -47,6 +47,6 @@ public sealed class OpenClawToolExecutorTests
             CancellationToken.None);
 
         Assert.Contains("requires approval", result.ResultText, StringComparison.OrdinalIgnoreCase);
-        await tool.DidNotReceiveWithAnyArgs().ExecuteAsync(default!, default);
+        await tool.DidNotReceiveWithAnyArgs().ExecuteAsync(default!, TestContext.Current.CancellationToken);
     }
 }

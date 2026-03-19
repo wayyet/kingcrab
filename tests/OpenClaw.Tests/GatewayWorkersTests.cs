@@ -20,7 +20,7 @@ public sealed class GatewayWorkersTests
     [Fact]
     public async Task Start_LoopbackApprovalStillRequiresRequesterMatch()
     {
-        var storagePath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "openclaw-worker-tests", Guid.NewGuid().ToString("N"));
+        var storagePath = Path.Combine(Path.GetTempPath(), "openclaw-worker-tests", Guid.CreateVersion7().ToString("N"));
         var store = new FileMemoryStore(storagePath, 4);
         var config = new GatewayConfig
         {
@@ -100,7 +100,7 @@ public sealed class GatewayWorkersTests
             SenderId = "attacker",
             Text = $"/approve {approval.ApprovalId} yes",
             MessageId = "msg1"
-        });
+        }, TestContext.Current.CancellationToken);
 
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         var outbound = await pipeline.OutboundReader.ReadAsync(timeout.Token);
@@ -214,7 +214,7 @@ public sealed class GatewayWorkersTests
             SenderId = "owner",
             Text = "hello",
             MessageId = "msg-grant"
-        });
+        }, TestContext.Current.CancellationToken);
 
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         var outbound = await pipeline.OutboundReader.ReadAsync(timeout.Token);
@@ -317,7 +317,7 @@ public sealed class GatewayWorkersTests
             SenderId = "owner",
             Text = "hello",
             MessageId = "msg-timeout"
-        });
+        }, TestContext.Current.CancellationToken);
 
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
         var approvalPrompt = await pipeline.OutboundReader.ReadAsync(timeout.Token);

@@ -12,7 +12,7 @@ public sealed class FileReadToolTests
     {
         var root = CreateTempDir();
         var path = Path.Combine(root, "note.txt");
-        await File.WriteAllTextAsync(path, "hello");
+        await File.WriteAllTextAsync(path, "hello", TestContext.Current.CancellationToken);
 
         var tool = new FileReadTool(new ToolingConfig
         {
@@ -28,7 +28,7 @@ public sealed class FileReadToolTests
     {
         var root = CreateTempDir();
         var path = Path.Combine(root, "note.txt");
-        await File.WriteAllTextAsync(path, "line1\nline2\nline3");
+        await File.WriteAllTextAsync(path, "line1\nline2\nline3", TestContext.Current.CancellationToken);
 
         var tool = new FileReadTool(new ToolingConfig
         {

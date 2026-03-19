@@ -1,56 +1,55 @@
-using Microsoft.Data.Sqlite;
 using OpenClaw.Core.Memory;
 using OpenClaw.Core.Models;
 using Xunit;
 
 namespace OpenClaw.Tests;
 
-public sealed class SqliteMemoryStoreRetentionTests
+public sealed class FileMemoryStoreRetentionTests
 {
     [Fact]
-    public async Task SweepAsync_ArchivesAndDeletesExpiredItems()
+    public async Task SweepAsync_ArchivesAndDeletesExpiredSessionAndBranch()
     {
         var root = CreateTempDir();
-        var dbPath = Path.Combine(root, "memory.db");
         var archive = Path.Combine(root, "archive");
         var now = new DateTimeOffset(2026, 03, 04, 12, 0, 0, TimeSpan.Zero);
+        var store = new FileMemoryStore(root, maxCachedSessions: 8);
 
-        using var store = new SqliteMemoryStore(dbPath, enableFts: false);
-
-        await store.SaveSessionAsync(new Session
+        var expiredSession = new Session
         {
             Id = "session-expired",
             ChannelId = "websocket",
             SenderId = "alice",
             LastActiveAt = now.AddDays(-45)
-        }, CancellationToken.None);
-        await store.SaveSessionAsync(new Session
+        };
+        var freshSession = new Session
         {
             Id = "session-fresh",
             ChannelId = "websocket",
             SenderId = "bob",
             LastActiveAt = now.AddDays(-1)
-        }, CancellationToken.None);
-        await store.SaveBranchAsync(new SessionBranch
+        };
+
+        var expiredBranch = new SessionBranch
         {
             BranchId = "branch-expired",
             SessionId = "session-expired",
             Name = "old",
             CreatedAt = now.AddDays(-20),
             History = []
-        }, CancellationToken.None);
-        await store.SaveBranchAsync(new SessionBranch
+        };
+        var freshBranch = new SessionBranch
         {
             BranchId = "branch-fresh",
             SessionId = "session-fresh",
             Name = "new",
             CreatedAt = now.AddDays(-1),
             History = []
-        }, CancellationToken.None);
+        };
 
-        var staleEpoch = now.AddDays(-45).ToUnixTimeSeconds();
-        await SetUpdatedAtAsync(dbPath, "sessions", "id", "session-expired", staleEpoch);
-        await SetUpdatedAtAsync(dbPath, "branches", "branch_id", "branch-expired", staleEpoch);
+        await store.SaveSessionAsync(expiredSession, CancellationToken.None);
+        await store.SaveSessionAsync(freshSession, CancellationToken.None);
+        await store.SaveBranchAsync(expiredBranch, CancellationToken.None);
+        await store.SaveBranchAsync(freshBranch, CancellationToken.None);
 
         var result = await store.SweepAsync(
             new RetentionSweepRequest
@@ -70,32 +69,29 @@ public sealed class SqliteMemoryStoreRetentionTests
         Assert.Equal(1, result.DeletedBranches);
         Assert.Equal(1, result.ArchivedSessions);
         Assert.Equal(1, result.ArchivedBranches);
+
         Assert.Null(await store.GetSessionAsync("session-expired", CancellationToken.None));
         Assert.NotNull(await store.GetSessionAsync("session-fresh", CancellationToken.None));
         Assert.Null(await store.LoadBranchAsync("branch-expired", CancellationToken.None));
         Assert.NotNull(await store.LoadBranchAsync("branch-fresh", CancellationToken.None));
+
+        Assert.NotEmpty(Directory.EnumerateFiles(archive, "*.json", SearchOption.AllDirectories));
     }
 
     [Fact]
-    public async Task SweepAsync_RespectsMaxItemsAndSkipsProtectedSession()
+    public async Task SweepAsync_ProtectedSessionIsSkipped()
     {
         var root = CreateTempDir();
-        var dbPath = Path.Combine(root, "memory.db");
+        var store = new FileMemoryStore(root, maxCachedSessions: 8);
         var now = new DateTimeOffset(2026, 03, 04, 12, 0, 0, TimeSpan.Zero);
 
-        using var store = new SqliteMemoryStore(dbPath, enableFts: false);
-
-        foreach (var id in new[] { "s1", "s2", "s3" })
+        await store.SaveSessionAsync(new Session
         {
-            await store.SaveSessionAsync(new Session
-            {
-                Id = id,
-                ChannelId = "websocket",
-                SenderId = id,
-                LastActiveAt = now.AddDays(-90)
-            }, CancellationToken.None);
-            await SetUpdatedAtAsync(dbPath, "sessions", "id", id, now.AddDays(-90).ToUnixTimeSeconds());
-        }
+            Id = "session-protected",
+            ChannelId = "websocket",
+            SenderId = "alice",
+            LastActiveAt = now.AddDays(-90)
+        }, CancellationToken.None);
 
         var result = await store.SweepAsync(
             new RetentionSweepRequest
@@ -106,27 +102,28 @@ public sealed class SqliteMemoryStoreRetentionTests
                 ArchiveEnabled = false,
                 ArchivePath = Path.Combine(root, "archive"),
                 ArchiveRetentionDays = 30,
-                MaxItems = 2
+                MaxItems = 1000
             },
-            protectedSessionIds: new HashSet<string>(StringComparer.Ordinal) { "s1" },
+            protectedSessionIds: new HashSet<string>(StringComparer.Ordinal)
+            {
+                "session-protected"
+            },
             CancellationToken.None);
 
         Assert.Equal(1, result.SkippedProtectedSessions);
-        Assert.Equal(2, result.DeletedSessions);
-        Assert.True(result.MaxItemsLimitReached);
-        Assert.NotNull(await store.GetSessionAsync("s1", CancellationToken.None));
+        Assert.Equal(0, result.DeletedSessions);
+        Assert.NotNull(await store.GetSessionAsync("session-protected", CancellationToken.None));
     }
 
     [Fact]
     public async Task SweepAsync_ArchiveFailurePreventsDelete()
     {
         var root = CreateTempDir();
-        var dbPath = Path.Combine(root, "memory.db");
+        var store = new FileMemoryStore(root, maxCachedSessions: 8);
         var now = new DateTimeOffset(2026, 03, 04, 12, 0, 0, TimeSpan.Zero);
         var invalidArchiveRoot = Path.Combine(root, "archive-blocker");
-        await File.WriteAllTextAsync(invalidArchiveRoot, "not-a-directory");
+        await File.WriteAllTextAsync(invalidArchiveRoot, "not-a-directory", TestContext.Current.CancellationToken);
 
-        using var store = new SqliteMemoryStore(dbPath, enableFts: false);
         await store.SaveSessionAsync(new Session
         {
             Id = "session-expired",
@@ -134,7 +131,6 @@ public sealed class SqliteMemoryStoreRetentionTests
             SenderId = "alice",
             LastActiveAt = now.AddDays(-90)
         }, CancellationToken.None);
-        await SetUpdatedAtAsync(dbPath, "sessions", "id", "session-expired", now.AddDays(-90).ToUnixTimeSeconds());
 
         var result = await store.SweepAsync(
             new RetentionSweepRequest
@@ -156,37 +152,38 @@ public sealed class SqliteMemoryStoreRetentionTests
     }
 
     [Fact]
-    public async Task Initialize_CreatesRetentionIndexes()
+    public async Task SweepAsync_PurgesExpiredArchiveFiles()
     {
         var root = CreateTempDir();
-        var dbPath = Path.Combine(root, "memory.db");
+        var archive = Path.Combine(root, "archive");
+        Directory.CreateDirectory(archive);
+        var oldFile = Path.Combine(archive, "old.json");
+        var newFile = Path.Combine(archive, "new.json");
+        await File.WriteAllTextAsync(oldFile, "{}", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(newFile, "{}", TestContext.Current.CancellationToken);
 
-        using var _ = new SqliteMemoryStore(dbPath, enableFts: false);
+        var now = new DateTimeOffset(2026, 03, 04, 12, 0, 0, TimeSpan.Zero);
+        File.SetLastWriteTimeUtc(oldFile, now.UtcDateTime.AddDays(-60));
+        File.SetLastWriteTimeUtc(newFile, now.UtcDateTime.AddDays(-1));
 
-        await using var conn = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = dbPath }.ToString());
-        await conn.OpenAsync();
+        var store = new FileMemoryStore(root, maxCachedSessions: 8);
+        var result = await store.SweepAsync(
+            new RetentionSweepRequest
+            {
+                NowUtc = now,
+                SessionExpiresBeforeUtc = now.AddDays(-30),
+                BranchExpiresBeforeUtc = now.AddDays(-14),
+                ArchiveEnabled = true,
+                ArchivePath = archive,
+                ArchiveRetentionDays = 30,
+                MaxItems = 1000
+            },
+            protectedSessionIds: new HashSet<string>(StringComparer.Ordinal),
+            CancellationToken.None);
 
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='index' AND name IN ('idx_sessions_updated_at','idx_branches_updated_at') ORDER BY name;";
-        var names = new List<string>();
-        await using var reader = await cmd.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
-            names.Add(reader.GetString(0));
-
-        Assert.Contains("idx_sessions_updated_at", names);
-        Assert.Contains("idx_branches_updated_at", names);
-    }
-
-    private static async Task SetUpdatedAtAsync(string dbPath, string table, string idColumn, string id, long updatedAt)
-    {
-        await using var conn = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = dbPath }.ToString());
-        await conn.OpenAsync();
-
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"UPDATE {table} SET updated_at = $updated_at WHERE {idColumn} = $id;";
-        cmd.Parameters.AddWithValue("$updated_at", updatedAt);
-        cmd.Parameters.AddWithValue("$id", id);
-        await cmd.ExecuteNonQueryAsync();
+        Assert.Equal(1, result.ArchivePurgedFiles);
+        Assert.False(File.Exists(oldFile));
+        Assert.True(File.Exists(newFile));
     }
 
     private static string CreateTempDir()

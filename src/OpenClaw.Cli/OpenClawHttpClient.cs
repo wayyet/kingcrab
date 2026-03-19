@@ -7,7 +7,10 @@ namespace OpenClaw.Cli;
 
 internal sealed class OpenClawHttpClient : IDisposable
 {
-    private readonly HttpClient _http;
+    private readonly HttpClient _http = new()
+    {
+        Timeout = Timeout.InfiniteTimeSpan
+    };
     private readonly Uri _chatCompletionsUri;
 
     public OpenClawHttpClient(string baseUrl, string? authToken)
@@ -20,12 +23,6 @@ internal sealed class OpenClawHttpClient : IDisposable
             throw new ArgumentException($"Invalid base URL: {baseUrl}", nameof(baseUrl));
 
         _chatCompletionsUri = new Uri(baseUri, "/v1/chat/completions");
-
-        _http = new HttpClient
-        {
-            Timeout = Timeout.InfiniteTimeSpan
-        };
-
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("openclaw-cli/1.0");
 
         if (!string.IsNullOrWhiteSpace(authToken))

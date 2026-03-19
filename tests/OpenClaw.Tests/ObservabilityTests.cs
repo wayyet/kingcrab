@@ -186,7 +186,7 @@ public sealed class ObservabilityTests
                     m.IncrementToolCalls();
                     m.AddInputTokens(1);
                 }
-            });
+            }, TestContext.Current.CancellationToken);
         }
 
         await Task.WhenAll(tasks);

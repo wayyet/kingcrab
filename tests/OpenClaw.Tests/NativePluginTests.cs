@@ -525,7 +525,7 @@ public class PdfReadToolTests
         try
         {
             // Write something that triggers the "no text found" path
-            await File.WriteAllTextAsync(tempFile, "not a real PDF");
+            await File.WriteAllTextAsync(tempFile, "not a real PDF", TestContext.Current.CancellationToken);
             var tool = new PdfReadTool(new PdfReadConfig { Enabled = true, MaxOutputChars = 50 });
 
             var result = await tool.ExecuteAsync(

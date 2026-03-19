@@ -1,0 +1,35 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <OpenClawEnableMafExperiment Condition="'$(OpenClawEnableMafExperiment)' == ''">false</OpenClawEnableMafExperiment>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\OpenClaw.Core\OpenClaw.Core.csproj" />
+    <ProjectReference Include="..\..\src\OpenClaw.Agent\OpenClaw.Agent.csproj" />
+    <ProjectReference Include="..\..\src\OpenClaw.Channels\OpenClaw.Channels.csproj" />
+    <ProjectReference Include="..\..\src\OpenClaw.Cli\OpenClaw.Cli.csproj" />
+    <ProjectReference Include="..\..\src\OpenClaw.Gateway\OpenClaw.Gateway.csproj" />
+    <ProjectReference Include="..\..\src\OpenClaw.PluginKit\OpenClaw.PluginKit.csproj" />
+    <ProjectReference Include="..\..\src\OpenClawNet.Sandbox.OpenSandbox\OpenClawNet.Sandbox.OpenSandbox.csproj" />
+    <ProjectReference Include="..\OpenClaw.TestPluginFixtures\OpenClaw.TestPluginFixtures.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(OpenClawEnableMafExperiment)' == 'true'">
+    <ProjectReference Include="..\OpenClaw.MicrosoftAgentFrameworkAdapter\OpenClaw.MicrosoftAgentFrameworkAdapter.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup Condition="'$(OpenClawEnableMafExperiment)' == 'true'">
+    <DefineConstants>$(DefineConstants);OPENCLAW_ENABLE_MAF_EXPERIMENT</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.3.0" />
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" Version="10.0.5" />
+    <PackageReference Include="NSubstitute" Version="5.3.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="xunit.v3" Version="3.2.2" />
+  </ItemGroup>
+</Project>

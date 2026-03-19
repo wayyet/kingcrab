@@ -3,7 +3,7 @@
     <RootNamespace>OpenClaw.TestPluginFixtures</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\OpenClaw.Core\OpenClaw.Core.csproj" />
-    <ProjectReference Include="..\OpenClaw.PluginKit\OpenClaw.PluginKit.csproj" />
+    <ProjectReference Include="..\..\src\OpenClaw.Core\OpenClaw.Core.csproj" />
+    <ProjectReference Include="..\..\src\OpenClaw.PluginKit\OpenClaw.PluginKit.csproj" />
   </ItemGroup>
 </Project>

@@ -162,7 +162,7 @@ public class SecurityTests
 
         // Create a temp PDF-like file outside allowed root
         var tmpFile = Path.GetTempFileName();
-        await File.WriteAllTextAsync(tmpFile, "%PDF-1.4 dummy");
+        await File.WriteAllTextAsync(tmpFile, "%PDF-1.4 dummy", TestContext.Current.CancellationToken);
 
         try
         {

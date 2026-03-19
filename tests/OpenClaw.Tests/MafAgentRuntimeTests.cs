@@ -69,15 +69,13 @@ public class MafAgentRuntimeTests
 
         try
         {
-            await File.WriteAllTextAsync(
-                Path.Combine(skillDir, "SKILL.md"),
-                """
+            await File.WriteAllTextAsync(Path.Combine(skillDir, "SKILL.md"), """
                 ---
                 name: reloadable-skill
                 description: Hot reloaded during tests
                 ---
                 Use this skill after reload.
-                """);
+                """, TestContext.Current.CancellationToken);
 
             var agent = MafTestRuntimeFactory.CreateRuntime(
                 _chatClient,
@@ -98,7 +96,7 @@ public class MafAgentRuntimeTests
 
             Assert.Empty(agent.LoadedSkillNames);
 
-            var loaded = await agent.ReloadSkillsAsync();
+            var loaded = await agent.ReloadSkillsAsync(TestContext.Current.CancellationToken);
 
             Assert.Single(loaded);
             Assert.Contains("reloadable-skill", loaded);

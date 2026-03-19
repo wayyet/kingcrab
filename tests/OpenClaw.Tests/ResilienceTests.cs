@@ -67,7 +67,7 @@ public sealed class ResilienceTests
         Assert.Equal(CircuitState.Open, cb.State);
 
         // Wait for cooldown
-        await Task.Delay(100);
+        await Task.Delay(100, TestContext.Current.CancellationToken);
 
         // Next call should succeed (probe) and close the circuit
         var result = await cb.ExecuteAsync(_ => Task.FromResult(99), CancellationToken.None);
@@ -85,7 +85,7 @@ public sealed class ResilienceTests
             cb.ExecuteAsync<int>(_ => throw new InvalidOperationException("fail"), CancellationToken.None));
 
         // Wait for cooldown
-        await Task.Delay(100);
+        await Task.Delay(100, TestContext.Current.CancellationToken);
 
         // Probe fails → re-opens
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
