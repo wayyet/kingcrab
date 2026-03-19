@@ -30,4 +30,8 @@
     <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="10.0.5" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.5" />
   </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\..\github\openclaw.net\src\OpenClaw.Client\OpenClaw.Client.csproj" />
+  </ItemGroup>
 </Project>

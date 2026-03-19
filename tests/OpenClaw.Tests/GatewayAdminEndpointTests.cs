@@ -4,12 +4,14 @@ using System.Net.Http.Headers;
 using System.Text.RegularExpressions;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
+using OpenClaw.Client;
 using OpenClaw.Agent;
 using OpenClaw.Agent.Plugins;
 using OpenClaw.Channels;
@@ -45,7 +47,7 @@ public sealed class GatewayAdminEndpointTests
         bearerRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
         var bearerResponse = await harness.Client.SendAsync(bearerRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, bearerResponse.StatusCode);
-        var bearerPayload = await ReadJsonAsync(bearerResponse);
+        var bearerPayload = await ReadJsonAsync(bearerResponse, TestContext.Current.CancellationToken);
         Assert.Equal("bearer", bearerPayload.RootElement.GetProperty("authMode").GetString());
 
         using var loginRequest = new HttpRequestMessage(HttpMethod.Post, "/auth/session")
@@ -55,7 +57,7 @@ public sealed class GatewayAdminEndpointTests
         loginRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
         var loginResponse = await harness.Client.SendAsync(loginRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, loginResponse.StatusCode);
-        var loginPayload = await ReadJsonAsync(loginResponse);
+        var loginPayload = await ReadJsonAsync(loginResponse, TestContext.Current.CancellationToken);
         Assert.Equal("browser-session", loginPayload.RootElement.GetProperty("authMode").GetString());
         var csrfToken = loginPayload.RootElement.GetProperty("csrfToken").GetString();
         Assert.False(string.IsNullOrWhiteSpace(csrfToken));
@@ -65,7 +67,7 @@ public sealed class GatewayAdminEndpointTests
         sessionRequest.Headers.Add("Cookie", cookie);
         var sessionResponse = await harness.Client.SendAsync(sessionRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, sessionResponse.StatusCode);
-        var sessionPayload = await ReadJsonAsync(sessionResponse);
+        var sessionPayload = await ReadJsonAsync(sessionResponse, TestContext.Current.CancellationToken);
         Assert.Equal("browser-session", sessionPayload.RootElement.GetProperty("authMode").GetString());
 
         using var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, "/auth/session");
@@ -85,7 +87,7 @@ public sealed class GatewayAdminEndpointTests
         currentSettingsRequest.Headers.Add("Cookie", cookie);
         var currentSettingsResponse = await harness.Client.SendAsync(currentSettingsRequest, TestContext.Current.CancellationToken);
         currentSettingsResponse.EnsureSuccessStatusCode();
-        using var currentSettings = await ReadJsonAsync(currentSettingsResponse);
+        using var currentSettings = await ReadJsonAsync(currentSettingsResponse, TestContext.Current.CancellationToken);
         var settingsPayload = currentSettings.RootElement.GetProperty("settings").Clone();
         var settingsDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(settingsPayload.GetRawText(), CoreJsonContext.Default.BridgeDictionaryStringJsonElement)!;
         settingsDict["usageFooter"] = JsonSerializer.SerializeToElement("tokens");
@@ -106,7 +108,7 @@ public sealed class GatewayAdminEndpointTests
         allowedRequest.Headers.Add(BrowserSessionAuthService.CsrfHeaderName, csrfToken);
         var allowedResponse = await harness.Client.SendAsync(allowedRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, allowedResponse.StatusCode);
-        var payload = await ReadJsonAsync(allowedResponse);
+        var payload = await ReadJsonAsync(allowedResponse, TestContext.Current.CancellationToken);
         Assert.Equal("tokens", payload.RootElement.GetProperty("settings").GetProperty("usageFooter").GetString());
     }
 
@@ -121,14 +123,14 @@ public sealed class GatewayAdminEndpointTests
         approvalsRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
         var approvalsResponse = await harness.Client.SendAsync(approvalsRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, approvalsResponse.StatusCode);
-        var approvalsPayload = await ReadJsonAsync(approvalsResponse);
+        var approvalsPayload = await ReadJsonAsync(approvalsResponse, TestContext.Current.CancellationToken);
         Assert.Equal(1, approvalsPayload.RootElement.GetProperty("items").GetArrayLength());
 
         using var historyRequest = new HttpRequestMessage(HttpMethod.Get, "/tools/approvals/history?limit=10");
         historyRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
         var historyResponse = await harness.Client.SendAsync(historyRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, historyResponse.StatusCode);
-        var historyPayload = await ReadJsonAsync(historyResponse);
+        var historyPayload = await ReadJsonAsync(historyResponse, TestContext.Current.CancellationToken);
         Assert.Equal(1, historyPayload.RootElement.GetProperty("items").GetArrayLength());
         Assert.Equal("created", historyPayload.RootElement.GetProperty("items")[0].GetProperty("eventType").GetString());
     }
@@ -159,7 +161,7 @@ public sealed class GatewayAdminEndpointTests
         listPolicies.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
         var listPoliciesResponse = await harness.Client.SendAsync(listPolicies, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, listPoliciesResponse.StatusCode);
-        using var policiesPayload = await ReadJsonAsync(listPoliciesResponse);
+        using var policiesPayload = await ReadJsonAsync(listPoliciesResponse, TestContext.Current.CancellationToken);
         Assert.Equal(1, policiesPayload.RootElement.GetProperty("items").GetArrayLength());
 
         using var resetCircuit = new HttpRequestMessage(HttpMethod.Post, "/admin/providers/openai/circuit/reset");
@@ -190,7 +192,7 @@ public sealed class GatewayAdminEndpointTests
         auditRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
         var auditResponse = await harness.Client.SendAsync(auditRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, auditResponse.StatusCode);
-        using var auditPayload = await ReadJsonAsync(auditResponse);
+        using var auditPayload = await ReadJsonAsync(auditResponse, TestContext.Current.CancellationToken);
         var actions = auditPayload.RootElement.GetProperty("items").EnumerateArray()
             .Select(item => item.GetProperty("actionType").GetString())
             .ToArray();
@@ -216,7 +218,7 @@ public sealed class GatewayAdminEndpointTests
         pluginRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
         var pluginResponse = await harness.Client.SendAsync(pluginRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, pluginResponse.StatusCode);
-        using var pluginPayload = await ReadJsonAsync(pluginResponse);
+        using var pluginPayload = await ReadJsonAsync(pluginResponse, TestContext.Current.CancellationToken);
         Assert.True(pluginPayload.RootElement.GetProperty("disabled").GetBoolean());
 
         using var createGrant = new HttpRequestMessage(HttpMethod.Post, "/tools/approval-policies")
@@ -242,7 +244,7 @@ public sealed class GatewayAdminEndpointTests
         listGrantRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
         var listGrantResponse = await harness.Client.SendAsync(listGrantRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, listGrantResponse.StatusCode);
-        using var grantPayload = await ReadJsonAsync(listGrantResponse);
+        using var grantPayload = await ReadJsonAsync(listGrantResponse, TestContext.Current.CancellationToken);
         Assert.Equal(1, grantPayload.RootElement.GetProperty("items").GetArrayLength());
 
         var session = await harness.Runtime.SessionManager.GetOrCreateByIdAsync("sess-timeline", "telegram", "user1", CancellationToken.None);
@@ -264,7 +266,7 @@ public sealed class GatewayAdminEndpointTests
         timelineRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
         var timelineResponse = await harness.Client.SendAsync(timelineRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, timelineResponse.StatusCode);
-        using var timelinePayload = await ReadJsonAsync(timelineResponse);
+        using var timelinePayload = await ReadJsonAsync(timelineResponse, TestContext.Current.CancellationToken);
         Assert.Equal(session.Id, timelinePayload.RootElement.GetProperty("sessionId").GetString());
         Assert.Equal(1, timelinePayload.RootElement.GetProperty("events").GetArrayLength());
     }
@@ -279,10 +281,348 @@ public sealed class GatewayAdminEndpointTests
         var response = await harness.Client.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        using var payload = await ReadJsonAsync(response);
+        using var payload = await ReadJsonAsync(response, TestContext.Current.CancellationToken);
         Assert.Equal(
             OpenClaw.Core.Models.RuntimeOrchestrator.Maf,
             payload.RootElement.GetProperty("runtime").GetProperty("orchestrator").GetString());
+    }
+
+    [Fact]
+    public async Task IntegrationApi_Status_Sessions_Events_AndMessageQueue_AreServed()
+    {
+        await using var harness = await CreateHarnessAsync(nonLoopbackBind: true);
+
+        var session = await harness.Runtime.SessionManager.GetOrCreateByIdAsync("sess-integration", "api", "user1", CancellationToken.None);
+        session.History.Add(new ChatTurn { Role = "user", Content = "hello" });
+        await harness.Runtime.SessionManager.PersistAsync(session, CancellationToken.None);
+        harness.Runtime.Operations.RuntimeEvents.Append(new RuntimeEventEntry
+        {
+            Id = "evt_integration",
+            SessionId = session.Id,
+            ChannelId = session.ChannelId,
+            SenderId = session.SenderId,
+            Component = "integration-test",
+            Action = "seeded",
+            Severity = "info",
+            Summary = "seeded"
+        });
+
+        using var statusRequest = new HttpRequestMessage(HttpMethod.Get, "/api/integration/status");
+        statusRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
+        var statusResponse = await harness.Client.SendAsync(statusRequest, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, statusResponse.StatusCode);
+        using var statusPayload = await ReadJsonAsync(statusResponse, TestContext.Current.CancellationToken);
+        Assert.Equal("ok", statusPayload.RootElement.GetProperty("health").GetProperty("status").GetString());
+        Assert.True(statusPayload.RootElement.GetProperty("activeSessions").GetInt32() >= 1);
+
+        using var sessionsRequest = new HttpRequestMessage(HttpMethod.Get, "/api/integration/sessions?page=1&pageSize=10&channelId=api");
+        sessionsRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
+        var sessionsResponse = await harness.Client.SendAsync(sessionsRequest, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, sessionsResponse.StatusCode);
+        using var sessionsPayload = await ReadJsonAsync(sessionsResponse, TestContext.Current.CancellationToken);
+        Assert.Equal(1, sessionsPayload.RootElement.GetProperty("active").GetArrayLength());
+
+        using var detailRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/integration/sessions/{Uri.EscapeDataString(session.Id)}");
+        detailRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
+        var detailResponse = await harness.Client.SendAsync(detailRequest, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, detailResponse.StatusCode);
+        using var detailPayload = await ReadJsonAsync(detailResponse, TestContext.Current.CancellationToken);
+        Assert.Equal(session.Id, detailPayload.RootElement.GetProperty("session").GetProperty("id").GetString());
+        Assert.True(detailPayload.RootElement.GetProperty("isActive").GetBoolean());
+
+        using var eventsRequest = new HttpRequestMessage(HttpMethod.Get, "/api/integration/runtime-events?limit=10&component=integration-test");
+        eventsRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
+        var eventsResponse = await harness.Client.SendAsync(eventsRequest, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, eventsResponse.StatusCode);
+        using var eventsPayload = await ReadJsonAsync(eventsResponse, TestContext.Current.CancellationToken);
+        Assert.Equal(1, eventsPayload.RootElement.GetProperty("items").GetArrayLength());
+
+        using var enqueueRequest = new HttpRequestMessage(HttpMethod.Post, "/api/integration/messages")
+        {
+            Content = JsonContent("""
+                {
+                  "channelId": "api",
+                  "senderId": "client-1",
+                  "text": "queued message"
+                }
+                """)
+        };
+        enqueueRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
+        var enqueueResponse = await harness.Client.SendAsync(enqueueRequest, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Accepted, enqueueResponse.StatusCode);
+        using var enqueuePayload = await ReadJsonAsync(enqueueResponse, TestContext.Current.CancellationToken);
+        Assert.True(enqueuePayload.RootElement.GetProperty("accepted").GetBoolean());
+
+        var queued = await harness.Runtime.Pipeline.InboundReader.ReadAsync(CancellationToken.None);
+        Assert.Equal("api", queued.ChannelId);
+        Assert.Equal("client-1", queued.SenderId);
+        Assert.Equal("queued message", queued.Text);
+    }
+
+    [Fact]
+    public async Task IntegrationApi_Dashboard_Approvals_Providers_Plugins_Audit_AndTimeline_AreServed()
+    {
+        await using var harness = await CreateHarnessAsync(nonLoopbackBind: true);
+
+        var session = await harness.Runtime.SessionManager.GetOrCreateByIdAsync("sess-dashboard", "api", "user-dashboard", CancellationToken.None);
+        session.History.Add(new ChatTurn { Role = "user", Content = "inspect me" });
+        await harness.Runtime.SessionManager.PersistAsync(session, CancellationToken.None);
+
+        var approval = harness.Runtime.ToolApprovalService.Create("sess-dashboard", "api", "user-dashboard", "shell", "{\"cmd\":\"pwd\"}", TimeSpan.FromMinutes(5));
+        harness.Runtime.ApprovalAuditStore.RecordCreated(approval);
+        harness.Runtime.Operations.OperatorAudit.Append(new OperatorAuditEntry
+        {
+            Id = "audit_dashboard_1",
+            ActorId = "tester",
+            AuthMode = "bearer",
+            ActionType = "dashboard_test",
+            TargetId = session.Id,
+            Summary = "seeded",
+            Success = true
+        });
+        harness.Runtime.Operations.RuntimeEvents.Append(new RuntimeEventEntry
+        {
+            Id = "evt_dashboard",
+            SessionId = session.Id,
+            ChannelId = session.ChannelId,
+            SenderId = session.SenderId,
+            Component = "dashboard-test",
+            Action = "seeded",
+            Severity = "info",
+            Summary = "seeded"
+        });
+
+        using var dashboardRequest = new HttpRequestMessage(HttpMethod.Get, "/api/integration/dashboard");
+        dashboardRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
+        var dashboardResponse = await harness.Client.SendAsync(dashboardRequest, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, dashboardResponse.StatusCode);
+        using var dashboardPayload = await ReadJsonAsync(dashboardResponse, TestContext.Current.CancellationToken);
+        Assert.Equal("ok", dashboardPayload.RootElement.GetProperty("status").GetProperty("health").GetProperty("status").GetString());
+        Assert.Equal(1, dashboardPayload.RootElement.GetProperty("approvals").GetProperty("items").GetArrayLength());
+
+        using var approvalsRequest = new HttpRequestMessage(HttpMethod.Get, "/api/integration/approvals?channelId=api&senderId=user-dashboard");
+        approvalsRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
+        var approvalsResponse = await harness.Client.SendAsync(approvalsRequest, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, approvalsResponse.StatusCode);
+        using var approvalsPayload = await ReadJsonAsync(approvalsResponse, TestContext.Current.CancellationToken);
+        Assert.Equal(1, approvalsPayload.RootElement.GetProperty("items").GetArrayLength());
+
+        using var approvalHistoryRequest = new HttpRequestMessage(HttpMethod.Get, "/api/integration/approval-history?limit=10&channelId=api");
+        approvalHistoryRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
+        var approvalHistoryResponse = await harness.Client.SendAsync(approvalHistoryRequest, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, approvalHistoryResponse.StatusCode);
+        using var approvalHistoryPayload = await ReadJsonAsync(approvalHistoryResponse, TestContext.Current.CancellationToken);
+        Assert.Equal("created", approvalHistoryPayload.RootElement.GetProperty("items")[0].GetProperty("eventType").GetString());
+
+        using var providersRequest = new HttpRequestMessage(HttpMethod.Get, "/api/integration/providers?recentTurnsLimit=5");
+        providersRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
+        var providersResponse = await harness.Client.SendAsync(providersRequest, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, providersResponse.StatusCode);
+        using var providersPayload = await ReadJsonAsync(providersResponse, TestContext.Current.CancellationToken);
+        Assert.True(providersPayload.RootElement.TryGetProperty("routes", out _));
+
+        using var pluginsRequest = new HttpRequestMessage(HttpMethod.Get, "/api/integration/plugins");
+        pluginsRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
+        var pluginsResponse = await harness.Client.SendAsync(pluginsRequest, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, pluginsResponse.StatusCode);
+        using var pluginsPayload = await ReadJsonAsync(pluginsResponse, TestContext.Current.CancellationToken);
+        Assert.True(pluginsPayload.RootElement.TryGetProperty("items", out _));
+
+        using var auditRequest = new HttpRequestMessage(HttpMethod.Get, "/api/integration/operator-audit?limit=10&actionType=dashboard_test");
+        auditRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
+        var auditResponse = await harness.Client.SendAsync(auditRequest, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, auditResponse.StatusCode);
+        using var auditPayload = await ReadJsonAsync(auditResponse, TestContext.Current.CancellationToken);
+        Assert.Equal(1, auditPayload.RootElement.GetProperty("items").GetArrayLength());
+
+        using var detailRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/integration/sessions/{Uri.EscapeDataString(session.Id)}");
+        detailRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
+        var detailResponse = await harness.Client.SendAsync(detailRequest, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, detailResponse.StatusCode);
+        using var detailPayload = await ReadJsonAsync(detailResponse, TestContext.Current.CancellationToken);
+        Assert.Equal(0, detailPayload.RootElement.GetProperty("branchCount").GetInt32());
+
+        using var timelineRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/integration/sessions/{Uri.EscapeDataString(session.Id)}/timeline?limit=10");
+        timelineRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
+        var timelineResponse = await harness.Client.SendAsync(timelineRequest, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, timelineResponse.StatusCode);
+        using var timelinePayload = await ReadJsonAsync(timelineResponse, TestContext.Current.CancellationToken);
+        Assert.Equal(session.Id, timelinePayload.RootElement.GetProperty("sessionId").GetString());
+        Assert.Equal(1, timelinePayload.RootElement.GetProperty("events").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task Mcp_Initialize_List_And_Call_AreServed()
+    {
+        await using var harness = await CreateHarnessAsync(nonLoopbackBind: true);
+
+        var anonymousResponse = await harness.Client.PostAsync("/mcp", JsonContent("{}"), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymousResponse.StatusCode);
+
+        using var initializeRequest = new HttpRequestMessage(HttpMethod.Post, "/mcp")
+        {
+            Content = JsonContent("""
+                {
+                  "jsonrpc": "2.0",
+                  "id": 1,
+                  "method": "initialize",
+                  "params": { "protocolVersion": "2025-03-26" }
+                }
+                """)
+        };
+        initializeRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
+        var initializeResponse = await harness.Client.SendAsync(initializeRequest, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, initializeResponse.StatusCode);
+        using var initializePayload = await ReadJsonAsync(initializeResponse, TestContext.Current.CancellationToken);
+        Assert.Equal("OpenClaw Gateway MCP", initializePayload.RootElement.GetProperty("result").GetProperty("serverInfo").GetProperty("name").GetString());
+        Assert.True(initializePayload.RootElement.GetProperty("result").GetProperty("capabilities").GetProperty("resources").GetProperty("supportsTemplates").GetBoolean());
+
+        using var toolsListRequest = new HttpRequestMessage(HttpMethod.Post, "/mcp")
+        {
+            Content = JsonContent("""
+                {
+                  "jsonrpc": "2.0",
+                  "id": 2,
+                  "method": "tools/list",
+                  "params": {}
+                }
+                """)
+        };
+        toolsListRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
+        var toolsListResponse = await harness.Client.SendAsync(toolsListRequest, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, toolsListResponse.StatusCode);
+        using var toolsListPayload = await ReadJsonAsync(toolsListResponse, TestContext.Current.CancellationToken);
+        Assert.Contains(toolsListPayload.RootElement.GetProperty("result").GetProperty("tools").EnumerateArray().Select(item => item.GetProperty("name").GetString()), name => name == "openclaw.get_dashboard");
+
+        using var templatesListRequest = new HttpRequestMessage(HttpMethod.Post, "/mcp")
+        {
+            Content = JsonContent("""
+                {
+                  "jsonrpc": "2.0",
+                  "id": 22,
+                  "method": "resources/templates/list",
+                  "params": {}
+                }
+                """)
+        };
+        templatesListRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
+        var templatesListResponse = await harness.Client.SendAsync(templatesListRequest, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, templatesListResponse.StatusCode);
+        using var templatesListPayload = await ReadJsonAsync(templatesListResponse, TestContext.Current.CancellationToken);
+        Assert.Contains(templatesListPayload.RootElement.GetProperty("result").GetProperty("resourceTemplates").EnumerateArray().Select(item => item.GetProperty("uriTemplate").GetString()), template => template == "openclaw://sessions/{sessionId}");
+
+        using var callToolRequest = new HttpRequestMessage(HttpMethod.Post, "/mcp")
+        {
+            Content = JsonContent("""
+                {
+                  "jsonrpc": "2.0",
+                  "id": 3,
+                  "method": "tools/call",
+                  "params": {
+                    "name": "openclaw.get_status",
+                    "arguments": {}
+                  }
+                }
+                """)
+        };
+        callToolRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
+        var callToolResponse = await harness.Client.SendAsync(callToolRequest, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, callToolResponse.StatusCode);
+        using var callToolPayload = await ReadJsonAsync(callToolResponse, TestContext.Current.CancellationToken);
+        var statusText = callToolPayload.RootElement.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString();
+        Assert.Contains("activeSessions", statusText);
+
+        using var resourceReadRequest = new HttpRequestMessage(HttpMethod.Post, "/mcp")
+        {
+            Content = JsonContent("""
+                {
+                  "jsonrpc": "2.0",
+                  "id": 4,
+                  "method": "resources/read",
+                  "params": {
+                    "uri": "openclaw://dashboard"
+                  }
+                }
+                """)
+        };
+        resourceReadRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
+        var resourceReadResponse = await harness.Client.SendAsync(resourceReadRequest, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, resourceReadResponse.StatusCode);
+        using var resourceReadPayload = await ReadJsonAsync(resourceReadResponse, TestContext.Current.CancellationToken);
+        var dashboardText = resourceReadPayload.RootElement.GetProperty("result").GetProperty("contents")[0].GetProperty("text").GetString();
+        Assert.Contains("status", dashboardText);
+
+        using var promptGetRequest = new HttpRequestMessage(HttpMethod.Post, "/mcp")
+        {
+            Content = JsonContent("""
+                {
+                  "jsonrpc": "2.0",
+                  "id": 23,
+                  "method": "prompts/get",
+                  "params": {
+                    "name": "openclaw_session_summary",
+                    "arguments": {
+                      "sessionId": "sess-dashboard"
+                    }
+                  }
+                }
+                """)
+        };
+        promptGetRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", harness.AuthToken);
+        var promptGetResponse = await harness.Client.SendAsync(promptGetRequest, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, promptGetResponse.StatusCode);
+        using var promptGetPayload = await ReadJsonAsync(promptGetResponse, TestContext.Current.CancellationToken);
+        var promptText = promptGetPayload.RootElement.GetProperty("result").GetProperty("messages")[0].GetProperty("content")[0].GetProperty("text").GetString();
+        Assert.Contains("sess-dashboard", promptText);
+    }
+
+    [Fact]
+    public async Task OpenClawHttpClient_McpSurface_Works()
+    {
+        await using var harness = await CreateHarnessAsync(nonLoopbackBind: true);
+
+        var session = await harness.Runtime.SessionManager.GetOrCreateByIdAsync("sess-client-mcp", "api", "sdk-user", CancellationToken.None);
+        session.History.Add(new ChatTurn { Role = "user", Content = "hello from sdk" });
+        await harness.Runtime.SessionManager.PersistAsync(session, CancellationToken.None);
+
+        using var client = new OpenClawHttpClient(harness.Client.BaseAddress!.ToString(), harness.AuthToken, harness.Client);
+
+        var initialize = await client.InitializeMcpAsync(new McpInitializeRequest { ProtocolVersion = "2025-03-26" }, CancellationToken.None);
+        Assert.True(initialize.Capabilities.Resources.SupportsTemplates);
+
+        var tools = await client.ListMcpToolsAsync(CancellationToken.None);
+        Assert.Contains(tools.Tools, item => item.Name == "openclaw.get_dashboard");
+
+        var templates = await client.ListMcpResourceTemplatesAsync(CancellationToken.None);
+        Assert.Contains(templates.ResourceTemplates, item => item.UriTemplate == "openclaw://sessions/{sessionId}");
+
+        var prompt = await client.GetMcpPromptAsync(
+            "openclaw_session_summary",
+            new Dictionary<string, string> { ["sessionId"] = session.Id },
+            CancellationToken.None);
+        Assert.Contains(session.Id, prompt.Messages[0].Content[0].Text);
+
+        var sessionResource = await client.ReadMcpResourceAsync($"openclaw://sessions/{Uri.EscapeDataString(session.Id)}", CancellationToken.None);
+        Assert.Contains(session.Id, sessionResource.Contents[0].Text);
+
+        using var emptyArguments = JsonDocument.Parse("{}");
+        var toolResult = await client.CallMcpToolAsync("openclaw.get_status", emptyArguments.RootElement.Clone(), CancellationToken.None);
+        Assert.False(toolResult.IsError);
+        Assert.Contains("activeSessions", toolResult.Content[0].Text);
+    }
+
+    [Fact]
+    public async Task OpenApi_Document_IsExposed()
+    {
+        await using var harness = await CreateHarnessAsync(nonLoopbackBind: false);
+
+        var response = await harness.Client.GetAsync("/openapi/openclaw-integration.json", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        var openApiVersion = payload.RootElement.GetProperty("openapi").GetString();
+        Assert.StartsWith("3.", openApiVersion);
+        Assert.True(payload.RootElement.GetProperty("paths").TryGetProperty("/api/integration/dashboard", out _));
     }
 
     [Fact]
@@ -375,9 +715,9 @@ public sealed class GatewayAdminEndpointTests
             Content = JsonContent("""{"remember":false}""")
         };
         loginRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", authToken);
-        var response = await client.SendAsync(loginRequest);
+        var response = await client.SendAsync(loginRequest, TestContext.Current.CancellationToken);
         response.EnsureSuccessStatusCode();
-        var payload = await ReadJsonAsync(response);
+        var payload = await ReadJsonAsync(response, TestContext.Current.CancellationToken);
         return (
             Assert.Single(response.Headers.GetValues("Set-Cookie")),
             payload.RootElement.GetProperty("csrfToken").GetString()!);
@@ -386,9 +726,9 @@ public sealed class GatewayAdminEndpointTests
     private static StringContent JsonContent(string json)
         => new(json, Encoding.UTF8, "application/json");
 
-    private static async Task<JsonDocument> ReadJsonAsync(HttpResponseMessage response)
+    private static async Task<JsonDocument> ReadJsonAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
-        var payload = await response.Content.ReadAsStringAsync();
+        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
         return JsonDocument.Parse(payload);
     }
 
@@ -447,7 +787,7 @@ public sealed class GatewayAdminEndpointTests
         var app = builder.Build();
         var runtime = CreateRuntime(config, storagePath, memoryStore);
         app.MapOpenClawEndpoints(startup, runtime);
-        await app.StartAsync();
+        await app.StartAsync(TestContext.Current.CancellationToken);
 
         return new GatewayTestHarness(app, app.GetTestClient(), runtime, config.AuthToken!);
     }

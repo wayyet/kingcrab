@@ -2,7 +2,7 @@ namespace OpenClaw.Agent;
 
 public sealed class MafOptions
 {
-    public const string SectionName = "OpenClaw:Experimental:MicrosoftAgentFramework";
+    public const string SectionName = "OpenClaw:MicrosoftAgentFramework";
 
     public string AgentName { get; set; } = "OpenClaw";
 
