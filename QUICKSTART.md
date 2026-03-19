@@ -127,12 +127,31 @@ Additional support here includes:
 
 ### Build Multi-arch Images
 
+Create and use a builder instance:
+
+```bash
+docker buildx create --name multiarch --use --bootstrap
+```
+
 Build Docker images for both `linux/amd64` and `linux/arm64` platforms:
+
+- Option 1: Use `--load` to load to local Docker
 
 ```bash
 docker buildx build --platform linux/amd64,linux/arm64 \
   -t openclaw.net:v0.0.1 \
   -t openclaw.net:latest \
+  --load \
+  ./
+```
+
+- Option 2: Use `--push` to push to the image repository
+
+```bash
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -t openclaw.net:v0.0.1 \
+  -t openclaw.net:latest \
+  --push \
   ./
 ```
 
