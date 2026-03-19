@@ -6,6 +6,7 @@
     <InterceptorsNamespaces>$(InterceptorsNamespaces);Microsoft.AspNetCore.OpenApi.Generated</InterceptorsNamespaces>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\src\OpenClaw.Client\OpenClaw.Client.csproj" />
     <ProjectReference Include="..\..\src\OpenClaw.Core\OpenClaw.Core.csproj" />
     <ProjectReference Include="..\..\src\OpenClaw.Agent\OpenClaw.Agent.csproj" />
     <ProjectReference Include="..\..\src\OpenClaw.Channels\OpenClaw.Channels.csproj" />
