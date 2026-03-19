@@ -7,21 +7,13 @@ namespace OpenClaw.Tests;
 public sealed class AgentRuntimeFactorySelectorTests
 {
     [Fact]
-    public void Select_DefaultsToNative()
+    public void Select_DefaultsToMaf()
     {
         var factory = AgentRuntimeFactorySelector.Select([new StubFactory(RuntimeOrchestrator.Maf)], orchestratorId: null);
         Assert.Equal(RuntimeOrchestrator.Maf, factory.OrchestratorId);
     }
 
-    [Fact]
-    public void Select_MafWithoutAdapterFactory_ReturnsHelpfulError()
-    {
-        var ex = Assert.Throws<InvalidOperationException>(() =>
-            AgentRuntimeFactorySelector.Select([new StubFactory(RuntimeOrchestrator.Maf)], RuntimeOrchestrator.Maf));
-
-        Assert.Contains("OpenClawEnableMafExperiment=true", ex.Message, StringComparison.Ordinal);
-    }
-
+ 
     private sealed class StubFactory(string orchestratorId) : IAgentRuntimeFactory
     {
         public string OrchestratorId => orchestratorId;

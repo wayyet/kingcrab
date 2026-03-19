@@ -30,7 +30,7 @@ public sealed class OpenClawToolExecutor
     private readonly ILogger? _logger;
     private readonly GatewayConfig _config;
     private readonly IToolSandbox? _toolSandbox;
-
+    private readonly ToolUsageTracker? _toolUsageTracker;
     public OpenClawToolExecutor(
         IReadOnlyList<ITool> tools,
         int toolTimeoutSeconds,
@@ -40,7 +40,8 @@ public sealed class OpenClawToolExecutor
         RuntimeMetrics? metrics = null,
         ILogger? logger = null,
         GatewayConfig? config = null,
-        IToolSandbox? toolSandbox = null)
+        IToolSandbox? toolSandbox = null,
+        ToolUsageTracker? toolUsageTracker = null)
     {
         _toolsByName = tools.ToDictionary(t => t.Name, StringComparer.Ordinal);
         _toolDeclarations = tools.Select(CreateDeclaration).Cast<AITool>().ToArray();
@@ -63,6 +64,7 @@ public sealed class OpenClawToolExecutor
             }
         };
         _toolSandbox = toolSandbox;
+        _toolUsageTracker = toolUsageTracker;
     }
 
     public IList<AITool> ToolDeclarations => _toolDeclarations;
@@ -213,6 +215,7 @@ public sealed class OpenClawToolExecutor
 
         _metrics?.IncrementToolCalls();
         turnCtx.RecordToolCall(sw.Elapsed, toolFailed, toolTimedOut);
+        _toolUsageTracker?.RecordToolCall(tool.Name, sw.Elapsed, toolFailed, toolTimedOut);
         _logger?.LogDebug("[{CorrelationId}] Tool {Tool} completed in {Duration}ms ok={Ok}",
             turnCtx.CorrelationId,
             tool.Name,

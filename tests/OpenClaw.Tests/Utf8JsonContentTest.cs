@@ -1,26 +1,27 @@
 ﻿using System.Text;
 using Xunit;
 
-namespace OpenClaw.Tests;
-
-public sealed class Utf8JsonContentTest
+namespace OpenClaw.Tests
 {
-    [Fact]
-    public async Task CopyToAsyncTest()
+    public sealed class Utf8JsonContentTest
     {
-        var jsonString = """
-            {"key":"value"}
-            """;
-        var stream = new MemoryStream(Encoding.UTF8.GetBytes(jsonString))
+        [Fact]
+        public async Task CopyToAsyncTest()
         {
-            Position = 0L
-        };
+            var jsonString = """
+                {"key":"value"}
+                """;
+            var stream = new MemoryStream(Encoding.UTF8.GetBytes(jsonString))
+            {
+                Position = 0L
+            };
 
-        using var jsonContent = new Agent.Tools.Utf8JsonContent(stream);
-        var actualStream = new MemoryStream();
-        await jsonContent.CopyToAsync(actualStream, TestContext.Current.CancellationToken);
-        var actual = Encoding.UTF8.GetString(actualStream.ToArray());
+            using var jsonContent = new Agent.Tools.Utf8JsonContent(stream);
+            var actualStream = new MemoryStream();
+            await jsonContent.CopyToAsync(actualStream, TestContext.Current.CancellationToken);
+            var actual = Encoding.UTF8.GetString(actualStream.ToArray());
 
-        Assert.Equal(jsonString, actual);
+            Assert.Equal(jsonString, actual);
+        }
     }
 }

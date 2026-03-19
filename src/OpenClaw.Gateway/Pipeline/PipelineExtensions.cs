@@ -100,6 +100,7 @@ internal static class PipelineExtensions
             runtime.ChannelAdapters,
             startup.Config,
             runtime.CronTask,
+            runtime.Heartbeat,
             runtime.ToolApprovalService,
             runtime.ApprovalAuditStore,
             runtime.PairingManager,

@@ -1,8 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using OpenClaw.Agent;
 using OpenClaw.Agent.Tools;
-using OpenClaw.Core.Abstractions;
 
 namespace OpenClaw.Agent;
 
@@ -76,7 +74,9 @@ public sealed class MafAgentRuntimeFactory : IAgentRuntimeFactory
             Logger = context.Logger,
             Hooks = context.Hooks,
             RequireToolApproval = context.RequireToolApproval,
-            ApprovalRequiredTools = context.ApprovalRequiredTools
+            ApprovalRequiredTools = context.ApprovalRequiredTools,
+            ToolSandbox = context.ToolSandbox,
+            ToolUsageTracker = context.ToolUsageTracker
         };
     }
 }

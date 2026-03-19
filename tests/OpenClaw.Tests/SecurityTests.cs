@@ -152,11 +152,9 @@ public class SecurityTests
     public async Task PdfReadTool_EnforcesReadPathPolicy()
     {
         var config = new OpenClaw.Core.Plugins.PdfReadConfig { Enabled = true };
-        var allowedRoot = Path.Combine(Path.GetTempPath(), "openclaw-tests", Guid.NewGuid().ToString("n"), "allowed");
-        Directory.CreateDirectory(allowedRoot);
         var toolingConfig = new OpenClaw.Core.Models.ToolingConfig
         {
-            AllowedReadRoots = [allowedRoot]
+            AllowedReadRoots = ["/allowed-only"]
         };
         var tool = new OpenClaw.Agent.Tools.PdfReadTool(config, toolingConfig);
 
@@ -171,7 +169,6 @@ public class SecurityTests
         }
         finally
         {
-            Directory.Delete(Path.GetDirectoryName(allowedRoot)!, recursive: true);
             File.Delete(tmpFile);
         }
     }

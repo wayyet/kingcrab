@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http;
 using System.Text;
 using Microsoft.Extensions.Logging.Abstractions;
 using OpenClaw.Channels;
@@ -150,6 +151,54 @@ public sealed class TwilioSmsTests
 
         Assert.Equal(200, res1.StatusCode);
         Assert.Equal(429, res2.StatusCode);
+    }
+
+    [Fact]
+    public async Task Webhook_PruneStaleRateWindows_RemovesInactiveSenders()
+    {
+        var temp = CreateTempDir();
+        var contacts = new FileContactStore(temp);
+
+        var config = new TwilioSmsConfig
+        {
+            Enabled = true,
+            ValidateSignature = false,
+            AllowedFromNumbers = ["+15551234567", "+15557654321"],
+            AllowedToNumbers = ["+15550000000"],
+            RateLimitPerFromPerMinute = 5
+        };
+
+        var allowlists = new AllowlistManager(temp, NullLogger<AllowlistManager>.Instance);
+        var recent = new RecentSendersStore(temp, NullLogger<RecentSendersStore>.Instance);
+        var handler = new TwilioSmsWebhookHandler(config, "token", contacts, allowlists, recent, AllowlistSemantics.Strict);
+
+        await handler.HandleAsync(
+            new Dictionary<string, string>
+            {
+                ["From"] = "+15551234567",
+                ["To"] = "+15550000000",
+                ["Body"] = "hello"
+            },
+            null,
+            (_, _) => ValueTask.CompletedTask,
+            CancellationToken.None);
+
+        await handler.HandleAsync(
+            new Dictionary<string, string>
+            {
+                ["From"] = "+15557654321",
+                ["To"] = "+15550000000",
+                ["Body"] = "hello"
+            },
+            null,
+            (_, _) => ValueTask.CompletedTask,
+            CancellationToken.None);
+
+        Assert.Equal(2, handler.ActiveRateWindowCount);
+
+        handler.PruneStaleRateWindows(DateTimeOffset.UtcNow.ToUnixTimeSeconds() / 60 + 3);
+
+        Assert.Equal(0, handler.ActiveRateWindowCount);
     }
 
     [Fact]

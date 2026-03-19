@@ -372,11 +372,8 @@ public class CodeExecToolTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_ProcessBackend_RunsJavaScriptSuccessfully()
+    public async Task ExecuteAsync_BashProcess_RunsSuccessfully()
     {
-        if (!HasExecutable("node"))
-            return;
-
         var tool = new CodeExecTool(new CodeExecConfig
         {
             Enabled = true,
@@ -384,19 +381,16 @@ public class CodeExecToolTests
         });
 
         var result = await tool.ExecuteAsync(
-            """{"language":"javascript","code":"console.log('hello from javascript')"}""",
+            """{"language":"bash","code":"echo 'hello from bash'"}""",
             CancellationToken.None);
 
-        Assert.Contains("hello from javascript", result);
+        Assert.Contains("hello from bash", result);
         Assert.Contains("Exit code: 0", result);
     }
 
     [Fact]
     public async Task ExecuteAsync_AllowedLanguages_Empty_AllowsAny()
     {
-        if (!HasExecutable("node"))
-            return;
-
         var tool = new CodeExecTool(new CodeExecConfig
         {
             Enabled = true,
@@ -405,32 +399,10 @@ public class CodeExecToolTests
         });
 
         var result = await tool.ExecuteAsync(
-            """{"language":"javascript","code":"console.log('ok')"}""",
+            """{"language":"bash","code":"echo 'ok'"}""",
             CancellationToken.None);
 
         Assert.Contains("ok", result);
-    }
-
-    private static bool HasExecutable(string fileName)
-    {
-        try
-        {
-            using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = fileName,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                Arguments = "--version"
-            });
-
-            return process is not null && process.WaitForExit(2000) && process.ExitCode == 0;
-        }
-        catch
-        {
-            return false;
-        }
     }
 
     [Fact]
