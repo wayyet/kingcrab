@@ -123,6 +123,38 @@ Additional support here includes:
 - `api.on(...)`
 - native dynamic in-process .NET plugins
 
+## Building and Running with Docker
+
+### Build Multi-arch Images
+
+Build Docker images for both `linux/amd64` and `linux/arm64` platforms:
+
+```bash
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -t openclaw.net:v0.0.1 \
+  -t openclaw.net:latest \
+  ./
+```
+
+### Run the Container
+
+Start the gateway container with the required environment variables:
+
+```bash
+docker run -d -p 18789:18789 \
+  -e MODEL_PROVIDER_KEY="sk-..." \
+  -e OPENCLAW_AUTH_TOKEN="change-me" \
+  -v openclaw-memory:/app/memory \
+  openclaw.net:latest
+```
+
+**Notes:**
+
+- Replace `"sk-..."` with your actual model provider API key
+- Replace `"change-me"` with a strong random token for production deployments
+- The `-v openclaw-memory:/app/memory` volume persists session history and memory across container restarts
+- Optionally mount a workspace volume for file tools: `-v openclaw-workspace:/app/workspace`
+
 ## Recommended Local Workflow
 
 1. Run `--doctor`
