@@ -1,0 +1,21 @@
+namespace OpenClaw.Agent;
+
+public sealed class MafOptions
+{
+    public const string SectionName = "OpenClaw:MicrosoftAgentFramework";
+
+    public string AgentName { get; set; } = "OpenClaw";
+
+    public string AgentDescription { get; set; } =
+        "Microsoft Agent Framework orchestration backend for OpenClaw.";
+
+    public string SessionSidecarPath { get; set; } = "sessions";
+
+    public bool EnableStreaming { get; set; } = true;
+
+    public bool EnableStreamingFallback
+    {
+        get => EnableStreaming;
+        set => EnableStreaming = value;
+    }
+}

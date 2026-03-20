@@ -1,0 +1,373 @@
+using OpenClaw.Core.Plugins;
+using OpenClaw.Core.Skills;
+
+namespace OpenClaw.Core.Models;
+
+/// <summary>
+/// Configuration for the OpenClaw gateway. Loaded from appsettings or env vars.
+/// </summary>
+public sealed class GatewayConfig
+{
+    public string BindAddress { get; set; } = "127.0.0.1";
+    public int Port { get; set; } = 18789;
+    public string? AuthToken { get; set; }
+    public RuntimeConfig Runtime { get; set; } = new();
+    public LlmProviderConfig Llm { get; set; } = new();
+    public MemoryConfig Memory { get; set; } = new();
+    public SecurityConfig Security { get; set; } = new();
+    public WebSocketConfig WebSocket { get; set; } = new();
+    public ToolingConfig Tooling { get; set; } = new();
+    public SandboxConfig Sandbox { get; set; } = new();
+    public ChannelsConfig Channels { get; set; } = new();
+    public PluginsConfig Plugins { get; set; } = new();
+    public SkillsConfig Skills { get; set; } = new();
+    public DelegationConfig Delegation { get; set; } = new();
+    public CronConfig Cron { get; set; } = new();
+    public WebhooksConfig Webhooks { get; set; } = new();
+    public string UsageFooter { get; set; } = "off"; // "off", "tokens", "full"
+
+    public int MaxConcurrentSessions { get; set; } = 64;
+    public int SessionTimeoutMinutes { get; set; } = 30;
+
+    /// <summary>Max total tokens (input + output) per session. 0 = unlimited.</summary>
+    public long SessionTokenBudget { get; set; } = 0;
+
+    /// <summary>Max messages per minute per session at the agent level. 0 = unlimited.</summary>
+    public int SessionRateLimitPerMinute { get; set; } = 0;
+
+    /// <summary>Seconds to wait for in-flight requests to complete during shutdown. 0 = no drain.</summary>
+    public int GracefulShutdownSeconds { get; set; } = 15;
+
+    /// <summary>
+    /// Token cost rates by "provider:model" key, in USD per 1K tokens.
+    /// Used for contract-governed USD cost budgets. Example: { "openai:gpt-4o": 0.005 }
+    /// </summary>
+    public Dictionary<string, decimal> TokenCostRates { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+public sealed class LlmProviderConfig
+{
+    public string Provider { get; set; } = "openai";
+    public string Model { get; set; } = "gpt-4o";
+    public string? ApiKey { get; set; }
+    public string? Endpoint { get; set; }
+    public string[] FallbackModels { get; set; } = [];
+    public int MaxTokens { get; set; } = 4096;
+    public float Temperature { get; set; } = 0.7f;
+
+    /// <summary>Per-call timeout in seconds for LLM requests. 0 = no timeout.</summary>
+    public int TimeoutSeconds { get; set; } = 120;
+
+    /// <summary>Number of retry attempts for transient LLM failures (429/5xx). 0 = no retries.</summary>
+    public int RetryCount { get; set; } = 3;
+
+    /// <summary>Consecutive failures before the circuit breaker opens.</summary>
+    public int CircuitBreakerThreshold { get; set; } = 5;
+
+    /// <summary>Seconds the circuit breaker stays open before probing.</summary>
+    public int CircuitBreakerCooldownSeconds { get; set; } = 30;
+}
+
+public sealed class MemoryConfig
+{
+    /// <summary>Memory backend provider: "file" (default) or "sqlite".</summary>
+    public string Provider { get; set; } = "file";
+
+    public string StoragePath { get; set; } = "./memory";
+    public int MaxHistoryTurns { get; set; } = 50;
+    public int? MaxCachedSessions { get; set; }
+
+    public MemorySqliteConfig Sqlite { get; set; } = new();
+    public MemoryRecallConfig Recall { get; set; } = new();
+    public MemoryRetentionConfig Retention { get; set; } = new();
+
+    /// <summary>When true, old history turns are summarized by the LLM instead of dropped.</summary>
+    public bool EnableCompaction { get; set; } = false;
+
+    /// <summary>Number of history turns that triggers compaction (must exceed MaxHistoryTurns).</summary>
+    public int CompactionThreshold { get; set; } = 40;
+
+    /// <summary>Number of recent turns to keep verbatim during compaction.</summary>
+    public int CompactionKeepRecent { get; set; } = 10;
+
+    /// <summary>Identifier for project-level memory scoping. Defaults to OPENCLAW_PROJECT env var.</summary>
+    public string? ProjectId { get; set; }
+}
+
+public sealed class MemoryRetentionConfig
+{
+    public bool Enabled { get; set; } = false;
+    public bool RunOnStartup { get; set; } = true;
+    public int SweepIntervalMinutes { get; set; } = 30;
+    public int SessionTtlDays { get; set; } = 30;
+    public int BranchTtlDays { get; set; } = 14;
+    public bool ArchiveEnabled { get; set; } = true;
+    public string ArchivePath { get; set; } = "./memory/archive";
+    public int ArchiveRetentionDays { get; set; } = 30;
+    public int MaxItemsPerSweep { get; set; } = 1000;
+}
+
+public sealed class MemorySqliteConfig
+{
+    public string DbPath { get; set; } = "./memory/openclaw.db";
+    public bool EnableFts { get; set; } = true;
+    public bool EnableVectors { get; set; } = false;
+
+    /// <summary>Embedding model name (e.g. "text-embedding-3-small"). Null disables vector embeddings.</summary>
+    public string? EmbeddingModel { get; set; }
+
+    /// <summary>Embedding vector dimensions. Defaults to 1536 (OpenAI text-embedding-3-small).</summary>
+    public int EmbeddingDimensions { get; set; } = 1536;
+}
+
+/// <summary>
+/// Built-in token cost rates (USD per 1K tokens) for common provider:model combinations.
+/// Used as fallback when the operator has not configured TokenCostRates.
+/// </summary>
+public static class DefaultTokenCostRates
+{
+    public static IReadOnlyDictionary<string, decimal> Rates { get; } =
+        new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["openai:gpt-4o"] = 0.005m,
+            ["openai:gpt-4o-mini"] = 0.0003m,
+            ["openai:gpt-4.1"] = 0.004m,
+            ["openai:gpt-4.1-mini"] = 0.0008m,
+            ["openai:gpt-4.1-nano"] = 0.0002m,
+            ["anthropic:claude-sonnet-4-5"] = 0.006m,
+            ["anthropic:claude-haiku-3-5"] = 0.002m,
+            ["ollama"] = 0.0m,
+        };
+}
+
+public sealed class MemoryRecallConfig
+{
+    public bool Enabled { get; set; } = false;
+    public int MaxNotes { get; set; } = 8;
+    public int MaxChars { get; set; } = 8000;
+}
+
+public sealed class SecurityConfig
+{
+    public bool AllowQueryStringToken { get; set; } = false;
+    public string[] AllowedOrigins { get; set; } = [];
+    public bool TrustForwardedHeaders { get; set; } = false;
+    public string[] KnownProxies { get; set; } = [];
+    public bool RequireRequesterMatchForHttpToolApproval { get; set; } = false;
+
+    /// <summary>
+    /// When binding to a non-loopback address, the gateway refuses to start if the local tooling
+    /// is configured in an unsafe way (e.g. shell enabled or wildcard roots). Set this to true
+    /// only if you fully trust your network perimeter and token distribution.
+    /// </summary>
+    public bool AllowUnsafeToolingOnPublicBind { get; set; } = false;
+
+    /// <summary>
+    /// When binding to a non-loopback address, the gateway refuses to start if the TypeScript/JS
+    /// plugin bridge is enabled. Set true to allow running third-party plugins while Internet-facing.
+    /// </summary>
+    public bool AllowPluginBridgeOnPublicBind { get; set; } = false;
+
+    /// <summary>
+    /// When binding to a non-loopback address, disallow raw: secret refs by default to reduce the
+    /// chance of committing secrets to config files.
+    /// </summary>
+    public bool AllowRawSecretRefsOnPublicBind { get; set; } = false;
+
+    /// <summary>Idle timeout (minutes) for browser admin sessions. Default 60 minutes.</summary>
+    public int BrowserSessionIdleMinutes { get; set; } = 60;
+
+    /// <summary>Lifetime (days) for persistent browser admin sessions created with "Remember me". Default 30 days.</summary>
+    public int BrowserRememberDays { get; set; } = 30;
+}
+
+public sealed class WebSocketConfig
+{
+    public int MaxMessageBytes { get; set; } = 65_536;
+    public int MaxConnections { get; set; } = 1_000;
+    public int MaxConnectionsPerIp { get; set; } = 50;
+    public int MessagesPerMinutePerConnection { get; set; } = 120;
+    public int ReceiveTimeoutSeconds { get; set; } = 120;
+}
+
+public sealed class ToolingConfig
+{
+    /// <summary>Autonomy mode: "readonly", "supervised", or "full".</summary>
+    public string AutonomyMode { get; set; } = "supervised";
+
+    /// <summary>Workspace root used when WorkspaceOnly=true. Supports env:OPENCLAW_WORKSPACE.</summary>
+    public string? WorkspaceRoot { get; set; } = "env:OPENCLAW_WORKSPACE";
+
+    /// <summary>When true, file paths must be within WorkspaceRoot.</summary>
+    public bool WorkspaceOnly { get; set; } = false;
+
+    /// <summary>Shell commands are allowed only if they match one of these globs. ["*"] allows all.</summary>
+    public string[] AllowedShellCommandGlobs { get; set; } = ["*"];
+
+    /// <summary>Forbidden path globs (deny wins). Applied to file-based tools and as a heuristic for shell.</summary>
+    public string[] ForbiddenPathGlobs { get; set; } = [];
+
+    public bool AllowShell { get; set; } = true;
+    public bool ReadOnlyMode { get; set; } = false;
+    public string[] AllowedReadRoots { get; set; } = ["*"];
+    public string[] AllowedWriteRoots { get; set; } = ["*"];
+
+    /// <summary>Per-tool execution timeout in seconds. 0 = no timeout.</summary>
+    public int ToolTimeoutSeconds { get; set; } = 30;
+
+    /// <summary>Execute independent tool calls in parallel when the LLM requests multiple tools.</summary>
+    public bool ParallelToolExecution { get; set; } = true;
+
+    /// <summary>When true, tools in ApprovalRequiredTools need explicit user approval before executing.</summary>
+    public bool RequireToolApproval { get; set; } = false;
+
+    /// <summary>Tool names that require user approval when RequireToolApproval is true.</summary>
+    public string[] ApprovalRequiredTools { get; set; } = ["shell", "write_file"];
+
+    /// <summary>Seconds to wait for a tool approval decision before denying. Default: 300 (5 minutes).</summary>
+    public int ToolApprovalTimeoutSeconds { get; set; } = 300;
+
+    public bool EnableBrowserTool { get; set; } = true;
+    public bool AllowBrowserEvaluate { get; set; } = true;
+    public bool BrowserHeadless { get; set; } = true;
+    public int BrowserTimeoutSeconds { get; set; } = 30;
+}
+
+public sealed class ChannelsConfig
+{
+    /// <summary>Allowlist semantics: "legacy" (backward-compatible) or "strict" ([]=deny, ["*"]=allow-all).</summary>
+    public string AllowlistSemantics { get; set; } = "legacy";
+    public SmsChannelConfig Sms { get; set; } = new();
+    public TelegramChannelConfig Telegram { get; set; } = new();
+    public WhatsAppChannelConfig WhatsApp { get; set; } = new();
+}
+
+public sealed class WhatsAppChannelConfig
+{
+    public bool Enabled { get; set; } = false;
+    public string Type { get; set; } = "official"; // "official" or "bridge"
+    public string DmPolicy { get; set; } = "pairing"; // open, pairing, closed
+    public string WebhookPath { get; set; } = "/whatsapp/inbound";
+    public string? WebhookPublicBaseUrl { get; set; }
+    public string WebhookVerifyToken { get; set; } = "openclaw-verify";
+    public string WebhookVerifyTokenRef { get; set; } = "env:WHATSAPP_VERIFY_TOKEN";
+
+    /// <summary>
+    /// When true, validates X-Hub-Signature-256 for official Cloud API webhooks.
+    /// Recommended for all non-loopback/public binds.
+    /// </summary>
+    public bool ValidateSignature { get; set; } = false;
+
+    /// <summary>Meta app secret used to validate official webhook signatures (direct value).</summary>
+    public string? WebhookAppSecret { get; set; }
+
+    /// <summary>Meta app secret reference (env: or raw:) used when WebhookAppSecret is null.</summary>
+    public string WebhookAppSecretRef { get; set; } = "env:WHATSAPP_APP_SECRET";
+    
+    // Official Cloud API settings
+    public string? CloudApiToken { get; set; }
+    public string CloudApiTokenRef { get; set; } = "env:WHATSAPP_CLOUD_API_TOKEN";
+    public string? PhoneNumberId { get; set; }
+    public string? BusinessAccountId { get; set; }
+
+    // Bridge settings (e.g. for whatsmeow bridge)
+    public string? BridgeUrl { get; set; }
+    public string? BridgeToken { get; set; }
+    public string BridgeTokenRef { get; set; } = "env:WHATSAPP_BRIDGE_TOKEN";
+    public bool BridgeSuppressSendExceptions { get; set; } = false;
+
+    public int MaxInboundChars { get; set; } = 4096;
+
+    /// <summary>Max inbound webhook request size in bytes.</summary>
+    public int MaxRequestBytes { get; set; } = 64 * 1024;
+
+    /// <summary>Optional allowlist for inbound senders (wa_id / from). Interpreted using Channels.AllowlistSemantics.</summary>
+    public string[] AllowedFromIds { get; set; } = [];
+}
+
+public sealed class SmsChannelConfig
+{
+    public string DmPolicy { get; set; } = "pairing"; // open, pairing, closed
+    public TwilioSmsConfig Twilio { get; set; } = new();
+}
+
+public sealed class TwilioSmsConfig
+{
+    public bool Enabled { get; set; } = false;
+    public string? AccountSid { get; set; }
+    public string? AuthTokenRef { get; set; }
+    public string? MessagingServiceSid { get; set; }
+    public string? FromNumber { get; set; }
+    public string WebhookPath { get; set; } = "/twilio/sms/inbound";
+    public string? WebhookPublicBaseUrl { get; set; }
+    public bool ValidateSignature { get; set; } = true;
+    public string[] AllowedFromNumbers { get; set; } = [];
+    public string[] AllowedToNumbers { get; set; } = [];
+    public int MaxInboundChars { get; set; } = 2000;
+    public int MaxRequestBytes { get; set; } = 64 * 1024;
+    public int RateLimitPerFromPerMinute { get; set; } = 30;
+    public bool AutoReplyForBlocked { get; set; } = false;
+    public string HelpText { get; set; } = "OpenClaw: reply STOP to opt out.";
+}
+
+public sealed class TelegramChannelConfig
+{
+    public bool Enabled { get; set; } = false;
+    public string DmPolicy { get; set; } = "pairing"; // open, pairing, closed
+    public string? BotToken { get; set; }
+    public string BotTokenRef { get; set; } = "env:TELEGRAM_BOT_TOKEN";
+    public string WebhookPath { get; set; } = "/telegram/inbound";
+    public string? WebhookPublicBaseUrl { get; set; }
+    public string[] AllowedFromUserIds { get; set; } = [];
+    public int MaxInboundChars { get; set; } = 4096;
+    public int MaxRequestBytes { get; set; } = 64 * 1024;
+
+    /// <summary>When true, validates the X-Telegram-Bot-Api-Secret-Token header on inbound webhooks.</summary>
+    public bool ValidateSignature { get; set; } = false;
+
+    /// <summary>Secret token set via Telegram's setWebhook API (direct value).</summary>
+    public string? WebhookSecretToken { get; set; }
+
+    /// <summary>Secret token reference (env: or raw:). Used when WebhookSecretToken is null.</summary>
+    public string WebhookSecretTokenRef { get; set; } = "env:TELEGRAM_WEBHOOK_SECRET";
+}
+
+public sealed class CronConfig
+{
+    public bool Enabled { get; set; } = false;
+    public List<CronJobConfig> Jobs { get; set; } = [];
+}
+
+public sealed class CronJobConfig
+{
+    public string Name { get; set; } = "";
+    public string CronExpression { get; set; } = "";
+    public string Prompt { get; set; } = "";
+    public bool RunOnStartup { get; set; } = false;
+    public string? SessionId { get; set; }
+    public string? ChannelId { get; set; }
+    public string? RecipientId { get; set; }
+    public string? Subject { get; set; }
+
+    /// <summary>IANA timezone ID (e.g. "America/New_York"). Null defaults to UTC.</summary>
+    public string? Timezone { get; set; }
+}
+
+public sealed class WebhooksConfig
+{
+    public bool Enabled { get; set; } = false;
+    public Dictionary<string, WebhookEndpointConfig> Endpoints { get; set; } = [];
+}
+
+public sealed class WebhookEndpointConfig
+{
+    public string? Secret { get; set; }
+    public bool ValidateHmac { get; set; } = false;
+    public string HmacHeader { get; set; } = "X-Hub-Signature-256";
+    public string? SessionId { get; set; }
+    public string PromptTemplate { get; set; } = "Webhook received:\n\n{body}";
+    public int MaxRequestBytes { get; set; } = 128 * 1024;
+
+    /// <summary>Maximum webhook body length in characters before truncation. Limits prompt injection surface.</summary>
+    public int MaxBodyLength { get; set; } = 10_240;
+}

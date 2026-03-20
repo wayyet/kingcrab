@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>OpenClaw.PluginKit</RootNamespace>
+    <IsPackable>true</IsPackable>
+    <PackageId>OpenClaw.PluginKit</PackageId>
+    <Description>Plugin abstractions and helper types for building OpenClaw.NET extensions.</Description>
+    <PackageTags>openclaw;plugins;ai;agent;dotnet</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OpenClaw.Core\OpenClaw.Core.csproj" />
+    <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="10.4.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.5" />
+  </ItemGroup>
+</Project>
