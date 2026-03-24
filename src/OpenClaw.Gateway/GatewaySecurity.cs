@@ -41,9 +41,9 @@ internal static class GatewaySecurity
         return ctx.Request.Query["token"].FirstOrDefault();
     }
 
-    public static bool IsTokenValid(string? provided, string expected)
+    public static bool IsTokenValid(string? provided, string? expected)
     {
-        if (string.IsNullOrEmpty(provided))
+        if (string.IsNullOrEmpty(provided) || string.IsNullOrEmpty(expected))
             return false;
 
         // FixedTimeEquals handles different-length spans in constant time (returns false).

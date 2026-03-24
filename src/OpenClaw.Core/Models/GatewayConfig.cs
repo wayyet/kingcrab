@@ -179,6 +179,26 @@ public sealed class SecurityConfig
 
     /// <summary>Lifetime (days) for persistent browser admin sessions created with "Remember me". Default 30 days.</summary>
     public int BrowserRememberDays { get; set; } = 30;
+
+    /// <summary>
+    /// OIDC Authority URL for standard JWT Bearer authentication.
+    /// Example: https://auth.example.com/realms/myrealm
+    /// When set, the gateway validates /mcp requests using OIDC JWT tokens instead of the static AuthToken.
+    /// </summary>
+    public string? OidcAuthority { get; set; }
+
+    /// <summary>Expected audience claim in JWT tokens. Leave empty to skip audience validation.</summary>
+    public string? OidcAudience { get; set; }
+
+    /// <summary>Whether to require HTTPS for the OIDC metadata discovery endpoint. Default true.</summary>
+    public bool OidcRequireHttpsMetadata { get; set; } = true;
+
+    /// <summary>
+    /// When true, all requests to /mcp and /api must carry a valid token or OIDC JWT
+    /// even when the gateway is bound to a loopback address (127.0.0.1 / localhost).
+    /// Has no effect when OidcAuthority is set (OIDC mode always enforces auth on all paths).
+    /// </summary>
+    public bool AlwaysRequireAuth { get; set; } = false;
 }
 
 public sealed class WebSocketConfig

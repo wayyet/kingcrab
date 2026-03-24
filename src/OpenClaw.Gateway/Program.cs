@@ -37,6 +37,9 @@ var runtime = await app.InitializeOpenClawRuntimeAsync(startup);
 
 // Populate the GatewayRuntimeHolder so MCP tools can access the runtime via DI.
 app.InitializeMcpRuntime(runtime);
+// Enable ASP.NET Core authentication middleware when OIDC is configured.
+if (!string.IsNullOrEmpty(startup.Config.Security.OidcAuthority))
+    app.UseAuthentication();
 // Apply token-auth middleware for /mcp before route matching.
 app.UseOpenClawMcpAuth(startup);
 
