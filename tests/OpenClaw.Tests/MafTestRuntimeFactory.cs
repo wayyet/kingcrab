@@ -104,7 +104,7 @@ internal static class MafTestRuntimeFactory
             ?? throw new InvalidOperationException("CompactHistoryAsync invocation returned null."));
     }
 
-    public static MafDelegateTool CreateDelegateTool(
+    public static DelegateTool CreateDelegateTool(
         IChatClient chatClient,
         IMemoryStore memoryStore,
         DelegationConfig delegationConfig,
@@ -165,16 +165,50 @@ internal static class MafTestRuntimeFactory
             ApprovalRequiredTools = approvalRequiredTools ?? []
         };
 
-        return new MafDelegateTool(
-            context,
-            options.Value,
-            agentFactory,
-            sessionStateStore,
-            telemetry,
-            NullLogger.Instance,
-            currentDepth);
+        return new DelegateTool(
+            context.ChatClient,
+            context.Tools,
+            context.MemoryStore,
+            context.Config.Llm,
+            context.Config.Delegation,
+            currentDepth: currentDepth,
+            metrics: context.RuntimeMetrics,
+            logger: context.Logger,
+            recall: context.Config.Memory.Recall, 
+            runtimeFactory: (tools, llmConfig, skillsConfig) =>
+            {
+                var agentRuntimeContext = new AgentRuntimeFactoryContext
+                {
+                    Services = services,
+                    Config = config,
+                    RuntimeState = context.RuntimeState,
+                    ChatClient = context.ChatClient,
+                    Tools = tools,
+                    MemoryStore = context.MemoryStore,
+                    RuntimeMetrics = context.RuntimeMetrics,
+                    ProviderUsage = context.ProviderUsage,
+                    LlmExecutionService = context.LlmExecutionService,
+                    Skills = context.Skills,
+                    SkillsConfig = context.Config.Skills,
+                    WorkspacePath = context.WorkspacePath,
+                    PluginSkillDirs = context.PluginSkillDirs,
+                    Logger = context.Logger,
+                    Hooks = context.Hooks,
+                    RequireToolApproval = requireToolApproval,
+                    ApprovalRequiredTools = approvalRequiredTools ?? []
+                };
+                return new MafAgentRuntime(
+                    agentRuntimeContext,
+                    options.Value,
+                    agentFactory,
+                    sessionStateStore,
+                    telemetry,
+                    NullLogger.Instance,
+                    persistSessionState: false);
+            }
+            );
     }
-
+     
     private sealed class PassThroughLlmExecutionService(IChatClient chatClient, int retryCount) : ILlmExecutionService
     {
         public CircuitState DefaultCircuitState => CircuitState.Closed;

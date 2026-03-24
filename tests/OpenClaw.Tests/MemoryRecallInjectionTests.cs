@@ -48,8 +48,8 @@ public sealed class MemoryRecallInjectionTests
 
         Assert.NotNull(captured);
         Assert.Contains(captured!, m =>
-            m.Role == ChatRole.System &&
-            (m.Text ?? "").Contains("Relevant memory notes:", StringComparison.Ordinal) &&
+            m.Role == ChatRole.User &&
+            (m.Text ?? "").Contains("[Relevant memory]", StringComparison.Ordinal) &&
             (m.Text ?? "").Contains("note:1", StringComparison.Ordinal) &&
             (m.Text ?? "").Contains("remember this", StringComparison.Ordinal));
     }
