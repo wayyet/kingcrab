@@ -37,6 +37,22 @@ var runtime = await app.InitializeOpenClawRuntimeAsync(startup);
 
 // Populate the GatewayRuntimeHolder so MCP tools can access the runtime via DI.
 app.InitializeMcpRuntime(runtime);
+
+// Browser WebSocket API cannot set custom Authorization headers.
+// Bridge /ws?token=... into Authorization: Bearer ... so standard auth can validate it.
+app.Use(async (ctx, next) =>
+{
+    if (ctx.Request.Path.StartsWithSegments("/ws", StringComparison.OrdinalIgnoreCase)
+        && !ctx.Request.Headers.ContainsKey("Authorization"))
+    {
+        var queryToken = ctx.Request.Query["token"].FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(queryToken))
+            ctx.Request.Headers.Authorization = $"Bearer {queryToken}";
+    }
+
+    await next(ctx);
+});
+
 // Enable ASP.NET Core authentication middleware when OIDC is configured.
 if (!string.IsNullOrEmpty(startup.Config.Security.OidcAuthority))
     app.UseAuthentication();

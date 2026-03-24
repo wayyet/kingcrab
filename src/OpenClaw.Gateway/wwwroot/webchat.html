@@ -139,7 +139,9 @@
         }
 
         #token-input,
-        #doctor-button {
+        #doctor-button,
+        #oidc-login-button,
+        #oidc-logout-button {
             background: rgba(255, 255, 255, 0.03);
             border: 1px solid var(--border);
             color: var(--text);
@@ -157,7 +159,9 @@
         }
 
         #token-input:focus,
-        #doctor-button:hover {
+        #doctor-button:hover,
+        #oidc-login-button:hover,
+        #oidc-logout-button:hover {
             outline: none;
             border-color: rgba(168, 85, 247, 0.5);
             background: rgba(255, 255, 255, 0.08);
@@ -181,12 +185,26 @@
             cursor: pointer;
         }
 
-        #doctor-button {
+        #doctor-button,
+        #oidc-login-button,
+        #oidc-logout-button {
             cursor: pointer;
             font-weight: 500;
         }
 
-        #doctor-button:active {
+        #oidc-login-button {
+            border-color: rgba(20, 184, 166, 0.35);
+            box-shadow: 0 0 12px rgba(20, 184, 166, 0.12);
+        }
+
+        #oidc-logout-button {
+            border-color: rgba(239, 68, 68, 0.35);
+            box-shadow: 0 0 12px rgba(239, 68, 68, 0.1);
+        }
+
+        #doctor-button:active,
+        #oidc-login-button:active,
+        #oidc-logout-button:active {
             transform: scale(0.95);
         }
 
@@ -626,6 +644,8 @@
         </div>
         <div class="header-right">
             <button id="doctor-button" title="Fetch /doctor/text">Doctor</button>
+            <button id="oidc-login-button" title="Sign in with OIDC">OIDC Login</button>
+            <button id="oidc-logout-button" title="Sign out from OIDC">OIDC Logout</button>
             <input type="password" id="token-input" placeholder="Auth Token (optional)">
             <label id="remember-token-wrap" title="Persist token in this browser">
                 <input type="checkbox" id="remember-token">
@@ -665,6 +685,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.1/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.9/purify.min.js"></script>
+    <script src="/oidc-auth.js"></script>
 
     <script>
         // Set up marked to use highlight.js
@@ -683,9 +704,18 @@
         const tokenInput = document.getElementById('token-input');
         const rememberToken = document.getElementById('remember-token');
         const doctorButton = document.getElementById('doctor-button');
+        const oidcLoginButton = document.getElementById('oidc-login-button');
+        const oidcLogoutButton = document.getElementById('oidc-logout-button');
         const typingRow = document.getElementById('typing-row');
         const TOKEN_KEY_PERSIST = 'openclaw_token';
         const TOKEN_KEY_SESSION = 'openclaw_token_session';
+
+        const OIDC_CONFIG = {
+            enabled: true,
+            authority: 'http://test-passport.zyagi.cn:1080/realms/ai4cbrain',
+            clientId: 'king-crab',
+            scope: 'openid profile email'
+        };
 
         let ws = null;
         let activeResponseDiv = null;
@@ -693,6 +723,7 @@
         let reconnectAttempts = 0;
         let reconnectTimer = null;
         let streamRenderTimer = null;
+        let oidcClient = null;
 
         const WEBCHAT_CONFIG = {
             streamRenderDebounceMs: Math.max(20, Number(window.OPENCLAW_WEBCHAT_CONFIG?.streamRenderDebounceMs ?? 120)),
@@ -711,6 +742,28 @@
             return tokenInput.value.trim() || getStoredToken();
         }
 
+        async function getAuthTokenForRequest(minValidSeconds = 60) {
+            if (oidcClient) {
+                const refreshed = await oidcClient.refreshIfNeeded(minValidSeconds);
+                if (refreshed) {
+                    tokenInput.value = refreshed;
+                    persistToken(refreshed);
+                    return refreshed;
+                }
+            }
+
+            return getCurrentToken();
+        }
+
+        async function getAuthHeaders(minValidSeconds = 60) {
+            const token = await getAuthTokenForRequest(minValidSeconds);
+            if (!token || token === 'bypass') {
+                return {};
+            }
+
+            return { Authorization: `Bearer ${token}` };
+        }
+
         function persistToken(token) {
             if (!token) return;
             sessionStorage.setItem(TOKEN_KEY_SESSION, token);
@@ -719,6 +772,39 @@
             } else {
                 localStorage.removeItem(TOKEN_KEY_PERSIST);
             }
+        }
+
+        function clearStoredToken() {
+            sessionStorage.removeItem(TOKEN_KEY_SESSION);
+            localStorage.removeItem(TOKEN_KEY_PERSIST);
+        }
+
+        function updateOidcButtons() {
+            const hasOidc = Boolean(oidcClient);
+            oidcLoginButton.style.display = hasOidc ? 'inline-flex' : 'none';
+            oidcLogoutButton.style.display = hasOidc ? 'inline-flex' : 'none';
+        }
+
+        function setDisconnectedUi() {
+            messageInput.disabled = true;
+            sendButton.disabled = true;
+            typingRow.style.display = 'none';
+        }
+
+        function shouldRetryConnection(event) {
+            const token = getCurrentToken();
+            if (!token) {
+                appendSystem('未检测到 token，停止自动重连。', true);
+                return false;
+            }
+
+            const isAuthClose = event.code === 1008 || (event.code >= 4000 && event.code < 5000);
+            if (isAuthClose) {
+                appendSystem('连接因鉴权失败关闭，停止自动重连。请重新登录。', true);
+                return false;
+            }
+
+            return true;
         }
 
         function preprocessMediaMarkers(raw) {
@@ -878,11 +964,21 @@
             scrollToBottom();
         }
 
-        function connect() {
+        async function connect() {
+            const token = await getAuthTokenForRequest(60);
+            if (!token) {
+                setDisconnectedUi();
+                appendSystem('未登录，已阻止 WebSocket 连接。请先点击 OIDC Login 或输入 token。', true);
+                return;
+            }
+
+            if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+                return;
+            }
+
             appendSystem('Connecting to OpenClaw.NET Gateway...');
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const baseWsUrl = `${protocol}//${window.location.host}/ws`;
-            const token = getCurrentToken();
             const wsUrl = token
                 ? `${baseWsUrl}?token=${encodeURIComponent(token)}`
                 : baseWsUrl;
@@ -993,9 +1089,7 @@
                     streamRenderTimer = null;
                 }
 
-                const isAuthClose = event.code === 1008 || (event.code >= 4000 && event.code < 5000);
-                if (isAuthClose && !WEBCHAT_CONFIG.retryOnAuthCloseCodes) {
-                    appendSystem('Connection closed due to authentication/authorization. Update token and reconnect.', true);
+                if (!shouldRetryConnection(event)) {
                     return;
                 }
 
@@ -1013,7 +1107,9 @@
                     )
                 );
                 appendSystem(`Connection dropped. Retrying in ${Math.max(1, Math.ceil(delay / 1000))}s...`, true);
-                reconnectTimer = setTimeout(connect, delay);
+                reconnectTimer = setTimeout(() => {
+                    connect();
+                }, delay);
             };
 
             ws.onerror = () => {
@@ -1090,13 +1186,50 @@
             }
         });
 
+        tokenInput.addEventListener('keydown', async (event) => {
+            if (event.key !== 'Enter') {
+                return;
+            }
+
+            const typed = tokenInput.value.trim();
+            if (!typed) {
+                return;
+            }
+
+            persistToken(typed);
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.close(1000, 'Reconnect with updated token');
+            }
+            await connect();
+        });
+
+        oidcLoginButton.addEventListener('click', async () => {
+            if (!oidcClient) {
+                appendSystem('OIDC is not configured for this page.', true);
+                return;
+            }
+            await oidcClient.login({ returnTo: window.location.pathname + window.location.search });
+        });
+
+        oidcLogoutButton.addEventListener('click', async () => {
+            clearStoredToken();
+            tokenInput.value = '';
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+            }
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.close(1000, 'OIDC logout');
+            }
+            setDisconnectedUi();
+            if (oidcClient) {
+                await oidcClient.logout();
+            }
+        });
+
         doctorButton.addEventListener('click', async () => {
             try {
-                const token = getCurrentToken();
-                const headers = {};
-                if (token && token !== 'bypass') {
-                    headers['Authorization'] = `Bearer ${token}`;
-                }
+                const headers = await getAuthHeaders(60);
                 const resp = await fetch('/doctor/text', { method: 'GET', headers: headers });
                 if (!resp.ok) {
                     appendSystem(`Doctor request failed (${resp.status}).`, true);
@@ -1109,7 +1242,26 @@
             }
         });
 
-        connect();
+        async function bootstrapAuth() {
+            if (OIDC_CONFIG.enabled && OIDC_CONFIG.authority && OIDC_CONFIG.clientId && window.OpenClawOidc) {
+                oidcClient = window.OpenClawOidc.create({
+                    authority: OIDC_CONFIG.authority,
+                    clientId: OIDC_CONFIG.clientId,
+                    scope: OIDC_CONFIG.scope,
+                    persist: rememberToken.checked
+                });
+
+                const callback = await oidcClient.handleRedirectCallback();
+                if (callback.handled && !callback.ok) {
+                    appendSystem(`OIDC login failed: ${callback.error}`, true);
+                }
+            }
+
+            updateOidcButtons();
+            await connect();
+        }
+
+        bootstrapAuth();
     </script>
 </body>
 

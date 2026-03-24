@@ -335,7 +335,9 @@
             <input id="token-input" type="password" placeholder="Auth token for public deployments">
             <label><input id="remember-token" type="checkbox"> Remember</label>
             <button id="login-button">Login</button>
+            <button id="oidc-login-button">OIDC Login</button>
             <button id="logout-button">Logout</button>
+            <button id="oidc-logout-button">OIDC Logout</button>
             <button id="refresh-button">Refresh</button>
             <a href="/chat">Open Chat</a>
         </div>
@@ -791,11 +793,14 @@
         </section>
     </main>
 
+    <script src="/oidc-auth.js"></script>
     <script>
         const tokenInput = document.getElementById('token-input');
         const rememberToken = document.getElementById('remember-token');
         const loginButton = document.getElementById('login-button');
+        const oidcLoginButton = document.getElementById('oidc-login-button');
         const logoutButton = document.getElementById('logout-button');
+        const oidcLogoutButton = document.getElementById('oidc-logout-button');
         const refreshButton = document.getElementById('refresh-button');
         const flash = document.getElementById('flash');
         const sessionStatus = document.getElementById('session-status');
@@ -905,6 +910,20 @@
         let settingsState = null;
         let heartbeatState = null;
         let approvalsPollTimer = null;
+        let oidcClient = null;
+
+        const OIDC_CONFIG = {
+            enabled: true,
+            authority: 'http://test-passport.zyagi.cn:1080/realms/ai4cbrain',
+            clientId: 'king-crab',
+            scope: 'openid profile email'
+        };
+
+        function updateOidcButtons() {
+            const hasOidc = Boolean(oidcClient);
+            oidcLoginButton.style.display = hasOidc ? 'inline-flex' : 'none';
+            oidcLogoutButton.style.display = hasOidc ? 'inline-flex' : 'none';
+        }
 
         async function api(url, options = {}) {
             const resp = await fetch(url, {
@@ -951,7 +970,14 @@
         }
 
         async function login() {
-            const token = tokenInput.value.trim();
+            let token = tokenInput.value.trim();
+            if (!token && oidcClient) {
+                token = await oidcClient.refreshIfNeeded(60) || '';
+                if (token) {
+                    tokenInput.value = token;
+                }
+            }
+
             const { resp, data } = await api('/auth/session', {
                 method: 'POST',
                 headers: {
@@ -1889,7 +1915,16 @@
 
         async function refreshAll() {
             loadMcpGuide();
-            const authed = await syncAuth();
+            let authed = await syncAuth();
+            if (!authed && oidcClient) {
+                const refreshed = await oidcClient.refreshIfNeeded(60);
+                if (refreshed) {
+                    tokenInput.value = refreshed;
+                    await login();
+                    authed = await syncAuth();
+                }
+            }
+
             if (!authed) {
                 clearFlash();
                 renderJson(summaryOutput, 'Login required.');
@@ -1955,12 +1990,29 @@
             }
         });
 
+        oidcLoginButton.addEventListener('click', async () => {
+            if (!oidcClient) {
+                showFlash('OIDC is not configured for this page.', 'error');
+                return;
+            }
+            await oidcClient.login({ returnTo: window.location.pathname + window.location.search });
+        });
+
         logoutButton.addEventListener('click', async () => {
             await logout();
             showFlash('Browser session cleared.', 'warn');
             if (approvalsPollTimer) {
                 clearInterval(approvalsPollTimer);
                 approvalsPollTimer = null;
+            }
+            await refreshAll();
+        });
+
+        oidcLogoutButton.addEventListener('click', async () => {
+            await logout();
+            if (oidcClient) {
+                await oidcClient.logout();
+                return;
             }
             await refreshAll();
         });
@@ -2249,7 +2301,31 @@
             }
         });
 
-        refreshAll();
+        async function bootstrapAuth() {
+            if (OIDC_CONFIG.enabled && OIDC_CONFIG.authority && OIDC_CONFIG.clientId && window.OpenClawOidc) {
+                oidcClient = window.OpenClawOidc.create({
+                    authority: OIDC_CONFIG.authority,
+                    clientId: OIDC_CONFIG.clientId,
+                    scope: OIDC_CONFIG.scope,
+                    persist: rememberToken.checked
+                });
+
+                const callback = await oidcClient.handleRedirectCallback();
+                if (callback.handled && !callback.ok) {
+                    showFlash(`OIDC login failed: ${callback.error}`, 'error');
+                }
+
+                const refreshed = await oidcClient.refreshIfNeeded(60);
+                if (refreshed) {
+                    tokenInput.value = refreshed;
+                }
+            }
+
+            updateOidcButtons();
+            await refreshAll();
+        }
+
+        bootstrapAuth();
     </script>
 </body>
 </html>
