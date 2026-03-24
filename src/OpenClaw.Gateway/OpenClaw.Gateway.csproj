@@ -2,6 +2,7 @@
   <PropertyGroup>
     <RootNamespace>OpenClaw.Gateway</RootNamespace>
     <OutputType>Exe</OutputType>
+    <OpenClawEnableOpenSandbox Condition="'$(OpenClawEnableOpenSandbox)' == ''">true</OpenClawEnableOpenSandbox>
     <PublishAot>false</PublishAot>
     <StripSymbols>true</StripSymbols>
     <OptimizationPreference>Size</OptimizationPreference>
