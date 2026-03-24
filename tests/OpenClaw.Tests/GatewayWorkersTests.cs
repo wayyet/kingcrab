@@ -678,6 +678,7 @@ public sealed class GatewayWorkersTests
         }, TestContext.Current.CancellationToken);
 
         var status = await WaitForHeartbeatStatusAsync(heartbeatService, TimeSpan.FromSeconds(2), static item => item.Outcome == "alert");
+        await WaitForConditionAsync(() => adapter.SendAttempts > 0, TimeSpan.FromSeconds(2));
 
         Assert.False(status.DeliverySuppressed);
         Assert.Null(status.LastDeliveredAtUtc);
@@ -823,6 +824,20 @@ public sealed class GatewayWorkersTests
         }
 
         throw new TimeoutException("Timed out waiting for managed heartbeat status.");
+    }
+
+    private static async Task WaitForConditionAsync(Func<bool> predicate, TimeSpan timeout)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        while (stopwatch.Elapsed < timeout)
+        {
+            if (predicate())
+                return;
+
+            await Task.Delay(25);
+        }
+
+        throw new TimeoutException("Timed out waiting for condition.");
     }
 
     private sealed class TestApplicationLifetime : IHostApplicationLifetime, IDisposable
