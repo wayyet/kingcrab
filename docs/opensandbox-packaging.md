@@ -162,6 +162,69 @@ OPENCLAW_GATEWAY_TOKEN=...
 
 如果沙箱卷挂载到了 `/workspace`，这套约定可以直接复用。
 
+## 本地快速测试启动
+
+下面是经过实际验证可以直接跑起来的 `docker run` 命令，适合在本机快速验证镜像功能。
+
+```powershell
+docker run -d `
+  --name openclaw-test `
+  -p 18789:18789 `
+  -e OPENCLAW_AUTH_TOKEN=local-test-token `
+  -e OpenClaw__Llm__Provider=openai `
+  -e OpenClaw__Llm__Model=MiniMax-M2.5 `
+  -e "OpenClaw__Llm__ApiKey=<你的 API Key>" `
+  -e OpenClaw__Llm__Endpoint=https://api.minimaxi.com/v1 `
+  -e OpenClaw__Security__AllowUnsafeToolingOnPublicBind=true `
+  -e OpenClaw__Security__AllowPluginBridgeOnPublicBind=true `
+  -e OpenClaw__Security__TrustForwardedHeaders=true `
+  ai4c-tcr.tencentcloudcr.com/agentfoundry/king-crab:opensandbox-latest
+```
+
+### 参数说明
+
+| 参数 | 说明 |
+|------|------|
+| `OPENCLAW_AUTH_TOKEN` | 必填。Bearer Token，所有 WebSocket/HTTP 请求都需要携带此值 |
+| `OpenClaw__Llm__Provider` | LLM 提供商，`openai` 表示兼容 OpenAI 接口的服务 |
+| `OpenClaw__Llm__Model` | 模型名称 |
+| `OpenClaw__Llm__ApiKey` | LLM API Key |
+| `OpenClaw__Llm__Endpoint` | 自定义 API 地址，使用第三方兼容服务时需要设置 |
+| `AllowUnsafeToolingOnPublicBind` | **本地测试专用**。绑定 `0.0.0.0` 时需要显式开启才能使用 shell/file 工具 |
+| `AllowPluginBridgeOnPublicBind` | **本地测试专用**。允许插件桥在公网绑定下工作 |
+| `TrustForwardedHeaders` | 配合反向代理使用；本地直连可不加，但无副作用 |
+
+> ⚠️ `AllowUnsafeToolingOnPublicBind=true` 仅用于本地开发测试，生产环境应通过 OpenSandbox 的网络策略和资源隔离代替此开关，或绑定到 loopback 地址。
+
+### 启动后验证
+
+查看日志确认服务已就绪：
+
+```powershell
+docker logs openclaw-test
+```
+
+正常启动时日志会出现：
+
+```
+Now listening on: http://0.0.0.0:18789
+Application started.
+```
+
+服务地址：
+- **Web 界面**：`http://localhost:18789`
+- **WebSocket**：`ws://localhost:18789/ws`（Header: `Authorization: Bearer local-test-token`）
+- **健康检查**：`http://localhost:18789/health`
+
+停止和清理：
+
+```powershell
+docker stop openclaw-test
+docker rm openclaw-test
+```
+
+---
+
 ## 总结
 
 最稳妥的方案不是改现有 `Dockerfile`，而是：
