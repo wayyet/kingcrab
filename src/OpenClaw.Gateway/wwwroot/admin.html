@@ -793,7 +793,7 @@
         </section>
     </main>
 
-    <script src="/oidc-auth.js"></script>
+    <script src="oidc-auth.js"></script>
     <script>
         const tokenInput = document.getElementById('token-input');
         const rememberToken = document.getElementById('remember-token');
@@ -925,8 +925,14 @@
             oidcLogoutButton.style.display = hasOidc ? 'inline-flex' : 'none';
         }
 
+        function getBasePath() {
+            const path = window.location.pathname;
+            const lastSlash = path.lastIndexOf('/');
+            return lastSlash > 0 ? path.substring(0, lastSlash) : '';
+        }
+
         async function api(url, options = {}) {
-            const resp = await fetch(url, {
+            const resp = await fetch(getBasePath() + url, {
                 credentials: 'same-origin',
                 ...options,
                 headers: {

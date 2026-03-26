@@ -685,7 +685,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.1/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.9/purify.min.js"></script>
-    <script src="/oidc-auth.js"></script>
+    <script src="oidc-auth.js"></script>
 
     <script>
         // Set up marked to use highlight.js
@@ -733,6 +733,15 @@
             maxReconnectAttempts: Math.max(0, Number(window.OPENCLAW_WEBCHAT_CONFIG?.maxReconnectAttempts ?? 0)),
             retryOnAuthCloseCodes: Boolean(window.OPENCLAW_WEBCHAT_CONFIG?.retryOnAuthCloseCodes ?? false)
         };
+
+        // Derives the URL prefix when served under a sub-path (e.g. sandbox reverse-proxy).
+        // e.g. pathname "/abc/18789/webchat.html" -> basePath "/abc/18789"
+        // e.g. pathname "/webchat.html" or "/" -> basePath ""
+        function getBasePath() {
+            const path = window.location.pathname;
+            const lastSlash = path.lastIndexOf('/');
+            return lastSlash > 0 ? path.substring(0, lastSlash) : '';
+        }
 
         function getStoredToken() {
             return sessionStorage.getItem(TOKEN_KEY_SESSION) || localStorage.getItem(TOKEN_KEY_PERSIST) || '';
@@ -978,7 +987,7 @@
 
             appendSystem('Connecting to OpenClaw.NET Gateway...');
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const baseWsUrl = `${protocol}//${window.location.host}/ws`;
+            const baseWsUrl = `${protocol}//${window.location.host}${getBasePath()}/ws`;
             const wsUrl = token
                 ? `${baseWsUrl}?token=${encodeURIComponent(token)}`
                 : baseWsUrl;
@@ -1230,7 +1239,7 @@
         doctorButton.addEventListener('click', async () => {
             try {
                 const headers = await getAuthHeaders(60);
-                const resp = await fetch('/doctor/text', { method: 'GET', headers: headers });
+                const resp = await fetch(`${getBasePath()}/doctor/text`, { method: 'GET', headers: headers });
                 if (!resp.ok) {
                     appendSystem(`Doctor request failed (${resp.status}).`, true);
                     return;
