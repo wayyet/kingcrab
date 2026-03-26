@@ -1,6 +1,7 @@
 using OpenClaw.Gateway.Bootstrap;
 using OpenClaw.Gateway.Composition;
 using OpenClaw.Gateway.Endpoints;
+using OpenClaw.Gateway.Mcp;
 using OpenClaw.Gateway.Pipeline;
 using OpenClaw.Gateway.Profiles;
 using OpenClaw.Agent;
@@ -34,8 +35,33 @@ builder.Services.AddOpenSandboxIntegration(builder.Configuration);
 var app = builder.Build();
 var runtime = await app.InitializeOpenClawRuntimeAsync(startup);
 
+// Populate the GatewayRuntimeHolder so MCP tools can access the runtime via DI.
+app.InitializeMcpRuntime(runtime);
+
+// Browser WebSocket API cannot set custom Authorization headers.
+// Bridge /ws?token=... into Authorization: Bearer ... so standard auth can validate it.
+app.Use(async (ctx, next) =>
+{
+    if (ctx.Request.Path.StartsWithSegments("/ws", StringComparison.OrdinalIgnoreCase)
+        && !ctx.Request.Headers.ContainsKey("Authorization"))
+    {
+        var queryToken = ctx.Request.Query["token"].FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(queryToken))
+            ctx.Request.Headers.Authorization = $"Bearer {queryToken}";
+    }
+
+    await next(ctx);
+});
+
+// Enable ASP.NET Core authentication middleware when OIDC is configured.
+if (!string.IsNullOrEmpty(startup.Config.Security.OidcAuthority))
+    app.UseAuthentication();
+// Apply token-auth middleware for /mcp before route matching.
+app.UseOpenClawMcpAuth(startup);
+
 app.UseOpenClawPipeline(startup, runtime);
 app.MapOpenApi("/openapi/{documentName}.json");
 app.MapOpenClawEndpoints(startup, runtime);
+app.MapMcp("/mcp");
 
 app.Run($"http://{startup.Config.BindAddress}:{startup.Config.Port}");

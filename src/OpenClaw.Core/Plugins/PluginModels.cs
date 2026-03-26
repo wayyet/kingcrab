@@ -467,6 +467,9 @@ public sealed class PluginLoadConfig
 {
     /// <summary>Extra plugin paths to scan (file or directory).</summary>
     public string[] Paths { get; set; } = [];
+
+    /// <summary>When true, scan the global extensions directory under the user profile.</summary>
+    public bool IncludeGlobalExtensions { get; set; } = true;
 }
 
 /// <summary>

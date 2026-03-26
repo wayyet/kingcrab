@@ -17,11 +17,16 @@ internal static class EndpointHelpers
 
     public static bool IsAuthorizedRequest(HttpContext ctx, GatewayConfig config, bool isNonLoopbackBind)
     {
-        if (!isNonLoopbackBind)
+        // Skip auth for loopback unless the operator explicitly requires it.
+        if (!isNonLoopbackBind && !config.Security.AlwaysRequireAuth)
             return true;
 
+        // OIDC mode: UseAuthentication() middleware has already validated the JWT.
+        if (!string.IsNullOrEmpty(config.Security.OidcAuthority))
+            return ctx.User.Identity?.IsAuthenticated == true;
+
         var token = GatewaySecurity.GetToken(ctx, config.Security.AllowQueryStringToken);
-        return GatewaySecurity.IsTokenValid(token, config.AuthToken!);
+        return GatewaySecurity.IsTokenValid(token, config.AuthToken);
     }
 
     public static OperatorAuthorizationResult AuthorizeOperatorRequest(
@@ -30,7 +35,12 @@ internal static class EndpointHelpers
         BrowserSessionAuthService browserSessions,
         bool requireCsrf)
     {
-        if (!startup.IsNonLoopbackBind)
+        var useOidc = !string.IsNullOrEmpty(startup.Config.Security.OidcAuthority);
+
+        // Loopback bypass: skip auth only when neither AlwaysRequireAuth nor OIDC is active.
+        if (!startup.IsNonLoopbackBind
+            && !startup.Config.Security.AlwaysRequireAuth
+            && !useOidc)
         {
             return new OperatorAuthorizationResult(
                 true,
@@ -39,16 +49,17 @@ internal static class EndpointHelpers
                 BrowserSession: null);
         }
 
-        var token = GatewaySecurity.GetToken(ctx, startup.Config.Security.AllowQueryStringToken);
-        if (GatewaySecurity.IsTokenValid(token, startup.Config.AuthToken!))
+        // OIDC mode: UseAuthentication() has already validated the JWT and populated ctx.User.
+        if (useOidc && ctx.User.Identity?.IsAuthenticated == true)
         {
             return new OperatorAuthorizationResult(
                 true,
-                "bearer",
+                "oidc-jwt",
                 UsedBrowserSession: false,
                 BrowserSession: null);
         }
 
+        // Browser session (admin Web UI cookie).
         if (browserSessions.TryAuthorize(ctx, requireCsrf, out var ticket))
         {
             return new OperatorAuthorizationResult(
@@ -56,6 +67,20 @@ internal static class EndpointHelpers
                 "browser-session",
                 UsedBrowserSession: true,
                 BrowserSession: ticket);
+        }
+
+        // Static token fallback (only when OIDC is not configured).
+        if (!useOidc)
+        {
+            var token = GatewaySecurity.GetToken(ctx, startup.Config.Security.AllowQueryStringToken);
+            if (GatewaySecurity.IsTokenValid(token, startup.Config.AuthToken!))
+            {
+                return new OperatorAuthorizationResult(
+                    true,
+                    "bearer",
+                    UsedBrowserSession: false,
+                    BrowserSession: null);
+            }
         }
 
         return new OperatorAuthorizationResult(

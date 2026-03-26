@@ -32,7 +32,14 @@ public class PluginDiscoveryTests : IDisposable
             """{"id":"test-plugin","name":"Test Plugin","version":"1.0.0"}""");
         File.WriteAllText(Path.Combine(pluginDir, "index.ts"), "export default function() {}");
 
-        var config = new PluginsConfig { Load = new PluginLoadConfig { Paths = [_tempDir] } };
+        var config = new PluginsConfig
+        {
+            Load = new PluginLoadConfig
+            {
+                Paths = [_tempDir],
+                IncludeGlobalExtensions = false
+            }
+        };
 
         // Act
         var discovered = PluginDiscovery.Discover(config);
@@ -53,7 +60,14 @@ public class PluginDiscoveryTests : IDisposable
         File.WriteAllText(Path.Combine(pluginDir, "openclaw.plugin.json"), "{ this is not valid json");
         File.WriteAllText(Path.Combine(pluginDir, "index.ts"), "export default function() {}");
 
-        var config = new PluginsConfig { Load = new PluginLoadConfig { Paths = [_tempDir] } };
+        var config = new PluginsConfig
+        {
+            Load = new PluginLoadConfig
+            {
+                Paths = [_tempDir],
+                IncludeGlobalExtensions = false
+            }
+        };
 
         // Act
         var discovered = PluginDiscovery.Discover(config);
@@ -70,7 +84,10 @@ public class PluginDiscoveryTests : IDisposable
         Directory.CreateDirectory(extDir);
         File.WriteAllText(Path.Combine(extDir, "my-tool.ts"), "// tool code");
 
-        var config = new PluginsConfig();
+        var config = new PluginsConfig
+        {
+            Load = new PluginLoadConfig { IncludeGlobalExtensions = false }
+        };
 
         // Act
         var discovered = PluginDiscovery.Discover(config, workspacePath: _tempDir);
@@ -98,7 +115,11 @@ public class PluginDiscoveryTests : IDisposable
 
         var config = new PluginsConfig
         {
-            Load = new PluginLoadConfig { Paths = [Path.Combine(_tempDir, "plugins")] }
+            Load = new PluginLoadConfig
+            {
+                Paths = [Path.Combine(_tempDir, "plugins")],
+                IncludeGlobalExtensions = false
+            }
         };
 
         // Act

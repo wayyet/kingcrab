@@ -109,7 +109,8 @@ public sealed class PluginBridgeIntegrationTests : IDisposable
         await using var host = CreateHost(new PluginsConfig
         {
             Enabled = true,
-            Load = new PluginLoadConfig { Paths = [pluginDir] }
+            Load = new PluginLoadConfig { Paths = [pluginDir] },
+            Allow = ["js-tool"]
         });
 
         var tools = await host.LoadAsync(null, CancellationToken.None);
@@ -591,7 +592,7 @@ public sealed class PluginBridgeIntegrationTests : IDisposable
 
         var result = PluginDiscovery.DiscoverWithDiagnostics(new PluginsConfig
         {
-            Load = new PluginLoadConfig { Paths = [pluginDir] }
+            Load = new PluginLoadConfig { Paths = [pluginDir], IncludeGlobalExtensions = false }
         });
 
         Assert.Empty(result.Plugins);
@@ -658,7 +659,7 @@ public sealed class PluginBridgeIntegrationTests : IDisposable
             startInfo.ArgumentList.Add("--version");
 
             using var process = Process.Start(startInfo);
-            if (process is null)
+            if(process is null)
                 return false;
 
             return process.WaitForExit(2000) && process.ExitCode == 0;
@@ -673,8 +674,8 @@ public sealed class PluginBridgeIntegrationTests : IDisposable
     {
         var path = Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory,
-            "..", "..", "..", "..",
-            "OpenClaw.Agent", "Plugins", "plugin-bridge.mjs"));
+            "..", "..", "..","..","..",
+            "src", "OpenClaw.Agent", "Plugins", "plugin-bridge.mjs"));
         Assert.True(File.Exists(path), $"Bridge script not found at {path}");
         return path;
     }
@@ -880,7 +881,8 @@ public sealed class PluginBridgeIntegrationTests : IDisposable
         await using var host = CreateHost(new PluginsConfig
         {
             Enabled = true,
-            Load = new PluginLoadConfig { Paths = [pluginDir] }
+            Load = new PluginLoadConfig { Paths = [pluginDir] },
+            Allow = ["hook-plugin"]
         });
 
         var tools = await host.LoadAsync(null, CancellationToken.None);
@@ -1287,7 +1289,8 @@ public sealed class PluginBridgeIntegrationTests : IDisposable
         await using var host = CreateHost(new PluginsConfig
         {
             Enabled = true,
-            Load = new PluginLoadConfig { Paths = [pluginDir] }
+            Load = new PluginLoadConfig { Paths = [pluginDir] },
+            Allow = ["hook-runtime-plugin"]
         });
 
         _ = await host.LoadAsync(null, CancellationToken.None);
@@ -1480,7 +1483,8 @@ public sealed class PluginBridgeIntegrationTests : IDisposable
         await using var host = CreateHost(new PluginsConfig
         {
             Enabled = true,
-            Load = new PluginLoadConfig { Paths = [pluginDir] }
+            Load = new PluginLoadConfig { Paths = [pluginDir] },
+            Allow = ["slow-hook-plugin"]
         });
 
         _ = await host.LoadAsync(null, CancellationToken.None);

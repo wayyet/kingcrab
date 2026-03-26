@@ -67,7 +67,9 @@ internal static class WebSocketEndpoints
                 }
             }
 
-            if (startup.IsNonLoopbackBind && !EndpointHelpers.IsAuthorizedRequest(ctx, startup.Config, startup.IsNonLoopbackBind))
+            // Auth is enforced by UseOpenClawMcpAuth middleware for /ws;
+            // this call handles the non-OIDC static-token path and respects AlwaysRequireAuth.
+            if (!EndpointHelpers.IsAuthorizedRequest(ctx, startup.Config, startup.IsNonLoopbackBind))
             {
                 ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 return;

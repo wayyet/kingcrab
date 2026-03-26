@@ -11,14 +11,16 @@ public sealed class FileReadToolTests
     {
         var root = CreateTempDir();
         var path = Path.Combine(root, "note.txt");
-        await File.WriteAllTextAsync(path, "hello", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(path, "hello",TestContext.Current.CancellationToken);
 
         var tool = new FileReadTool(new ToolingConfig
         {
             AllowedReadRoots = [path]
         });
 
-        var output = await tool.ExecuteAsync(System.Text.Json.JsonSerializer.Serialize(new { path = path }), CancellationToken.None);
+        var output = await tool.ExecuteAsync(
+            System.Text.Json.JsonSerializer.Serialize(new { path }),
+            CancellationToken.None);
         Assert.Equal("hello", output);
     }
 
@@ -34,7 +36,9 @@ public sealed class FileReadToolTests
             AllowedReadRoots = [root]
         });
 
-        var output = await tool.ExecuteAsync($$"""{"path":"{{path}}","max_lines":-5}""", CancellationToken.None);
+        var output = await tool.ExecuteAsync(
+            System.Text.Json.JsonSerializer.Serialize(new { path, max_lines = -5 }),
+            CancellationToken.None);
         Assert.StartsWith("line1", output, StringComparison.Ordinal);
     }
 

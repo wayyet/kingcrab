@@ -52,10 +52,13 @@ public static class PluginDiscovery
         }
 
         // 3. Global extensions
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var globalExtDir = Path.Combine(home, ".openclaw", "extensions");
-        if (Directory.Exists(globalExtDir))
-            ScanExtensionsDirectory(globalExtDir, seen, result);
+        if (pluginsConfig.Load.IncludeGlobalExtensions)
+        {
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var globalExtDir = Path.Combine(home, ".openclaw", "extensions");
+            if (Directory.Exists(globalExtDir))
+                ScanExtensionsDirectory(globalExtDir, seen, result);
+        }
 
         return result;
     }

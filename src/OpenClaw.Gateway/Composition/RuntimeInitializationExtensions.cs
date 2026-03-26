@@ -1,5 +1,4 @@
-using System.Collections.Concurrent;
-using System.Collections.Frozen;
+using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using OpenClaw.Agent;
 using OpenClaw.Agent.Integrations;
@@ -21,6 +20,8 @@ using OpenClaw.Gateway;
 using OpenClaw.Gateway.Bootstrap;
 using OpenClaw.Gateway.Extensions;
 using OpenClaw.Gateway.Profiles;
+using System.Collections.Concurrent;
+using System.Collections.Frozen;
 
 namespace OpenClaw.Gateway.Composition;
 
@@ -304,8 +305,10 @@ internal static class RuntimeInitializationExtensions
             new SessionsTool(sessionManager, pipeline.InboundWriter)
         };
 
-        if (config.Tooling.EnableBrowserTool)
+        if (runtimeState.EffectiveMode != GatewayRuntimeMode.Aot && config.Tooling.EnableBrowserTool)
+        {
             tools.Add(new BrowserTool(config.Tooling));
+        } 
 
         if (string.Equals(Environment.GetEnvironmentVariable("OPENCLAW_ENABLE_STREAMING_SMOKE_TOOL"), "1", StringComparison.Ordinal))
             tools.Add(new StreamingSmokeEchoTool());
