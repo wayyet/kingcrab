@@ -14,6 +14,7 @@
     <Project Path="src/OpenClaw.Gateway/OpenClaw.Gateway.csproj" />
     <Project Path="src/OpenClaw.PluginKit/OpenClaw.PluginKit.csproj" />
     <Project Path="src/OpenClawNet.Sandbox.OpenSandbox/OpenClawNet.Sandbox.OpenSandbox.csproj" />
+    <Project Path="src/OpenClaw.SandboxDemo/OpenClaw.SandboxDemo.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/OpenClaw.TestPluginFixtures/OpenClaw.TestPluginFixtures.csproj" />
