@@ -93,6 +93,9 @@ static async Task CreateSandboxFlow(SandboxLifecycleManager manager)
         var state = await manager.WaitForStateAsync(sandbox.Id, "Running", maxWaitSeconds: 300);
         Console.WriteLine($"  当前状态: {state}");
 
+        if (state == "Running")
+            await manager.PrintGatewayAccessInfoAsync(sandbox.Id);
+
         await sandbox.DisposeAsync();
     }
     catch (SandboxApiException ex)
@@ -285,6 +288,7 @@ static void PrintBanner(OpenSandboxSettings s)
     Console.WriteLine("╚══════════════════════════════════════════════════════════╝");
     Console.WriteLine($"  服务器: {s.Protocol}://{s.Domain}");
     Console.WriteLine($"  镜像  : {s.Image}");
+    Console.WriteLine($"  网关  : port {s.GatewayPort}  入口 {string.Join(" ", s.Entrypoint)}");
     Console.WriteLine();
 }
 

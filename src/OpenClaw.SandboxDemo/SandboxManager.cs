@@ -3,6 +3,7 @@ using OpenSandbox;
 using OpenSandbox.Config;
 using OpenSandbox.Core;
 using OpenSandbox.Models;
+using System.Net.Http.Headers;
 
 namespace OpenClaw.SandboxDemo;
 
@@ -16,6 +17,9 @@ public sealed class OpenSandboxSettings
     public string Image { get; set; } = string.Empty;
     public int TimeoutSeconds { get; set; } = 43200;
     public string DefaultMetadataCreatedBy { get; set; } = "csharp-sandbox-demo";
+    public int GatewayPort { get; set; } = 18789;
+    public string[] Entrypoint { get; set; } = ["/app/OpenClaw.Gateway"];
+    public KingCrabGatewaySettings KingCrab { get; set; } = new();
 
     public ConnectionConfig BuildConnectionConfig()
     {
@@ -26,6 +30,47 @@ public sealed class OpenSandboxSettings
             Protocol = protocol,
         });
     }
+}
+
+/// <summary>
+/// KingCrab 网关运行时配置，对应 appsettings.json 中 OpenSandbox:KingCrab 节点
+/// </summary>
+public sealed class KingCrabGatewaySettings
+{
+    public string AuthToken { get; set; } = "king-crab-demo-token";
+    public string OidcAuthority { get; set; } = "http://test-passport.zyagi.cn:1080/realms/ai4cbrain";
+    public string OidcAudience { get; set; } = "account";
+    public string AllowedOrigin { get; set; } = "http://183.6.65.92:90";
+    public string LlmModel { get; set; } = "MiniMax-M2.5";
+    public string LlmEndpoint { get; set; } = "https://api.minimaxi.com/v1";
+    public string LlmApiKey { get; set; } = string.Empty;
+    public string[] NetworkEgressAllowHosts { get; set; } = ["test-passport.zyagi.cn", "api.minimaxi.com"];
+
+    public Dictionary<string, string> BuildRuntimeEnv(int gatewayPort) => new()
+    {
+        ["Logging__LogLevel__Default"] = "Debug",
+        ["Logging__LogLevel__Microsoft"] = "Debug",
+        ["Logging__LogLevel__Microsoft.AspNetCore"] = "Debug",
+        ["OpenClaw__BindAddress"] = "0.0.0.0",
+        ["OpenClaw__Port"] = gatewayPort.ToString(),
+        ["OpenClaw__AuthToken"] = AuthToken,
+        ["OpenClaw__Security__AlwaysRequireAuth"] = "true",
+        ["OpenClaw__Security__AllowQueryStringToken"] = "false",
+        ["OpenClaw__Security__AllowedOrigins__0"] = AllowedOrigin,
+        ["OpenClaw__Security__OidcAuthority"] = OidcAuthority,
+        ["OpenClaw__Security__OidcAudience"] = OidcAudience,
+        ["OpenClaw__Security__OidcRequireHttpsMetadata"] = "false",
+        ["OpenClaw__Security__AllowUnsafeToolingOnPublicBind"] = "true",
+        ["OpenClaw__Security__AllowPluginBridgeOnPublicBind"] = "true",
+        ["OpenClaw__Security__AllowRawSecretRefsOnPublicBind"] = "true",
+        ["OpenClaw__Plugins__Enabled"] = "true",
+        ["OpenClaw__Tooling__AllowShell"] = "true",
+        ["OpenClaw__Tooling__WorkspaceRoot"] = "/workspace",
+        ["OpenClaw__Memory__StoragePath"] = "/app/memory",
+        ["MODEL_PROVIDER_KEY"] = LlmApiKey,
+        ["MODEL_PROVIDER_MODEL"] = LlmModel,
+        ["MODEL_PROVIDER_ENDPOINT"] = LlmEndpoint,
+    };
 }
 
 /// <summary>
@@ -63,7 +108,25 @@ public sealed class SandboxLifecycleManager
         if (!string.IsNullOrWhiteSpace(label))
             metadata["label"] = label;
 
+        // 合并环境变量：KingCrab 模板 + 用户覆盖（extraEnv 优先）
+        var env = _settings.KingCrab.BuildRuntimeEnv(_settings.GatewayPort);
+        if (extraEnv != null)
+            foreach (var kv in extraEnv)
+                env[kv.Key] = kv.Value;
+
+        // 出站网络策略
+        NetworkPolicy? networkPolicy = _settings.KingCrab.NetworkEgressAllowHosts.Length > 0
+            ? new NetworkPolicy
+            {
+                DefaultAction = NetworkRuleAction.Allow,
+                Egress = [.. _settings.KingCrab.NetworkEgressAllowHosts.Select(h =>
+                    new NetworkRule { Action = NetworkRuleAction.Allow, Target = h })]
+            }
+            : null;
+
         Console.WriteLine($"  正在创建沙箱 (image={_settings.Image}, timeout={timeout}s) ...");
+        Console.WriteLine($"  入口程序 : {string.Join(" ", _settings.Entrypoint)}");
+        Console.WriteLine($"  网关端口 : {_settings.GatewayPort}");
 
         var sandbox = await Sandbox.CreateAsync(new SandboxCreateOptions
         {
@@ -71,7 +134,9 @@ public sealed class SandboxLifecycleManager
             Image = _settings.Image,
             TimeoutSeconds = timeout,
             Metadata = metadata,
-            Env = extraEnv,
+            Entrypoint = _settings.Entrypoint,
+            NetworkPolicy = networkPolicy,
+            Env = env,
         }, ct);
 
         Console.WriteLine($"  沙箱已创建: {sandbox.Id}");
@@ -99,6 +164,15 @@ public sealed class SandboxLifecycleManager
         }
 
         PrintSandboxJson(body);
+
+        // Running 状态时自动展示网关访问信息
+        using var stateDoc = System.Text.Json.JsonDocument.Parse(body);
+        if (stateDoc.RootElement.TryGetProperty("status", out var stEl)
+            && stEl.TryGetProperty("state", out var stateEl)
+            && stateEl.GetString() == "Running")
+        {
+            await PrintGatewayAccessInfoAsync(sandboxId);
+        }
     }
 
     /// <summary>
@@ -334,6 +408,78 @@ public sealed class SandboxLifecycleManager
     }
 
     // ------------------------------------------------------------------ //
+    //  KingCrab 网关访问信息
+    // ------------------------------------------------------------------ //
+
+    /// <summary>
+    /// 解析网关端点并打印完整访问地址与 curl 示例，便于用户直接测试
+    /// </summary>
+    public async Task PrintGatewayAccessInfoAsync(string sandboxId)
+    {
+        if (_settings.GatewayPort <= 0) return;
+
+        var http = _connection.GetHttpClient();
+        var url = $"{_connection.GetBaseUrl().TrimEnd('/')}/sandboxes/{Uri.EscapeDataString(sandboxId)}/endpoints/{_settings.GatewayPort}";
+        try
+        {
+            using var resp = await http.GetAsync(url);
+            var body = await resp.Content.ReadAsStringAsync();
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                Console.WriteLine($"  [网关端点] 获取失败: HTTP {(int)resp.StatusCode}");
+                return;
+            }
+
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            var endpointRaw = doc.RootElement.TryGetProperty("endpoint", out var epEl)
+                ? epEl.GetString() ?? "" : "";
+            var baseUrl = NormalizeUrl(endpointRaw);
+
+            var routeHeaders = new Dictionary<string, string>();
+            if (doc.RootElement.TryGetProperty("headers", out var hEl)
+                && hEl.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                foreach (var h in hEl.EnumerateObject())
+                    routeHeaders[h.Name] = h.Value.GetString() ?? "";
+            }
+
+            var token = _settings.KingCrab.AuthToken;
+            var extraH = routeHeaders.Count > 0
+                ? " " + string.Join(" ", routeHeaders.Select(h => $"-H \"{h.Key}: {h.Value}\""))
+                : "";
+            var shortId = sandboxId.Length >= 8 ? sandboxId[..8] + "..." : sandboxId;
+
+            Console.WriteLine();
+            Console.WriteLine($"  ┌─── 网关访问信息 ({shortId}) ──────────────────────────────────────");
+            Console.WriteLine($"  │  Base URL   : {baseUrl}");
+            Console.WriteLine($"  │  健康检查   : {baseUrl}/health");
+            Console.WriteLine($"  │  对话接口   : {baseUrl}/chat");
+            Console.WriteLine($"  │  根路径     : {baseUrl}/");
+            Console.WriteLine($"  │  Auth Token : {token}");
+            if (routeHeaders.Count > 0)
+            {
+                Console.WriteLine("  │  路由请求头 :");
+                foreach (var h in routeHeaders)
+                    Console.WriteLine($"  │    {h.Key}: {h.Value}");
+            }
+            Console.WriteLine("  │");
+            Console.WriteLine("  │  curl 健康检查:");
+            Console.WriteLine($"  │    curl -H \"Authorization: Bearer {token}\"{extraH} {baseUrl}/health");
+            Console.WriteLine("  │  curl 对话 (SSE):");
+            Console.WriteLine($"  │    curl -H \"Authorization: Bearer {token}\"{extraH} \\");
+            Console.WriteLine( "  │         -H \"Content-Type: application/json\" \\");
+            Console.WriteLine($"  │         -d '{{\"messages\":[{{\"role\":\"user\",\"content\":\"你好\"}}]}}' \\");
+            Console.WriteLine($"  │         {baseUrl}/chat");
+            Console.WriteLine("  └──────────────────────────────────────────────────────────────────");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  [网关端点] 查询异常: {ex.Message}");
+        }
+    }
+
+    // ------------------------------------------------------------------ //
     //  私有辅助
     // ------------------------------------------------------------------ //
 
@@ -387,6 +533,11 @@ public sealed class SandboxLifecycleManager
             Console.WriteLine($"  [ERROR] {operation}失败: HTTP {(int)resp.StatusCode} {body}");
         }
     }
+
+    private static string NormalizeUrl(string endpointAddress)
+        => endpointAddress.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+            ? endpointAddress.TrimEnd('/')
+            : $"http://{endpointAddress}".TrimEnd('/');
 
     private static string FormatDateTime(string raw)
     {
