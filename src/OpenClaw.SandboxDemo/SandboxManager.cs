@@ -87,7 +87,7 @@ public sealed class SandboxLifecycleManager
     /// </summary>
     public async Task PrintSandboxDetailAsync(string sandboxId)
     {
-        using var http = _connection.GetHttpClient();
+        var http = _connection.GetHttpClient();
         var url = $"{_connection.GetBaseUrl().TrimEnd('/')}/sandboxes/{Uri.EscapeDataString(sandboxId)}";
         using var resp = await http.GetAsync(url);
         var body = await resp.Content.ReadAsStringAsync();
@@ -106,7 +106,7 @@ public sealed class SandboxLifecycleManager
     /// </summary>
     public async Task ListSandboxesAsync(string? stateFilter = null, int page = 1, int pageSize = 20)
     {
-        using var http = _connection.GetHttpClient();
+        var http = _connection.GetHttpClient();
         var baseUrl = _connection.GetBaseUrl().TrimEnd('/');
 
         var query = $"page={page}&pageSize={pageSize}";
@@ -165,7 +165,7 @@ public sealed class SandboxLifecycleManager
 
     public async Task PauseSandboxAsync(string sandboxId)
     {
-        using var http = _connection.GetHttpClient();
+        var http = _connection.GetHttpClient();
         var url = $"{_connection.GetBaseUrl().TrimEnd('/')}/sandboxes/{Uri.EscapeDataString(sandboxId)}/pause";
         using var resp = await http.PostAsync(url, null);
         HandleEmptyResponse(resp, "暂停");
@@ -173,7 +173,7 @@ public sealed class SandboxLifecycleManager
 
     public async Task ResumeSandboxAsync(string sandboxId)
     {
-        using var http = _connection.GetHttpClient();
+        var http = _connection.GetHttpClient();
         var url = $"{_connection.GetBaseUrl().TrimEnd('/')}/sandboxes/{Uri.EscapeDataString(sandboxId)}/resume";
         using var resp = await http.PostAsync(url, null);
         HandleEmptyResponse(resp, "恢复");
@@ -186,7 +186,7 @@ public sealed class SandboxLifecycleManager
     public async Task RenewExpirationAsync(string sandboxId, int additionalSeconds)
     {
         // 先查询当前沙箱得到现有过期时间，然后追加
-        using var http = _connection.GetHttpClient();
+        var http = _connection.GetHttpClient();
         var baseUrl = _connection.GetBaseUrl().TrimEnd('/');
 
         var getUrl = $"{baseUrl}/sandboxes/{Uri.EscapeDataString(sandboxId)}";
@@ -242,7 +242,7 @@ public sealed class SandboxLifecycleManager
 
     public async Task DeleteSandboxAsync(string sandboxId)
     {
-        using var http = _connection.GetHttpClient();
+        var http = _connection.GetHttpClient();
         var url = $"{_connection.GetBaseUrl().TrimEnd('/')}/sandboxes/{Uri.EscapeDataString(sandboxId)}";
         using var resp = await http.DeleteAsync(url);
         HandleEmptyResponse(resp, "删除");
@@ -267,7 +267,7 @@ public sealed class SandboxLifecycleManager
         Console.Write($"  等待沙箱进入 [{targetState}] 状态 ");
         while (DateTime.UtcNow < deadline)
         {
-            using var http = _connection.GetHttpClient();
+            var http = _connection.GetHttpClient();
             var url = $"{_connection.GetBaseUrl().TrimEnd('/')}/sandboxes/{Uri.EscapeDataString(sandboxId)}";
             try
             {
@@ -310,7 +310,7 @@ public sealed class SandboxLifecycleManager
 
     public async Task PrintEndpointAsync(string sandboxId, int port)
     {
-        using var http = _connection.GetHttpClient();
+        var http = _connection.GetHttpClient();
         var url = $"{_connection.GetBaseUrl().TrimEnd('/')}/sandboxes/{Uri.EscapeDataString(sandboxId)}/endpoints/{port}";
         using var resp = await http.GetAsync(url);
         var body = await resp.Content.ReadAsStringAsync();
