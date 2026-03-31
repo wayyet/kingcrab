@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Models;
+using OpenClaw.Core.Observability;
 using OpenClaw.Core.Plugins;
 
 namespace OpenClaw.Agent.Plugins;
@@ -17,6 +18,8 @@ public sealed class PluginHost : IAsyncDisposable
     private readonly ILogger _logger;
     private readonly GatewayRuntimeState _runtimeState;
     private readonly HashSet<string> _blockedPluginIds;
+    private readonly string? _runtimeRoot;
+    private readonly RuntimeMetrics? _metrics;
     private readonly List<PluginBridgeProcess> _bridges = [];
     private readonly Dictionary<string, PluginBridgeProcess> _bridgesByPluginId = new(StringComparer.Ordinal);
     private readonly List<ITool> _pluginTools = [];
@@ -34,7 +37,9 @@ public sealed class PluginHost : IAsyncDisposable
         string bridgeScriptPath,
         ILogger logger,
         GatewayRuntimeState? runtimeState = null,
-        IReadOnlyCollection<string>? blockedPluginIds = null)
+        IReadOnlyCollection<string>? blockedPluginIds = null,
+        string? runtimeRoot = null,
+        RuntimeMetrics? metrics = null)
     {
         _config = config;
         _bridgeScriptPath = bridgeScriptPath;
@@ -43,6 +48,8 @@ public sealed class PluginHost : IAsyncDisposable
         _blockedPluginIds = blockedPluginIds is { Count: > 0 }
             ? new HashSet<string>(blockedPluginIds, StringComparer.Ordinal)
             : new HashSet<string>(StringComparer.Ordinal);
+        _runtimeRoot = runtimeRoot;
+        _metrics = metrics;
     }
 
     /// <summary>
@@ -195,7 +202,7 @@ public sealed class PluginHost : IAsyncDisposable
             return;
         }
 
-        var bridge = new PluginBridgeProcess(_bridgeScriptPath, _logger, _config.Transport);
+        var bridge = new PluginBridgeProcess(_bridgeScriptPath, _logger, _config.Transport, runtimeRoot: _runtimeRoot, metrics: _metrics);
         var pluginConfig = GetPluginConfig(id);
 
         var initResult = await bridge.StartAsync(plugin.EntryPath, id, pluginConfig, ct);
@@ -221,7 +228,10 @@ public sealed class PluginHost : IAsyncDisposable
             return;
         }
 
-        var blockedCapabilities = PluginCapabilityPolicy.GetBlockedCapabilities(_runtimeState.EffectiveMode, requestedCapabilities);
+        var blockedCapabilities = PluginCapabilityPolicy.GetBlockedCapabilities(
+            _runtimeState.EffectiveMode,
+            requestedCapabilities,
+            PluginCapabilityPolicy.ExecutionHostKind.Bridge);
         if (blockedCapabilities.Length > 0)
         {
             var message =
@@ -303,26 +313,39 @@ public sealed class PluginHost : IAsyncDisposable
             _logger.LogInformation("  Registered channel '{ChannelId}' from plugin '{PluginId}'", ch.Id, id);
         }
 
-        // Wire notification handler to dispatch channel messages to the correct adapter
+        // Wire notification handler to dispatch channel messages and auth events to the correct adapter
         if (channelAdapters.Count > 0)
         {
             bridge.SetNotificationHandler(notification =>
             {
-                if (notification.Notification == "channel_message" && notification.Params is { } p)
+                if (notification.Params is not { } p) return;
+
+                var channelId = p.TryGetProperty("channelId", out var cid) ? cid.GetString() : null;
+                if (channelId is null) return;
+
+                var target = channelAdapters.Find(a => a.ChannelId == channelId);
+                if (target is null) return;
+
+                switch (notification.Notification)
                 {
-                    var channelId = p.TryGetProperty("channelId", out var cid) ? cid.GetString() : null;
-                    if (channelId is not null)
-                    {
-                        var target = channelAdapters.Find(a => a.ChannelId == channelId);
-                        if (target is not null)
+                    case "channel_message":
+                        _ = Task.Run(async () =>
                         {
-                            _ = Task.Run(async () =>
-                            {
-                                try { await target.HandleInboundAsync(p, CancellationToken.None); }
-                                catch (Exception ex) { _logger.LogWarning(ex, "Failed to handle inbound channel message for '{ChannelId}'", channelId); }
-                            });
-                        }
-                    }
+                            try { await target.HandleInboundAsync(p, CancellationToken.None); }
+                            catch (Exception ex) { _logger.LogWarning(ex, "Failed to handle inbound channel message for '{ChannelId}'", channelId); }
+                        });
+                        break;
+
+                    case "channel_auth_event":
+                        try { target.HandleAuthEvent(p); }
+                        catch (Exception ex) { _logger.LogWarning(ex, "Failed to handle auth event for '{ChannelId}'", channelId); }
+                        break;
+
+                    case "channel_typing":
+                    case "channel_receipt":
+                    case "channel_reaction":
+                        _logger.LogDebug("Received {Notification} notification from plugin channel '{ChannelId}'", notification.Notification, channelId);
+                        break;
                 }
             });
         }

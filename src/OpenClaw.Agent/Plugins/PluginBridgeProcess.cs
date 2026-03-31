@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using Microsoft.Extensions.Logging;
 using OpenClaw.Core.Models;
+using OpenClaw.Core.Observability;
 using OpenClaw.Core.Plugins;
 
 namespace OpenClaw.Agent.Plugins;
@@ -20,6 +21,9 @@ public sealed class PluginBridgeProcess : IAsyncDisposable
     private readonly ILogger _logger;
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
     private readonly BridgeTransportConfig _transportConfig;
+    private readonly BridgeProcessLaunchSpec? _launchSpec;
+    private readonly string? _runtimeRoot;
+    private readonly RuntimeMetrics? _metrics;
     private IBridgeTransport? _transport;
     private BridgeTransportRuntimeConfig _runtimeTransport = new();
     private string? _entryPath;
@@ -40,11 +44,15 @@ public sealed class PluginBridgeProcess : IAsyncDisposable
         _transport?.SetNotificationHandler(handler);
     }
 
-    public PluginBridgeProcess(string bridgeScriptPath, ILogger logger, BridgeTransportConfig? transportConfig = null)
+    public PluginBridgeProcess(string bridgeScriptPath, ILogger logger, BridgeTransportConfig? transportConfig = null,
+        BridgeProcessLaunchSpec? launchSpec = null, string? runtimeRoot = null, RuntimeMetrics? metrics = null)
     {
         _bridgeScriptPath = bridgeScriptPath;
         _logger = logger;
         _transportConfig = transportConfig ?? new BridgeTransportConfig();
+        _launchSpec = launchSpec;
+        _runtimeRoot = runtimeRoot;
+        _metrics = metrics;
     }
 
     /// <summary>
@@ -255,7 +263,7 @@ public sealed class PluginBridgeProcess : IAsyncDisposable
 
     private async Task<BridgeResponse> InitializeProcessAsync(CancellationToken ct)
     {
-        var (transport, runtimeTransport) = BridgeTransportFactory.Create(_transportConfig, _pluginId!, _logger);
+        var (transport, runtimeTransport) = BridgeTransportFactory.Create(_transportConfig, _pluginId!, _logger, _runtimeRoot, _metrics);
         if (_notificationHandler is not null)
             transport.SetNotificationHandler(_notificationHandler);
 
@@ -299,6 +307,9 @@ public sealed class PluginBridgeProcess : IAsyncDisposable
 
     private Process StartProcess(string entryPath, BridgeTransportRuntimeConfig transport)
     {
+        if (_launchSpec is not null)
+            return StartExternalProcess(transport);
+
         var nodeExe = FindNodeExecutable()
             ?? throw new InvalidOperationException(
                 "Node.js is required for OpenClaw plugin support but was not found. " +
@@ -320,6 +331,8 @@ public sealed class PluginBridgeProcess : IAsyncDisposable
         psi.Environment["OPENCLAW_BRIDGE_TRANSPORT_MODE"] = transport.Mode;
         if (!string.IsNullOrWhiteSpace(transport.SocketPath))
             psi.Environment["OPENCLAW_BRIDGE_SOCKET_PATH"] = transport.SocketPath;
+        if (!string.IsNullOrWhiteSpace(transport.SocketAuthToken))
+            psi.Environment["OPENCLAW_BRIDGE_SOCKET_AUTH_TOKEN"] = transport.SocketAuthToken;
 
         var process = Process.Start(psi)
             ?? throw new InvalidOperationException("Failed to start Node.js plugin bridge process.");
@@ -329,6 +342,51 @@ public sealed class PluginBridgeProcess : IAsyncDisposable
         {
             if (!string.IsNullOrWhiteSpace(e.Data))
                 _logger.LogInformation("[Node] {Output}", e.Data);
+        };
+        process.BeginErrorReadLine();
+        return process;
+    }
+
+    private Process StartExternalProcess(BridgeTransportRuntimeConfig transport)
+    {
+        var launchSpec = _launchSpec
+            ?? throw new InvalidOperationException("External launch spec is not configured.");
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = launchSpec.FileName,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WorkingDirectory = launchSpec.WorkingDirectory ?? Environment.CurrentDirectory
+        };
+
+        foreach (var argument in launchSpec.Arguments)
+            psi.ArgumentList.Add(argument);
+
+        psi.Environment["OPENCLAW_BRIDGE_TRANSPORT_MODE"] = transport.Mode;
+        if (!string.IsNullOrWhiteSpace(transport.SocketPath))
+            psi.Environment["OPENCLAW_BRIDGE_SOCKET_PATH"] = transport.SocketPath;
+        if (!string.IsNullOrWhiteSpace(transport.SocketAuthToken))
+            psi.Environment["OPENCLAW_BRIDGE_SOCKET_AUTH_TOKEN"] = transport.SocketAuthToken;
+        foreach (var (name, value) in launchSpec.EnvironmentVariables)
+        {
+            if (value is null)
+                psi.Environment.Remove(name);
+            else
+                psi.Environment[name] = value;
+        }
+
+        var process = Process.Start(psi)
+            ?? throw new InvalidOperationException($"Failed to start bridge child process '{launchSpec.FileName}'.");
+
+        process.EnableRaisingEvents = true;
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (!string.IsNullOrWhiteSpace(e.Data))
+                _logger.LogInformation("[Bridge] {Output}", e.Data);
         };
         process.BeginErrorReadLine();
         return process;

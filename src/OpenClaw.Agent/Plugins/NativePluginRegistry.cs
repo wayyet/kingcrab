@@ -61,6 +61,13 @@ public sealed class NativePluginRegistry : IDisposable
             RegisterTool(new MqttTool(config.Mqtt), "mqtt");
             RegisterTool(new MqttPublishTool(config.Mqtt, toolingConfig), "mqtt");
         }
+
+        if (config.Notion.Enabled)
+        {
+            RegisterTool(new NotionTool(config.Notion), "notion");
+            if (!config.Notion.ReadOnly)
+                RegisterTool(new NotionWriteTool(config.Notion, toolingConfig: toolingConfig), "notion");
+        }
     }
 
     private void RegisterTool(ITool tool, string pluginId, string? detail = null)
@@ -76,6 +83,9 @@ public sealed class NativePluginRegistry : IDisposable
         _logger.LogInformation("Native plugin enabled: {PluginId}{Detail}",
             pluginId, detail is not null ? $" ({detail})" : "");
     }
+
+    public void RegisterExternalTool(ITool tool, string pluginId, string? detail = null)
+        => RegisterTool(tool, pluginId, detail);
 
     /// <summary>
     /// All enabled native plugin tools.

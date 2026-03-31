@@ -25,6 +25,11 @@ public sealed class OpenClawHttpClient : IDisposable
     private readonly Uri _adminHeartbeatUri;
     private readonly Uri _adminHeartbeatPreviewUri;
     private readonly Uri _adminHeartbeatStatusUri;
+    private readonly Uri _adminPostureUri;
+    private readonly Uri _adminApprovalSimulationUri;
+    private readonly Uri _adminIncidentExportUri;
+    private readonly Uri _adminWhatsAppSetupUri;
+    private readonly Uri _adminWhatsAppRestartUri;
     private long _mcpRequestId;
 
     public OpenClawHttpClient(string baseUrl, string? authToken, HttpClient? httpClient = null)
@@ -51,6 +56,11 @@ public sealed class OpenClawHttpClient : IDisposable
         _adminHeartbeatUri = new Uri(baseUri, "/admin/heartbeat");
         _adminHeartbeatPreviewUri = new Uri(baseUri, "/admin/heartbeat/preview");
         _adminHeartbeatStatusUri = new Uri(baseUri, "/admin/heartbeat/status");
+        _adminPostureUri = new Uri(baseUri, "/admin/posture");
+        _adminApprovalSimulationUri = new Uri(baseUri, "/admin/approvals/simulate");
+        _adminIncidentExportUri = new Uri(baseUri, "/admin/incident/export");
+        _adminWhatsAppSetupUri = new Uri(baseUri, "/admin/channels/whatsapp/setup");
+        _adminWhatsAppRestartUri = new Uri(baseUri, "/admin/channels/whatsapp/restart");
 
         _http = httpClient ?? new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
         _ownsHttpClient = httpClient is null;
@@ -288,6 +298,89 @@ public sealed class OpenClawHttpClient : IDisposable
     public Task<HeartbeatStatusResponse> GetHeartbeatStatusAsync(CancellationToken cancellationToken)
         => GetAsync(_adminHeartbeatStatusUri, CoreJsonContext.Default.HeartbeatStatusResponse, cancellationToken);
 
+    public Task<SecurityPostureResponse> GetSecurityPostureAsync(CancellationToken cancellationToken)
+        => GetAsync(_adminPostureUri, CoreJsonContext.Default.SecurityPostureResponse, cancellationToken);
+
+    public async Task<ApprovalSimulationResponse> SimulateApprovalAsync(
+        ApprovalSimulationRequest request,
+        CancellationToken cancellationToken)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Post, _adminApprovalSimulationUri)
+        {
+            Content = BuildJsonContent(request, CoreJsonContext.Default.ApprovalSimulationRequest)
+        };
+
+        return await SendAsync(req, CoreJsonContext.Default.ApprovalSimulationResponse, cancellationToken);
+    }
+
+    public Task<IncidentBundleResponse> ExportIncidentBundleAsync(
+        int approvalLimit,
+        int eventLimit,
+        CancellationToken cancellationToken)
+        => GetAsync(
+            new Uri($"{_adminIncidentExportUri}?approvalLimit={Math.Clamp(approvalLimit, 1, 500)}&eventLimit={Math.Clamp(eventLimit, 1, 500)}", UriKind.RelativeOrAbsolute),
+            CoreJsonContext.Default.IncidentBundleResponse,
+            cancellationToken);
+
+    public Task<WhatsAppSetupResponse> GetWhatsAppSetupAsync(CancellationToken cancellationToken)
+        => GetAsync(_adminWhatsAppSetupUri, CoreJsonContext.Default.WhatsAppSetupResponse, cancellationToken);
+
+    public async Task<WhatsAppSetupResponse> SaveWhatsAppSetupAsync(
+        WhatsAppSetupRequest request,
+        CancellationToken cancellationToken)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Put, _adminWhatsAppSetupUri)
+        {
+            Content = BuildJsonContent(request, CoreJsonContext.Default.WhatsAppSetupRequest)
+        };
+
+        return await SendAsync(req, CoreJsonContext.Default.WhatsAppSetupResponse, cancellationToken);
+    }
+
+    public async Task<WhatsAppSetupResponse> RestartWhatsAppAsync(CancellationToken cancellationToken)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Post, _adminWhatsAppRestartUri);
+        return await SendAsync(req, CoreJsonContext.Default.WhatsAppSetupResponse, cancellationToken);
+    }
+
+    public Task<ChannelAuthStatusResponse> GetChannelAuthAsync(string channelId, string? accountId, CancellationToken cancellationToken)
+        => GetAsync(BuildChannelAuthUri(channelId, accountId), CoreJsonContext.Default.ChannelAuthStatusResponse, cancellationToken);
+
+    public async Task StreamChannelAuthAsync(
+        string channelId,
+        string? accountId,
+        Action<ChannelAuthStatusItem> onEvent,
+        CancellationToken cancellationToken)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, BuildChannelAuthStreamUri(channelId, accountId));
+        req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+
+        using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        if (!resp.IsSuccessStatusCode)
+            throw await CreateHttpErrorAsync(resp, cancellationToken);
+
+        await using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
+        using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 16 * 1024, leaveOpen: false);
+
+        while (true)
+        {
+            var line = await reader.ReadLineAsync(cancellationToken);
+            if (line is null)
+                break;
+
+            if (!line.StartsWith("data:", StringComparison.Ordinal))
+                continue;
+
+            var data = line["data:".Length..].TrimStart();
+            if (data.Length == 0)
+                continue;
+
+            var item = JsonSerializer.Deserialize(data, CoreJsonContext.Default.ChannelAuthStatusItem);
+            if (item is not null)
+                onEvent(item);
+        }
+    }
+
     private async Task<T> GetAsync<T>(Uri uri, JsonTypeInfo<T> jsonTypeInfo, CancellationToken cancellationToken)
     {
         using var req = new HttpRequestMessage(HttpMethod.Get, uri);
@@ -457,6 +550,27 @@ public sealed class OpenClawHttpClient : IDisposable
             pairs.Add($"action={Uri.EscapeDataString(query.Action)}");
 
         return new Uri($"{_integrationRuntimeEventsUri}?{string.Join("&", pairs)}", UriKind.RelativeOrAbsolute);
+    }
+
+    private Uri BuildChannelAuthUri(string channelId, string? accountId)
+    {
+        if (string.IsNullOrWhiteSpace(channelId))
+            throw new ArgumentException("Channel id is required.", nameof(channelId));
+
+        var baseUri = new Uri(_adminWhatsAppSetupUri, $"/admin/channels/{Uri.EscapeDataString(channelId)}/auth");
+        if (string.IsNullOrWhiteSpace(accountId))
+            return baseUri;
+
+        return new Uri($"{baseUri}?accountId={Uri.EscapeDataString(accountId)}", UriKind.Absolute);
+    }
+
+    private Uri BuildChannelAuthStreamUri(string channelId, string? accountId)
+    {
+        var baseUri = new Uri(_adminWhatsAppSetupUri, $"/admin/channels/{Uri.EscapeDataString(channelId)}/auth/stream");
+        if (string.IsNullOrWhiteSpace(accountId))
+            return baseUri;
+
+        return new Uri($"{baseUri}?accountId={Uri.EscapeDataString(accountId)}", UriKind.Absolute);
     }
 
     private static HttpContent BuildJsonContent<T>(T request, JsonTypeInfo<T> jsonTypeInfo)

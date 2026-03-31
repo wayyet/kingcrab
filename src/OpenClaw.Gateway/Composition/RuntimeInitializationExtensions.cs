@@ -84,6 +84,9 @@ internal static class RuntimeInitializationExtensions
         if (config.Channels.Telegram.Enabled)
             channelAdapters["telegram"] = app.Services.GetRequiredService<TelegramChannel>();
 
+        if (config.Channels.Teams.Enabled)
+            channelAdapters["teams"] = app.Services.GetRequiredService<TeamsChannel>();
+
         if (config.Channels.WhatsApp.Enabled)
         {
             if (config.Channels.WhatsApp.Type == "bridge")
@@ -273,6 +276,8 @@ internal static class RuntimeInitializationExtensions
             TwilioSmsWebhookHandler = smsWebhookHandler,
             PluginHost = pluginHost,
             NativeDynamicPluginHost = nativeDynamicPluginHost,
+            WhatsAppWorkerHost = null,
+            ChannelAuthEvents = WireChannelAuthEvents(channelAdapters),
             RegisteredToolNames = tools.Select(t => t.Name).ToFrozenSet(StringComparer.Ordinal)
         };
 
@@ -731,5 +736,17 @@ internal static class RuntimeInitializationExtensions
                 };
             })
             .ToArray();
+    }
+
+    private static ChannelAuthEventStore WireChannelAuthEvents(
+        IReadOnlyDictionary<string, IChannelAdapter> channelAdapters)
+    {
+        var store = new ChannelAuthEventStore();
+        foreach (var adapter in channelAdapters.Values)
+        {
+            if (adapter is Agent.Plugins.BridgedChannelAdapter bridged)
+                bridged.OnAuthEvent += store.Record;
+        }
+        return store;
     }
 }

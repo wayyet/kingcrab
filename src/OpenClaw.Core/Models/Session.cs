@@ -380,6 +380,20 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(Dictionary<string, decimal>))]
 [JsonSerializable(typeof(ToolUsageSnapshot))]
 [JsonSerializable(typeof(List<ToolUsageSnapshot>))]
+[JsonSerializable(typeof(OpenClaw.Core.Plugins.BridgeMediaAttachment))]
+[JsonSerializable(typeof(OpenClaw.Core.Plugins.BridgeMediaAttachment[]))]
+[JsonSerializable(typeof(OpenClaw.Core.Plugins.BridgeChannelTypingRequest))]
+[JsonSerializable(typeof(OpenClaw.Core.Plugins.BridgeChannelReceiptRequest))]
+[JsonSerializable(typeof(OpenClaw.Core.Plugins.BridgeChannelReactionRequest))]
+[JsonSerializable(typeof(OpenClaw.Core.Plugins.BridgeChannelAuthEvent))]
+[JsonSerializable(typeof(ChannelAuthStatusResponse))]
+[JsonSerializable(typeof(ChannelAuthStatusItem))]
+[JsonSerializable(typeof(WhatsAppSetupRequest))]
+[JsonSerializable(typeof(WhatsAppSetupResponse))]
+[JsonSerializable(typeof(SecurityPostureResponse))]
+[JsonSerializable(typeof(ApprovalSimulationRequest))]
+[JsonSerializable(typeof(ApprovalSimulationResponse))]
+[JsonSerializable(typeof(IncidentBundleResponse))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,

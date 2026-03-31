@@ -27,6 +27,7 @@ internal static class Program
                 "run" => await RunAsync(rest),
                 "chat" => await ChatAsync(rest),
                 "heartbeat" => await HeartbeatAsync(rest),
+                "admin" => await AdminAsync(rest),
                 "clawhub" => await ClawHubCommand.RunAsync(rest),
                 "version" or "--version" or "-v" => PrintVersion(),
                 _ => UnknownCommand(command)
@@ -67,11 +68,12 @@ internal static class Program
               openclaw run [options] <prompt>
               openclaw chat [options]
               openclaw heartbeat <wizard|preview|status> [options]
+              openclaw admin <posture|incident export|approvals simulate> [options]
               openclaw clawhub [wrapper options] [--] <clawhub args...>
 
             Common options:
               --url <url>        Base URL (default: OPENCLAW_BASE_URL or http://127.0.0.1:18789)
-              --token <token>    Auth token (default: OPENCLAW_AUTH_TOKEN)
+              --token <token>    Auth token (deprecated: prefer OPENCLAW_AUTH_TOKEN)
               --model <model>    Model override (optional)
               --system <text>    System prompt (optional)
 
@@ -88,10 +90,14 @@ internal static class Program
 
             Examples:
               openclaw run "summarize this README" --file ./README.md
+              OPENCLAW_AUTH_TOKEN=... openclaw run "summarize this README" --file ./README.md
               cat error.log | openclaw run "what went wrong?"
               openclaw chat --system "Be concise."
               openclaw heartbeat status
               openclaw heartbeat wizard
+              openclaw admin posture
+              openclaw admin approvals simulate --tool shell --args "{\"command\":\"pwd\"}"
+              openclaw admin incident export
 
             ClawHub wrapper:
               # Forward --help to ClawHub itself:
@@ -116,7 +122,20 @@ internal static class Program
 
             Notes:
               - The heartbeat commands talk to the gateway admin API.
-              - Use OPENCLAW_BASE_URL / OPENCLAW_AUTH_TOKEN or pass --url / --token.
+              - Prefer OPENCLAW_BASE_URL / OPENCLAW_AUTH_TOKEN over command-line tokens.
+            """);
+    }
+
+    private static void PrintAdminHelp()
+    {
+        Console.WriteLine(
+            """
+            openclaw admin
+
+            Usage:
+              openclaw admin posture [--url <url>] [--token <token>]
+              openclaw admin incident export [--approval-limit <n>] [--event-limit <n>] [--url <url>] [--token <token>]
+              openclaw admin approvals simulate --tool <tool> [--args <json>] [--autonomy <mode>] [--require-approval <true|false>] [--approval-tool <tool>]... [--url <url>] [--token <token>]
             """);
     }
 
@@ -130,7 +149,7 @@ internal static class Program
         }
 
         var baseUrl = parsed.GetOption("--url") ?? Environment.GetEnvironmentVariable(EnvBaseUrl) ?? DefaultBaseUrl;
-        var token = parsed.GetOption("--token") ?? Environment.GetEnvironmentVariable(EnvAuthToken);
+        var token = ResolveAuthToken(parsed, Console.Error);
         var model = parsed.GetOption("--model");
         var system = parsed.GetOption("--system");
 
@@ -189,7 +208,7 @@ internal static class Program
         }
 
         var baseUrl = parsed.GetOption("--url") ?? Environment.GetEnvironmentVariable(EnvBaseUrl) ?? DefaultBaseUrl;
-        var token = parsed.GetOption("--token") ?? Environment.GetEnvironmentVariable(EnvAuthToken);
+        var token = ResolveAuthToken(parsed, Console.Error);
         var model = parsed.GetOption("--model");
         var system = parsed.GetOption("--system");
 
@@ -260,7 +279,7 @@ internal static class Program
         }
 
         var baseUrl = parsed.GetOption("--url") ?? Environment.GetEnvironmentVariable(EnvBaseUrl) ?? DefaultBaseUrl;
-        var token = parsed.GetOption("--token") ?? Environment.GetEnvironmentVariable(EnvAuthToken);
+        var token = ResolveAuthToken(parsed, Console.Error);
 
         using var client = new OpenClawHttpClient(baseUrl, token);
         return subcommand switch
@@ -270,6 +289,74 @@ internal static class Program
             "wizard" => await HeartbeatWizardAsync(client),
             _ => throw new ArgumentException($"Unknown heartbeat command: {subcommand}")
         };
+    }
+
+    private static async Task<int> AdminAsync(string[] args)
+    {
+        if (args.Length == 0 || args[0] is "-h" or "--help" or "help")
+        {
+            PrintAdminHelp();
+            return 0;
+        }
+
+        var group = args[0].Trim().ToLowerInvariant();
+        if (group == "posture")
+        {
+            var parsed = CliArgs.Parse(args.Skip(1).ToArray());
+            var baseUrl = parsed.GetOption("--url") ?? Environment.GetEnvironmentVariable(EnvBaseUrl) ?? DefaultBaseUrl;
+            var token = ResolveAuthToken(parsed, Console.Error);
+            using var client = new OpenClawHttpClient(baseUrl, token);
+            var posture = await client.GetSecurityPostureAsync(CancellationToken.None);
+            WritePosture(posture);
+            return 0;
+        }
+
+        if (group == "incident" && args.Length > 1 && string.Equals(args[1], "export", StringComparison.OrdinalIgnoreCase))
+        {
+            var parsed = CliArgs.Parse(args.Skip(2).ToArray());
+            var baseUrl = parsed.GetOption("--url") ?? Environment.GetEnvironmentVariable(EnvBaseUrl) ?? DefaultBaseUrl;
+            var token = ResolveAuthToken(parsed, Console.Error);
+            var approvalLimit = ParseInt(parsed.GetOption("--approval-limit")) ?? 100;
+            var eventLimit = ParseInt(parsed.GetOption("--event-limit")) ?? 200;
+            using var client = new OpenClawHttpClient(baseUrl, token);
+            var bundle = await client.ExportIncidentBundleAsync(approvalLimit, eventLimit, CancellationToken.None);
+            Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(bundle, CoreJsonContext.Default.IncidentBundleResponse));
+            return 0;
+        }
+
+        if (group == "approvals" && args.Length > 1 && string.Equals(args[1], "simulate", StringComparison.OrdinalIgnoreCase))
+        {
+            var parsed = CliArgs.Parse(args.Skip(2).ToArray());
+            var baseUrl = parsed.GetOption("--url") ?? Environment.GetEnvironmentVariable(EnvBaseUrl) ?? DefaultBaseUrl;
+            var token = ResolveAuthToken(parsed, Console.Error);
+            var tool = parsed.GetOption("--tool");
+            if (string.IsNullOrWhiteSpace(tool))
+            {
+                Console.Error.WriteLine("--tool is required.");
+                return 2;
+            }
+
+            using var client = new OpenClawHttpClient(baseUrl, token);
+            var response = await client.SimulateApprovalAsync(new ApprovalSimulationRequest
+            {
+                ToolName = tool,
+                ArgumentsJson = parsed.GetOption("--args"),
+                AutonomyMode = parsed.GetOption("--autonomy"),
+                RequireToolApproval = ParseBool(parsed.GetOption("--require-approval")),
+                ApprovalRequiredTools = parsed.Options.TryGetValue("--approval-tool", out var tools)
+                    ? tools.ToArray()
+                    : null
+            }, CancellationToken.None);
+
+            Console.WriteLine($"{response.Decision}: {response.Reason}");
+            Console.WriteLine($"tool={response.ToolName} autonomy={response.AutonomyMode} require_approval={response.RequireToolApproval.ToString().ToLowerInvariant()}");
+            if (response.ApprovalRequiredTools.Count > 0)
+                Console.WriteLine($"approval_tools={string.Join(",", response.ApprovalRequiredTools)}");
+            return 0;
+        }
+
+        PrintAdminHelp();
+        return 2;
     }
 
     private static async Task<int> HeartbeatStatusAsync(OpenClawHttpClient client)
@@ -615,5 +702,59 @@ internal static class Program
         if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
             throw new ArgumentException($"Invalid int: {raw}");
         return value;
+    }
+
+    private static bool? ParseBool(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return null;
+
+        return raw.Trim().ToLowerInvariant() switch
+        {
+            "1" or "true" or "yes" or "y" => true,
+            "0" or "false" or "no" or "n" => false,
+            _ => throw new ArgumentException($"Invalid bool: {raw}")
+        };
+    }
+
+    internal static string? ResolveAuthToken(CliArgs parsed, TextWriter error)
+    {
+        var cliToken = parsed.GetOption("--token");
+        if (!string.IsNullOrWhiteSpace(cliToken))
+        {
+            error.WriteLine("Warning: --token is deprecated because command-line arguments can be exposed in process listings. Prefer OPENCLAW_AUTH_TOKEN.");
+            return cliToken;
+        }
+
+        return Environment.GetEnvironmentVariable(EnvAuthToken);
+    }
+
+    private static string ToBoolWord(bool value) => value ? "true" : "false";
+
+    private static void WritePosture(SecurityPostureResponse posture)
+    {
+        Console.WriteLine($"public_bind: {ToBoolWord(posture.PublicBind)}");
+        Console.WriteLine($"auth_token_configured: {ToBoolWord(posture.AuthTokenConfigured)}");
+        Console.WriteLine($"autonomy_mode: {posture.AutonomyMode}");
+        Console.WriteLine($"tool_approval_required: {ToBoolWord(posture.ToolApprovalRequired)}");
+        Console.WriteLine($"requester_match_http_tool_approval: {ToBoolWord(posture.RequireRequesterMatchForHttpToolApproval)}");
+        Console.WriteLine($"browser_session_cookie_secure_effective: {ToBoolWord(posture.BrowserSessionCookieSecureEffective)}");
+        Console.WriteLine($"trust_forwarded_headers: {ToBoolWord(posture.TrustForwardedHeaders)}");
+        Console.WriteLine($"plugin_bridge: enabled={ToBoolWord(posture.PluginBridgeEnabled)} transport={posture.PluginBridgeTransportMode} security={posture.PluginBridgeSecurityMode}");
+        Console.WriteLine($"sandbox_configured: {ToBoolWord(posture.SandboxConfigured)}");
+
+        if (posture.RiskFlags.Count > 0)
+        {
+            Console.WriteLine("risk_flags:");
+            foreach (var risk in posture.RiskFlags)
+                Console.WriteLine($"- {risk}");
+        }
+
+        if (posture.Recommendations.Count > 0)
+        {
+            Console.WriteLine("recommendations:");
+            foreach (var recommendation in posture.Recommendations)
+                Console.WriteLine($"- {recommendation}");
+        }
     }
 }

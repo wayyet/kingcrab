@@ -108,6 +108,49 @@ public sealed class PluginsConfig
 
     /// <summary>Configuration for in-process dynamic .NET plugins. JIT mode only.</summary>
     public NativeDynamicPluginsConfig DynamicNative { get; set; } = new();
+
+    /// <summary>Configuration for MCP (Model Context Protocol) server connections.</summary>
+    public McpPluginsConfig Mcp { get; set; } = new();
+}
+
+public sealed class McpPluginsConfig
+{
+    public bool Enabled { get; set; } = false;
+    public Dictionary<string, McpServerConfig> Servers { get; set; } = new(StringComparer.Ordinal);
+}
+
+public sealed class McpServerConfig
+{
+    public bool Enabled { get; set; } = true;
+    public string? Name { get; set; }
+    public string? Transport { get; set; }
+    public string? Command { get; set; }
+    public string[] Arguments { get; set; } = [];
+    public string? WorkingDirectory { get; set; }
+    public Dictionary<string, string> Environment { get; set; } = new(StringComparer.Ordinal);
+    public string? Url { get; set; }
+    public Dictionary<string, string> Headers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public string? ToolNamePrefix { get; set; }
+    public int StartupTimeoutSeconds { get; set; } = 15;
+    public int RequestTimeoutSeconds { get; set; } = 60;
+}
+
+public static class McpServerConfigExtensions
+{
+    public static string NormalizeTransport(this McpServerConfig config)
+    {
+        var transport = config.Transport?.Trim();
+        if (string.IsNullOrWhiteSpace(transport))
+            return string.IsNullOrWhiteSpace(config.Url) ? "stdio" : "http";
+
+        if (transport.Equals("streamable-http", StringComparison.OrdinalIgnoreCase) ||
+            transport.Equals("streamable_http", StringComparison.OrdinalIgnoreCase))
+        {
+            return "http";
+        }
+
+        return transport.ToLowerInvariant();
+    }
 }
 
 /// <summary>
@@ -128,6 +171,7 @@ public sealed class NativePluginsConfig
     public InboxZeroConfig InboxZero { get; set; } = new();
     public HomeAssistantConfig HomeAssistant { get; set; } = new();
     public MqttConfig Mqtt { get; set; } = new();
+    public NotionConfig Notion { get; set; } = new();
 }
 
 public sealed class HomeAssistantConfig
@@ -230,6 +274,44 @@ public sealed class MqttSubscriptionConfig
     public int Qos { get; set; } = 0;
     public string PromptTemplate { get; set; } = "MQTT message on {topic}: {payload}";
     public int CooldownSeconds { get; set; } = 1;
+}
+
+public sealed class NotionConfig
+{
+    public bool Enabled { get; set; } = false;
+
+    /// <summary>Notion integration token secret ref (env: or raw:).</summary>
+    public string ApiKeyRef { get; set; } = "env:NOTION_API_KEY";
+
+    /// <summary>Base URL for the Notion REST API.</summary>
+    public string BaseUrl { get; set; } = "https://api.notion.com/v1";
+
+    /// <summary>Pinned Notion-Version header value.</summary>
+    public string ApiVersion { get; set; } = "2022-06-28";
+
+    /// <summary>Default page for scratchpad-style read/append operations.</summary>
+    public string? DefaultPageId { get; set; }
+
+    /// <summary>Default database for note list/search/create operations.</summary>
+    public string? DefaultDatabaseId { get; set; }
+
+    /// <summary>Explicit page allowlist. DefaultPageId is implicitly allowed.</summary>
+    public string[] AllowedPageIds { get; set; } = [];
+
+    /// <summary>Explicit database allowlist. DefaultDatabaseId is implicitly allowed.</summary>
+    public string[] AllowedDatabaseIds { get; set; } = [];
+
+    /// <summary>Maximum results returned by search/list operations.</summary>
+    public int MaxSearchResults { get; set; } = 10;
+
+    /// <summary>When true, omit the write tool and deny write operations.</summary>
+    public bool ReadOnly { get; set; } = false;
+
+    /// <summary>
+    /// When true, notion_write is always added to the effective approval-required tool set.
+    /// This can force approval handling on even if approvals are otherwise disabled.
+    /// </summary>
+    public bool RequireApprovalForWrites { get; set; } = true;
 }
 
 public sealed class WebSearchConfig
@@ -633,6 +715,9 @@ public sealed class BridgeTransportRuntimeConfig
 {
     public string Mode { get; init; } = "stdio";
     public string? SocketPath { get; init; }
+    public string? SocketDirectory { get; init; }
+    public string? SocketAuthToken { get; init; }
+    public string SecurityMode { get; init; } = "legacy";
 }
 
 /// <summary>
@@ -749,6 +834,87 @@ public sealed class BridgeChannelSendRequest
     public required string ChannelId { get; init; }
     public required string RecipientId { get; init; }
     public required string Text { get; init; }
+    public string? SessionId { get; init; }
+    public string? ReplyToMessageId { get; init; }
+    public string? Subject { get; init; }
+    public BridgeMediaAttachment[]? Attachments { get; init; }
+}
+
+/// <summary>
+/// Media attachment for bridge channel messages.
+/// </summary>
+public sealed class BridgeMediaAttachment
+{
+    /// <summary>Media type: "image", "video", "audio", "document", "sticker".</summary>
+    public required string Type { get; init; }
+
+    /// <summary>HTTP URL or file path to the media.</summary>
+    public string? Url { get; init; }
+
+    /// <summary>Optional caption for the media.</summary>
+    public string? Caption { get; init; }
+
+    /// <summary>MIME type hint (e.g. "audio/ogg; codecs=opus").</summary>
+    public string? MimeType { get; init; }
+
+    /// <summary>Original file name.</summary>
+    public string? FileName { get; init; }
+
+    /// <summary>When true, video should be sent as an animated GIF.</summary>
+    public bool GifPlayback { get; init; }
+}
+
+/// <summary>
+/// Request to send a typing indicator through a bridge channel.
+/// </summary>
+public sealed class BridgeChannelTypingRequest
+{
+    public required string ChannelId { get; init; }
+    public required string RecipientId { get; init; }
+    public bool IsTyping { get; init; } = true;
+}
+
+/// <summary>
+/// Request to send a read receipt through a bridge channel.
+/// </summary>
+public sealed class BridgeChannelReceiptRequest
+{
+    public required string ChannelId { get; init; }
+    public required string MessageId { get; init; }
+    public string? RemoteJid { get; init; }
+    public string? Participant { get; init; }
+}
+
+/// <summary>
+/// Request to send a reaction through a bridge channel.
+/// </summary>
+public sealed class BridgeChannelReactionRequest
+{
+    public required string ChannelId { get; init; }
+    public required string MessageId { get; init; }
+    public required string Emoji { get; init; }
+    public string? RemoteJid { get; init; }
+    public string? Participant { get; init; }
+}
+
+/// <summary>
+/// Auth event notification from a bridge channel (e.g. QR code for WhatsApp linking).
+/// </summary>
+public sealed class BridgeChannelAuthEvent
+{
+    public required string ChannelId { get; init; }
+
+    /// <summary>Auth state: "qr_code", "connected", "disconnected", "error".</summary>
+    public required string State { get; init; }
+
+    /// <summary>State-specific data (QR string, error message, etc.).</summary>
+    public string? Data { get; init; }
+
+    /// <summary>Account identifier for multi-account channels.</summary>
+    public string? AccountId { get; init; }
+
+    /// <summary>Timestamp assigned when the gateway receives the auth event.</summary>
+    public DateTimeOffset UpdatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
 }
 
 public sealed class BridgeCommandExecuteRequest

@@ -448,4 +448,18 @@ public static class PluginDiscovery
 
         return null;
     }
+
+    public static bool TryResolveContainedPath(string rootPath, string relativePath, out string resolvedPath)
+    {
+        resolvedPath = Path.GetFullPath(Path.Combine(rootPath, relativePath));
+        var fullRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        if (string.Equals(resolvedPath, fullRoot, comparison))
+            return true;
+
+        return resolvedPath.StartsWith(fullRoot + Path.DirectorySeparatorChar, comparison);
+    }
 }
