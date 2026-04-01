@@ -13,8 +13,6 @@ internal sealed class OpenClawMcpResources
 
     public OpenClawMcpResources(IntegrationApiFacade facade) => _facade = facade;
 
-    // ── Static resources ──────────────────────────────────────────────────────
-
     [McpServerResource(UriTemplate = "openclaw://status", Name = "Gateway Status", MimeType = "application/json")]
     [Description("Current gateway runtime status snapshot.")]
     public string GetStatus()
@@ -63,8 +61,6 @@ internal sealed class OpenClawMcpResources
         => JsonSerializer.Serialize(
             _facade.GetOperatorAudit(new OperatorAuditQuery { Limit = 20 }),
             CoreJsonContext.Default.IntegrationOperatorAuditResponse);
-
-    // ── Template resources ────────────────────────────────────────────────────
 
     [McpServerResource(UriTemplate = "openclaw://sessions/{sessionId}", Name = "Session Detail", MimeType = "application/json")]
     [Description("Read a session detail snapshot by session ID.")]

@@ -49,10 +49,6 @@ internal static class ToolPathPolicy
 
         if (Directory.Exists(full))
         {
-            // Avoid resolving symlinks on a filesystem root (can throw on some hosts).
-            if (IsPathRoot(full))
-                return full;
-
             return ResolveDirectoryLinkOrSelf(full);
         }
 

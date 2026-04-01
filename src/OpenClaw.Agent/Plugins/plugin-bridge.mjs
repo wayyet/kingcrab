@@ -47,6 +47,9 @@ let transportMode = normalizeMode(process.env.OPENCLAW_BRIDGE_TRANSPORT_MODE ?? 
 /** @type {string | null} */
 let socketPath = process.env.OPENCLAW_BRIDGE_SOCKET_PATH ?? null;
 
+/** @type {string | null} */
+let socketAuthToken = process.env.OPENCLAW_BRIDGE_SOCKET_AUTH_TOKEN ?? null;
+
 /** @type {import("node:net").Socket | null} */
 let transportSocket = null;
 
@@ -89,6 +92,9 @@ function connectSocketTransport() {
   transportSocket.setEncoding("utf8");
 
   transportSocket.once("connect", () => {
+    if (socketAuthToken) {
+      transportSocket.write(`${JSON.stringify({ type: "bridge_auth", token: socketAuthToken })}\n`);
+    }
     resolveSocketReady();
     attachSocketReader(transportSocket);
   });
@@ -239,10 +245,16 @@ function createPluginApi(pluginId, pluginConfig, logger) {
         send: channelDef.send ?? channelDef.onMessage,
         start: channelDef.start,
         stop: channelDef.stop,
+        typing: channelDef.typing,
+        readReceipt: channelDef.readReceipt,
+        react: channelDef.react,
       });
       if (channelDef) {
         channelDef.receive = (msg) => {
           sendNotification("channel_message", { channelId: id, ...msg });
+        };
+        channelDef.emitAuthEvent = (evt) => {
+          sendNotification("channel_auth_event", { channelId: id, ...evt });
         };
       }
       logger.info(`Channel "${id}" registered`);
@@ -310,6 +322,7 @@ function createLogger(pluginId) {
 
 async function loadPlugin(entryPath) {
   const ext = entryPath.split(".").pop()?.toLowerCase();
+  const entryUrl = pathToFileURL(entryPath).href;
 
   if (ext === "ts") {
     const jitiPath = findJiti(entryPath);
@@ -321,8 +334,8 @@ async function loadPlugin(entryPath) {
 
     try {
       const { default: createJiti } = await import(pathToFileURL(jitiPath).href);
-      const jiti = createJiti(entryPath, { interopDefault: true });
-      return jiti(entryPath);
+      const jiti = createJiti(entryUrl, { interopDefault: true });
+      return jiti(entryUrl);
     } catch (e) {
       throw new Error(
         `Failed to load TypeScript plugin "${entryPath}" via jiti: ${e?.message ?? "unknown error"}. Ensure 'jiti' is installed and the plugin is valid.`
@@ -340,22 +353,8 @@ async function loadPlugin(entryPath) {
     }
   }
 
-  const url = pathToFileURL(entryPath).href;
-  const mod = await import(url);
-  return mod;
-}
-
-function resolvePluginExport(pluginExport) {
-  if (!pluginExport) return null;
-  if (typeof pluginExport === "function") return pluginExport;
-  if (typeof pluginExport.register === "function") return pluginExport;
-
-  const candidate = pluginExport.default;
-  if (!candidate) return pluginExport;
-  if (typeof candidate === "function") return candidate;
-  if (typeof candidate.register === "function") return candidate;
-
-  return pluginExport;
+  const mod = await import(entryUrl);
+  return mod.default ?? mod;
 }
 
 function findJiti(entryPath) {
@@ -402,7 +401,7 @@ async function handleRequest(req) {
       resetState();
 
       try {
-        const pluginExport = resolvePluginExport(await loadPlugin(entryPath));
+        const pluginExport = await loadPlugin(entryPath);
         const api = createPluginApi(pluginId, config, logger);
 
         if (typeof pluginExport === "function") {
@@ -513,21 +512,69 @@ async function handleRequest(req) {
       const channelId = getParam(req.params, "channelId");
       const ch = registeredChannels.get(channelId);
       if (!ch) throw new Error(`Unknown channel: ${channelId}`);
+      let startResult;
       if (typeof ch.start === "function") {
-        await ch.start();
+        startResult = await ch.start();
       }
       startedChannels.add(channelId);
-      return { ok: true };
+      const result = { ok: true };
+      if (startResult && typeof startResult === "object" && startResult.selfId) {
+        result.selfId = startResult.selfId;
+      }
+      return result;
     }
 
     case "channel_send": {
       const channelId = getParam(req.params, "channelId");
       const recipientId = getParam(req.params, "recipientId");
       const text = getParam(req.params, "text");
+      const sessionId = req.params?.sessionId ?? null;
+      const replyToMessageId = req.params?.replyToMessageId ?? null;
+      const subject = req.params?.subject ?? null;
+      const attachments = req.params?.attachments ?? null;
       const ch = registeredChannels.get(channelId);
       if (!ch) throw new Error(`Unknown channel: ${channelId}`);
       if (typeof ch.send === "function") {
-        await ch.send({ channelId, recipientId, text });
+        await ch.send({ channelId, recipientId, text, sessionId, replyToMessageId, subject, attachments });
+      }
+      return { ok: true };
+    }
+
+    case "channel_typing": {
+      const channelId = getParam(req.params, "channelId");
+      const recipientId = getParam(req.params, "recipientId");
+      const isTyping = req.params?.isTyping ?? true;
+      const ch = registeredChannels.get(channelId);
+      if (!ch) throw new Error(`Unknown channel: ${channelId}`);
+      if (typeof ch.typing === "function") {
+        await ch.typing({ channelId, recipientId, isTyping });
+      }
+      return { ok: true };
+    }
+
+    case "channel_read_receipt": {
+      const channelId = getParam(req.params, "channelId");
+      const messageId = getParam(req.params, "messageId");
+      const remoteJid = req.params?.remoteJid ?? null;
+      const participant = req.params?.participant ?? null;
+      const ch = registeredChannels.get(channelId);
+      if (!ch) throw new Error(`Unknown channel: ${channelId}`);
+      if (typeof ch.readReceipt === "function") {
+        await ch.readReceipt({ channelId, messageId, remoteJid, participant });
+      }
+      return { ok: true };
+    }
+
+    case "channel_react": {
+      const channelId = getParam(req.params, "channelId");
+      const messageId = getParam(req.params, "messageId");
+      const emoji = getParam(req.params, "emoji");
+      const remoteJid = req.params?.remoteJid ?? null;
+      const participant = req.params?.participant ?? null;
+      const ch = registeredChannels.get(channelId);
+      if (!ch) throw new Error(`Unknown channel: ${channelId}`);
+      if (typeof ch.react === "function") {
+        await ch.react({ channelId, messageId, emoji, remoteJid, participant });
       }
       return { ok: true };
     }

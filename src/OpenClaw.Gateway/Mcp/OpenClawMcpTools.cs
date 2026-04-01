@@ -18,25 +18,21 @@ internal sealed class OpenClawMcpTools
 
     public OpenClawMcpTools(IntegrationApiFacade facade) => _facade = facade;
 
-    // ── Dashboard & Status ────────────────────────────────────────────────────
-
-    [McpServerTool(Name = "openclaw.get_dashboard"),
+    [McpServerTool(Name = "openclaw.get_dashboard", ReadOnly = true),
      Description("Get the aggregated operator dashboard snapshot.")]
     public async Task<string> GetDashboard(CancellationToken ct)
         => JsonSerializer.Serialize(
             await _facade.GetDashboardAsync(ct),
             CoreJsonContext.Default.IntegrationDashboardResponse);
 
-    [McpServerTool(Name = "openclaw.get_status"),
+    [McpServerTool(Name = "openclaw.get_status", ReadOnly = true),
      Description("Get the current OpenClaw gateway runtime status.")]
     public string GetStatus()
         => JsonSerializer.Serialize(
             _facade.BuildStatusResponse(),
             CoreJsonContext.Default.IntegrationStatusResponse);
 
-    // ── Approvals ─────────────────────────────────────────────────────────────
-
-    [McpServerTool(Name = "openclaw.list_approvals"),
+    [McpServerTool(Name = "openclaw.list_approvals", ReadOnly = true),
      Description("List pending tool approvals with optional channel or sender filters.")]
     public string ListApprovals(
         [Description("Optional channel ID filter.")] string? channelId = null,
@@ -45,7 +41,7 @@ internal sealed class OpenClawMcpTools
             _facade.GetApprovals(channelId, senderId),
             CoreJsonContext.Default.IntegrationApprovalsResponse);
 
-    [McpServerTool(Name = "openclaw.get_approval_history"),
+    [McpServerTool(Name = "openclaw.get_approval_history", ReadOnly = true),
      Description("Get recent approval history entries.")]
     public string GetApprovalHistory(
         [Description("Maximum number of entries to return.")] int? limit = null,
@@ -62,9 +58,7 @@ internal sealed class OpenClawMcpTools
             }),
             CoreJsonContext.Default.IntegrationApprovalHistoryResponse);
 
-    // ── Providers & Plugins ───────────────────────────────────────────────────
-
-    [McpServerTool(Name = "openclaw.get_providers"),
+    [McpServerTool(Name = "openclaw.get_providers", ReadOnly = true),
      Description("Get provider routing, usage, policies, and recent turns.")]
     public string GetProviders(
         [Description("Maximum number of recent turns to include.")] int? recentTurnsLimit = null)
@@ -72,16 +66,14 @@ internal sealed class OpenClawMcpTools
             _facade.GetProviders(recentTurnsLimit ?? 20),
             CoreJsonContext.Default.IntegrationProvidersResponse);
 
-    [McpServerTool(Name = "openclaw.get_plugins"),
+    [McpServerTool(Name = "openclaw.get_plugins", ReadOnly = true),
      Description("Get the current plugin health listing.")]
     public string GetPlugins()
         => JsonSerializer.Serialize(
             _facade.GetPlugins(),
             CoreJsonContext.Default.IntegrationPluginsResponse);
 
-    // ── Operator Audit ────────────────────────────────────────────────────────
-
-    [McpServerTool(Name = "openclaw.query_operator_audit"),
+    [McpServerTool(Name = "openclaw.query_operator_audit", ReadOnly = true),
      Description("Query recent operator audit entries.")]
     public string QueryOperatorAudit(
         [Description("Maximum number of entries to return.")] int? limit = null,
@@ -98,9 +90,7 @@ internal sealed class OpenClawMcpTools
             }),
             CoreJsonContext.Default.IntegrationOperatorAuditResponse);
 
-    // ── Sessions ──────────────────────────────────────────────────────────────
-
-    [McpServerTool(Name = "openclaw.list_sessions"),
+    [McpServerTool(Name = "openclaw.list_sessions", ReadOnly = true),
      Description("List OpenClaw sessions with optional filters.")]
     public async Task<string> ListSessions(
         [Description("Page number (1-based).")] int? page = null,
@@ -122,7 +112,7 @@ internal sealed class OpenClawMcpTools
                 ct),
             CoreJsonContext.Default.IntegrationSessionsResponse);
 
-    [McpServerTool(Name = "openclaw.get_session"),
+    [McpServerTool(Name = "openclaw.get_session", ReadOnly = true),
      Description("Get a session by session ID.")]
     public async Task<string> GetSession(
         [Description("The session ID.")] string sessionId,
@@ -135,7 +125,7 @@ internal sealed class OpenClawMcpTools
         return JsonSerializer.Serialize(session, CoreJsonContext.Default.IntegrationSessionDetailResponse);
     }
 
-    [McpServerTool(Name = "openclaw.get_session_timeline"),
+    [McpServerTool(Name = "openclaw.get_session_timeline", ReadOnly = true),
      Description("Get the runtime timeline for a session.")]
     public async Task<string> GetSessionTimeline(
         [Description("The session ID.")] string sessionId,
@@ -149,9 +139,7 @@ internal sealed class OpenClawMcpTools
         return JsonSerializer.Serialize(timeline, CoreJsonContext.Default.IntegrationSessionTimelineResponse);
     }
 
-    // ── Runtime Events ────────────────────────────────────────────────────────
-
-    [McpServerTool(Name = "openclaw.query_runtime_events"),
+    [McpServerTool(Name = "openclaw.query_runtime_events", ReadOnly = true),
      Description("Query recent runtime events.")]
     public string QueryRuntimeEvents(
         [Description("Maximum number of events to return.")] int? limit = null,
@@ -171,8 +159,6 @@ internal sealed class OpenClawMcpTools
                 Action = action
             }),
             CoreJsonContext.Default.IntegrationRuntimeEventsResponse);
-
-    // ── Messaging ─────────────────────────────────────────────────────────────
 
     [McpServerTool(Name = "openclaw.send_message"),
      Description("Queue a message into the OpenClaw inbound pipeline.")]

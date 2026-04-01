@@ -28,7 +28,6 @@ public sealed class AgentRuntimeFactoryContext
     public required IReadOnlyList<string> ApprovalRequiredTools { get; init; }
     public IToolSandbox? ToolSandbox { get; init; }
     public ToolUsageTracker? ToolUsageTracker { get; init; }
-
 }
 
 public interface IAgentRuntimeFactory

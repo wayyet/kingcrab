@@ -1,5 +1,6 @@
 using OpenClaw.Core.Security;
 using OpenClaw.Core.Models;
+using OpenClaw.Core.Plugins;
 
 namespace OpenClaw.Core.Validation;
 
@@ -165,6 +166,46 @@ public static class ConfigValidator
         var runtimeOrchestrator = RuntimeOrchestrator.Normalize(config.Runtime.Orchestrator);
         if (runtimeOrchestrator is not RuntimeOrchestrator.Maf)
             errors.Add("Runtime.Orchestrator must be 'maf'.");
+        ValidateNotionConfig(config.Plugins.Native.Notion, errors);
+        // MCP plugin servers
+        if (config.Plugins.Mcp.Enabled)
+        {
+            if (config.Plugins.Mcp.Servers is null)
+            {
+                errors.Add("Plugins.Mcp.Servers must be provided when MCP is enabled.");
+            }
+            else
+            {
+                foreach (var (serverId, server) in config.Plugins.Mcp.Servers)
+                {
+                    if (!server.Enabled)
+                        continue;
+
+                    var transport = server.NormalizeTransport();
+                    if (transport is not ("stdio" or "http"))
+                    {
+                        errors.Add($"Plugins.Mcp.Servers.{serverId}.Transport must be 'stdio' or 'http'.");
+                        continue;
+                    }
+
+                    if (server.StartupTimeoutSeconds < 1)
+                        errors.Add($"Plugins.Mcp.Servers.{serverId}.StartupTimeoutSeconds must be >= 1 (got {server.StartupTimeoutSeconds}).");
+                    if (server.RequestTimeoutSeconds < 1)
+                        errors.Add($"Plugins.Mcp.Servers.{serverId}.RequestTimeoutSeconds must be >= 1 (got {server.RequestTimeoutSeconds}).");
+
+                    if (transport == "stdio")
+                    {
+                        if (string.IsNullOrWhiteSpace(server.Command))
+                            errors.Add($"Plugins.Mcp.Servers.{serverId}.Command must be set when Transport='stdio'.");
+                    }
+                    else if (!Uri.TryCreate(server.Url, UriKind.Absolute, out var url) ||
+                             (url.Scheme != Uri.UriSchemeHttp && url.Scheme != Uri.UriSchemeHttps))
+                    {
+                        errors.Add($"Plugins.Mcp.Servers.{serverId}.Url must be an absolute http(s) URL when Transport='http'.");
+                    }
+                }
+            }
+        }
 
         // Channels
         if (config.Channels.Sms.Twilio.MaxInboundChars < 1)
@@ -181,12 +222,61 @@ public static class ConfigValidator
             errors.Add($"Channels.WhatsApp.MaxInboundChars must be >= 1 (got {config.Channels.WhatsApp.MaxInboundChars}).");
         if (config.Channels.WhatsApp.MaxRequestBytes < 1024)
             errors.Add($"Channels.WhatsApp.MaxRequestBytes must be >= 1024 (got {config.Channels.WhatsApp.MaxRequestBytes}).");
+        if (config.Channels.WhatsApp.Type is not ("official" or "bridge" or "first_party_worker"))
+            errors.Add("Channels.WhatsApp.Type must be 'official', 'bridge', or 'first_party_worker'.");
         if (config.Channels.WhatsApp.ValidateSignature)
         {
             var appSecret = SecretResolver.Resolve(config.Channels.WhatsApp.WebhookAppSecretRef)
                 ?? config.Channels.WhatsApp.WebhookAppSecret;
             if (string.IsNullOrWhiteSpace(appSecret))
                 errors.Add("Channels.WhatsApp.ValidateSignature is true but WebhookAppSecret/WebhookAppSecretRef is not configured.");
+        }
+        if (string.Equals(config.Channels.WhatsApp.Type, "first_party_worker", StringComparison.OrdinalIgnoreCase))
+        {
+            var worker = config.Channels.WhatsApp.FirstPartyWorker;
+            if (worker.Driver is not ("baileys_csharp" or "simulated"))
+                errors.Add("Channels.WhatsApp.FirstPartyWorker.Driver must be 'baileys_csharp' or 'simulated'.");
+            if (worker.Accounts.Count == 0)
+                errors.Add("Channels.WhatsApp.FirstPartyWorker.Accounts must contain at least one account.");
+
+            foreach (var account in worker.Accounts)
+            {
+                if (string.IsNullOrWhiteSpace(account.AccountId))
+                    errors.Add("Channels.WhatsApp.FirstPartyWorker.Accounts[].AccountId must be set.");
+                if (string.IsNullOrWhiteSpace(account.SessionPath))
+                    errors.Add($"Channels.WhatsApp.FirstPartyWorker account '{account.AccountId}' must set SessionPath.");
+                if (account.PairingMode is not ("qr" or "pairing_code"))
+                    errors.Add($"Channels.WhatsApp.FirstPartyWorker account '{account.AccountId}' PairingMode must be 'qr' or 'pairing_code'.");
+                if (string.Equals(account.PairingMode, "pairing_code", StringComparison.OrdinalIgnoreCase) &&
+                    string.IsNullOrWhiteSpace(account.PhoneNumber))
+                {
+                    errors.Add($"Channels.WhatsApp.FirstPartyWorker account '{account.AccountId}' requires PhoneNumber for pairing_code mode.");
+                }
+            }
+        }
+        if (config.Channels.Teams.MaxInboundChars < 1)
+            errors.Add($"Channels.Teams.MaxInboundChars must be >= 1 (got {config.Channels.Teams.MaxInboundChars}).");
+        if (config.Channels.Teams.MaxRequestBytes < 1024)
+            errors.Add($"Channels.Teams.MaxRequestBytes must be >= 1024 (got {config.Channels.Teams.MaxRequestBytes}).");
+        if (config.Channels.Teams.GroupPolicy is not ("open" or "allowlist" or "disabled"))
+            errors.Add("Channels.Teams.GroupPolicy must be 'open', 'allowlist', or 'disabled'.");
+        if (config.Channels.Teams.ReplyStyle is not ("thread" or "top-level"))
+            errors.Add("Channels.Teams.ReplyStyle must be 'thread' or 'top-level'.");
+        if (config.Channels.Teams.ChunkMode is not ("length" or "newline"))
+            errors.Add("Channels.Teams.ChunkMode must be 'length' or 'newline'.");
+        if (config.Channels.Teams.TextChunkLimit < 1)
+            errors.Add($"Channels.Teams.TextChunkLimit must be >= 1 (got {config.Channels.Teams.TextChunkLimit}).");
+        if (config.Channels.Teams.Enabled)
+        {
+            var teamsAppId = SecretResolver.Resolve(config.Channels.Teams.AppIdRef) ?? config.Channels.Teams.AppId;
+            var teamsAppPassword = SecretResolver.Resolve(config.Channels.Teams.AppPasswordRef) ?? config.Channels.Teams.AppPassword;
+            var teamsTenantId = SecretResolver.Resolve(config.Channels.Teams.TenantIdRef) ?? config.Channels.Teams.TenantId;
+            if (string.IsNullOrWhiteSpace(teamsAppId))
+                errors.Add("Channels.Teams.AppId/AppIdRef must be configured when Teams is enabled.");
+            if (string.IsNullOrWhiteSpace(teamsAppPassword))
+                errors.Add("Channels.Teams.AppPassword/AppPasswordRef must be configured when Teams is enabled.");
+            if (string.IsNullOrWhiteSpace(teamsTenantId))
+                errors.Add("Channels.Teams.TenantId/TenantIdRef must be configured when Teams is enabled.");
         }
         if (!config.Channels.AllowlistSemantics.Equals("legacy", StringComparison.OrdinalIgnoreCase) &&
             !config.Channels.AllowlistSemantics.Equals("strict", StringComparison.OrdinalIgnoreCase))
@@ -196,6 +286,7 @@ public static class ConfigValidator
         ValidateDmPolicy("Channels.Sms.DmPolicy", config.Channels.Sms.DmPolicy, errors);
         ValidateDmPolicy("Channels.Telegram.DmPolicy", config.Channels.Telegram.DmPolicy, errors);
         ValidateDmPolicy("Channels.WhatsApp.DmPolicy", config.Channels.WhatsApp.DmPolicy, errors);
+        ValidateDmPolicy("Channels.Teams.DmPolicy", config.Channels.Teams.DmPolicy, errors);
 
         // Cron
         if (config.Cron.Enabled)
@@ -234,6 +325,35 @@ public static class ConfigValidator
         }
 
         return errors;
+    }
+
+    private static void ValidateNotionConfig(NotionConfig config, List<string> errors)
+    {
+        if (!config.Enabled)
+            return;
+
+        if (string.IsNullOrWhiteSpace(SecretResolver.Resolve(config.ApiKeyRef)))
+            errors.Add("Plugins.Native.Notion.ApiKeyRef must resolve to a token when Notion is enabled.");
+
+        if (!Uri.TryCreate(config.BaseUrl?.TrimEnd('/'), UriKind.Absolute, out _))
+            errors.Add("Plugins.Native.Notion.BaseUrl must be a valid absolute URL when Notion is enabled.");
+
+        if (string.IsNullOrWhiteSpace(config.ApiVersion))
+            errors.Add("Plugins.Native.Notion.ApiVersion must be set when Notion is enabled.");
+
+        if (config.MaxSearchResults < 1)
+            errors.Add($"Plugins.Native.Notion.MaxSearchResults must be >= 1 (got {config.MaxSearchResults}).");
+
+        var hasAnyTarget =
+            !string.IsNullOrWhiteSpace(config.DefaultPageId) ||
+            !string.IsNullOrWhiteSpace(config.DefaultDatabaseId) ||
+            config.AllowedPageIds.Any(id => !string.IsNullOrWhiteSpace(id)) ||
+            config.AllowedDatabaseIds.Any(id => !string.IsNullOrWhiteSpace(id));
+
+        if (!hasAnyTarget)
+        {
+            errors.Add("Plugins.Native.Notion requires at least one allowed/default page or database id when enabled.");
+        }
     }
 
     private static bool IsValidCronExpression(string expression)

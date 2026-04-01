@@ -2,6 +2,10 @@ using System.Buffers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
+using Microsoft.Extensions.Logging.Abstractions;
+using OpenClaw.Agent;
+using OpenClaw.Agent.Plugins;
+using OpenClaw.Channels;
 using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Models;
 using OpenClaw.Core.Pipeline;
@@ -10,6 +14,7 @@ using OpenClaw.Core.Security;
 using OpenClaw.Gateway;
 using OpenClaw.Gateway.Bootstrap;
 using OpenClaw.Gateway.Composition;
+using QRCoder;
 
 namespace OpenClaw.Gateway.Endpoints;
 
@@ -24,6 +29,7 @@ internal static class AdminEndpoints
     {
         var browserSessions = app.Services.GetRequiredService<BrowserSessionAuthService>();
         var adminSettings = app.Services.GetRequiredService<AdminSettingsService>();
+        var pluginAdminSettings = app.Services.GetRequiredService<PluginAdminSettingsService>();
         var heartbeat = app.Services.GetRequiredService<HeartbeatService>();
         var sessionAdminStore = (ISessionAdminStore)app.Services.GetRequiredService<IMemoryStore>();
         var operations = runtime.Operations;
@@ -168,6 +174,68 @@ internal static class AdminEndpoints
             };
 
             return Results.Json(response, CoreJsonContext.Default.AdminSummaryResponse);
+        });
+
+        app.MapGet("/admin/posture", (HttpContext ctx) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: false, endpointScope: "admin.posture");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+
+            return Results.Json(SecurityPostureBuilder.Build(startup, runtime), CoreJsonContext.Default.SecurityPostureResponse);
+        });
+
+        app.MapPost("/admin/approvals/simulate", async (HttpContext ctx) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: true, endpointScope: "admin.approvals.simulate");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+
+            var requestPayload = await ReadJsonBodyAsync(ctx, CoreJsonContext.Default.ApprovalSimulationRequest);
+            if (requestPayload.Failure is not null)
+                return requestPayload.Failure;
+
+            var request = requestPayload.Value;
+            if (request is null || string.IsNullOrWhiteSpace(request.ToolName))
+                return Results.BadRequest(new MutationResponse { Success = false, Error = "toolName is required." });
+
+            var response = await SimulateApprovalAsync(startup, runtime, request, ctx.RequestAborted);
+            return Results.Json(response, CoreJsonContext.Default.ApprovalSimulationResponse);
+        });
+
+        app.MapGet("/admin/incident/export", async (HttpContext ctx, int approvalLimit = 100, int eventLimit = 200) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: false, endpointScope: "admin.incident.export");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+
+            runtime.RuntimeMetrics.SetActiveSessions(runtime.SessionManager.ActiveCount);
+            runtime.RuntimeMetrics.SetCircuitBreakerState((int)runtime.AgentRuntime.CircuitBreakerState);
+            var posture = SecurityPostureBuilder.Build(startup, runtime);
+            var retentionStatus = await runtime.RetentionCoordinator.GetStatusAsync(ctx.RequestAborted);
+
+            var response = new IncidentBundleResponse
+            {
+                GeneratedAtUtc = DateTimeOffset.UtcNow,
+                Posture = posture,
+                Metrics = runtime.RuntimeMetrics.Snapshot(),
+                Retention = retentionStatus,
+                ApprovalHistory = runtime.ApprovalAuditStore.Query(new ApprovalHistoryQuery { Limit = approvalLimit })
+                    .Select(RedactApprovalHistory)
+                    .ToArray(),
+                ProviderPolicies = operations.ProviderPolicies.List(),
+                ProviderRoutes = operations.LlmExecution.SnapshotRoutes(),
+                ProviderUsage = runtime.ProviderUsage.Snapshot(),
+                RuntimeEvents = operations.RuntimeEvents.Query(new RuntimeEventQuery { Limit = eventLimit })
+                    .Select(RedactRuntimeEvent)
+                    .ToArray(),
+                WebhookDeadLetters = operations.WebhookDeliveries.List()
+                    .Select(RedactDeadLetter)
+                    .ToArray(),
+                PluginHealth = operations.PluginHealth.ListSnapshots()
+            };
+
+            return Results.Json(response, CoreJsonContext.Default.IncidentBundleResponse);
         });
 
         app.MapGet("/admin/sessions", async (HttpContext ctx, int page = 1, int pageSize = 25, string? search = null, string? channelId = null, string? senderId = null, string? state = null, DateTimeOffset? fromUtc = null, DateTimeOffset? toUtc = null, bool? starred = null, string? tag = null) =>
@@ -556,12 +624,20 @@ internal static class AdminEndpoints
                 return authResult.Failure;
             var auth = authResult.Authorization!;
 
-            var before = operations.ProviderPolicies.List().FirstOrDefault(item => string.Equals(item.Id, id, StringComparison.Ordinal));
-            var removed = operations.ProviderPolicies.Delete(id);
-            RecordOperatorAudit(ctx, operations, auth, "provider_policy_delete", id, removed ? $"Deleted provider policy '{id}'." : $"Provider policy '{id}' was not found.", removed, before, after: null);
-            return removed
-                ? Results.Json(new MutationResponse { Success = true, Message = "Provider policy deleted." }, CoreJsonContext.Default.MutationResponse)
-                : Results.NotFound(new MutationResponse { Success = false, Error = "Provider policy not found." });
+            try
+            {
+                var before = operations.ProviderPolicies.List().FirstOrDefault(item => string.Equals(item.Id, id, StringComparison.Ordinal));
+                var removed = operations.ProviderPolicies.Delete(id);
+                RecordOperatorAudit(ctx, operations, auth, "provider_policy_delete", id, removed ? $"Deleted provider policy '{id}'." : $"Provider policy '{id}' was not found.", removed, before, after: null);
+                return removed
+                    ? Results.Json(new MutationResponse { Success = true, Message = "Provider policy deleted." }, CoreJsonContext.Default.MutationResponse)
+                    : Results.NotFound(new MutationResponse { Success = false, Error = "Provider policy not found." });
+            }
+            catch (Exception ex)
+            {
+                RecordOperatorAudit(ctx, operations, auth, "provider_policy_delete", id, ex.Message, success: false, before: null, after: null);
+                return Results.Json(new MutationResponse { Success = false, Error = ex.Message }, CoreJsonContext.Default.MutationResponse, statusCode: StatusCodes.Status500InternalServerError);
+            }
         });
 
         app.MapPost("/admin/providers/{providerId}/circuit/reset", (HttpContext ctx, string providerId) =>
@@ -644,10 +720,18 @@ internal static class AdminEndpoints
             if (request is null)
                 return Results.BadRequest(new OperationStatusResponse { Success = false, Error = "Session metadata payload is required." });
 
-            var before = operations.SessionMetadata.Get(id);
-            var updated = operations.SessionMetadata.Set(id, request);
-            RecordOperatorAudit(ctx, operations, auth, "session_metadata_update", id, $"Updated session metadata for '{id}'.", success: true, before, updated);
-            return Results.Json(updated, CoreJsonContext.Default.SessionMetadataSnapshot);
+            try
+            {
+                var before = operations.SessionMetadata.Get(id);
+                var updated = operations.SessionMetadata.Set(id, request);
+                RecordOperatorAudit(ctx, operations, auth, "session_metadata_update", id, $"Updated session metadata for '{id}'.", success: true, before, updated);
+                return Results.Json(updated, CoreJsonContext.Default.SessionMetadataSnapshot);
+            }
+            catch (Exception ex)
+            {
+                RecordOperatorAudit(ctx, operations, auth, "session_metadata_update", id, ex.Message, success: false, before: null, after: request);
+                return Results.Json(new MutationResponse { Success = false, Error = ex.Message }, CoreJsonContext.Default.MutationResponse, statusCode: StatusCodes.Status500InternalServerError);
+            }
         });
 
         app.MapGet("/admin/sessions/export", async (HttpContext ctx, string? search = null, string? channelId = null, string? senderId = null, string? state = null, DateTimeOffset? fromUtc = null, DateTimeOffset? toUtc = null, bool? starred = null, string? tag = null) =>
@@ -807,23 +891,31 @@ internal static class AdminEndpoints
             if (request is null)
                 return Results.BadRequest(new OperationStatusResponse { Success = false, Error = "Approval policy payload is required." });
 
-            var saved = operations.ApprovalGrants.AddOrUpdate(new ToolApprovalGrant
+            try
             {
-                Id = string.IsNullOrWhiteSpace(request.Id) ? $"apg_{Guid.NewGuid():N}"[..20] : request.Id,
-                Scope = request.Scope,
-                ChannelId = request.ChannelId,
-                SenderId = request.SenderId,
-                SessionId = request.SessionId,
-                ToolName = request.ToolName,
-                CreatedAtUtc = request.CreatedAtUtc == default ? DateTimeOffset.UtcNow : request.CreatedAtUtc,
-                ExpiresAtUtc = request.ExpiresAtUtc,
-                GrantedBy = string.IsNullOrWhiteSpace(request.GrantedBy) ? EndpointHelpers.GetOperatorActorId(ctx, auth) : request.GrantedBy,
-                GrantSource = string.IsNullOrWhiteSpace(request.GrantSource) ? auth.AuthMode : request.GrantSource,
-                RemainingUses = Math.Max(1, request.RemainingUses)
-            });
+                var saved = operations.ApprovalGrants.AddOrUpdate(new ToolApprovalGrant
+                {
+                    Id = string.IsNullOrWhiteSpace(request.Id) ? $"apg_{Guid.NewGuid():N}"[..20] : request.Id,
+                    Scope = request.Scope,
+                    ChannelId = request.ChannelId,
+                    SenderId = request.SenderId,
+                    SessionId = request.SessionId,
+                    ToolName = request.ToolName,
+                    CreatedAtUtc = request.CreatedAtUtc == default ? DateTimeOffset.UtcNow : request.CreatedAtUtc,
+                    ExpiresAtUtc = request.ExpiresAtUtc,
+                    GrantedBy = string.IsNullOrWhiteSpace(request.GrantedBy) ? EndpointHelpers.GetOperatorActorId(ctx, auth) : request.GrantedBy,
+                    GrantSource = string.IsNullOrWhiteSpace(request.GrantSource) ? auth.AuthMode : request.GrantSource,
+                    RemainingUses = Math.Max(1, request.RemainingUses)
+                });
 
-            RecordOperatorAudit(ctx, operations, auth, "approval_grant_upsert", saved.Id, $"Updated tool approval grant '{saved.Id}'.", success: true, before: null, after: saved);
-            return Results.Json(saved, CoreJsonContext.Default.ToolApprovalGrant);
+                RecordOperatorAudit(ctx, operations, auth, "approval_grant_upsert", saved.Id, $"Updated tool approval grant '{saved.Id}'.", success: true, before: null, after: saved);
+                return Results.Json(saved, CoreJsonContext.Default.ToolApprovalGrant);
+            }
+            catch (Exception ex)
+            {
+                RecordOperatorAudit(ctx, operations, auth, "approval_grant_upsert", request.Id ?? "new", ex.Message, success: false, before: null, after: request);
+                return Results.Json(new MutationResponse { Success = false, Error = ex.Message }, CoreJsonContext.Default.MutationResponse, statusCode: StatusCodes.Status500InternalServerError);
+            }
         });
 
         app.MapDelete("/tools/approval-policies/{id}", (HttpContext ctx, string id) =>
@@ -833,11 +925,19 @@ internal static class AdminEndpoints
                 return authResult.Failure;
             var auth = authResult.Authorization!;
 
-            var removed = operations.ApprovalGrants.Delete(id);
-            RecordOperatorAudit(ctx, operations, auth, "approval_grant_delete", id, removed ? $"Deleted tool approval grant '{id}'." : $"Tool approval grant '{id}' was not found.", removed, before: null, after: null);
-            return removed
-                ? Results.Json(new MutationResponse { Success = true, Message = "Approval grant deleted." }, CoreJsonContext.Default.MutationResponse)
-                : Results.NotFound(new MutationResponse { Success = false, Error = "Approval grant not found." });
+            try
+            {
+                var removed = operations.ApprovalGrants.Delete(id);
+                RecordOperatorAudit(ctx, operations, auth, "approval_grant_delete", id, removed ? $"Deleted tool approval grant '{id}'." : $"Tool approval grant '{id}' was not found.", removed, before: null, after: null);
+                return removed
+                    ? Results.Json(new MutationResponse { Success = true, Message = "Approval grant deleted." }, CoreJsonContext.Default.MutationResponse)
+                    : Results.NotFound(new MutationResponse { Success = false, Error = "Approval grant not found." });
+            }
+            catch (Exception ex)
+            {
+                RecordOperatorAudit(ctx, operations, auth, "approval_grant_delete", id, ex.Message, success: false, before: null, after: null);
+                return Results.Json(new MutationResponse { Success = false, Error = ex.Message }, CoreJsonContext.Default.MutationResponse, statusCode: StatusCodes.Status500InternalServerError);
+            }
         });
 
         app.MapGet("/admin/audit", (HttpContext ctx, int limit = 100, string? actorId = null, string? actionType = null, string? targetId = null) =>
@@ -929,9 +1029,17 @@ internal static class AdminEndpoints
             if (request is null)
                 return Results.BadRequest(new OperationStatusResponse { Success = false, Error = "Rate-limit policy payload is required." });
 
-            var saved = operations.ActorRateLimits.AddOrUpdate(request);
-            RecordOperatorAudit(ctx, operations, auth, "rate_limit_policy_upsert", saved.Id, $"Updated rate-limit policy '{saved.Id}'.", success: true, before: null, after: saved);
-            return Results.Json(saved, CoreJsonContext.Default.ActorRateLimitPolicy);
+            try
+            {
+                var saved = operations.ActorRateLimits.AddOrUpdate(request);
+                RecordOperatorAudit(ctx, operations, auth, "rate_limit_policy_upsert", saved.Id, $"Updated rate-limit policy '{saved.Id}'.", success: true, before: null, after: saved);
+                return Results.Json(saved, CoreJsonContext.Default.ActorRateLimitPolicy);
+            }
+            catch (Exception ex)
+            {
+                RecordOperatorAudit(ctx, operations, auth, "rate_limit_policy_upsert", request.Id ?? "new", ex.Message, success: false, before: null, after: request);
+                return Results.Json(new MutationResponse { Success = false, Error = ex.Message }, CoreJsonContext.Default.MutationResponse, statusCode: StatusCodes.Status500InternalServerError);
+            }
         });
 
         app.MapDelete("/admin/rate-limits/{id}", (HttpContext ctx, string id) =>
@@ -941,11 +1049,272 @@ internal static class AdminEndpoints
                 return authResult.Failure;
             var auth = authResult.Authorization!;
 
-            var removed = operations.ActorRateLimits.Delete(id);
-            RecordOperatorAudit(ctx, operations, auth, "rate_limit_policy_delete", id, removed ? $"Deleted rate-limit policy '{id}'." : $"Rate-limit policy '{id}' was not found.", removed, before: null, after: null);
-            return removed
-                ? Results.Json(new MutationResponse { Success = true, Message = "Rate-limit policy deleted." }, CoreJsonContext.Default.MutationResponse)
-                : Results.NotFound(new MutationResponse { Success = false, Error = "Rate-limit policy not found." });
+            try
+            {
+                var removed = operations.ActorRateLimits.Delete(id);
+                RecordOperatorAudit(ctx, operations, auth, "rate_limit_policy_delete", id, removed ? $"Deleted rate-limit policy '{id}'." : $"Rate-limit policy '{id}' was not found.", removed, before: null, after: null);
+                return removed
+                    ? Results.Json(new MutationResponse { Success = true, Message = "Rate-limit policy deleted." }, CoreJsonContext.Default.MutationResponse)
+                    : Results.NotFound(new MutationResponse { Success = false, Error = "Rate-limit policy not found." });
+            }
+            catch (Exception ex)
+            {
+                RecordOperatorAudit(ctx, operations, auth, "rate_limit_policy_delete", id, ex.Message, success: false, before: null, after: null);
+                return Results.Json(new MutationResponse { Success = false, Error = ex.Message }, CoreJsonContext.Default.MutationResponse, statusCode: StatusCodes.Status500InternalServerError);
+            }
+        });
+
+        // ── Channel Auth Events ──────────────────────────────────────
+        var authEventStore = runtime.ChannelAuthEvents;
+
+        app.MapGet("/admin/channels/auth", (HttpContext ctx) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: false, endpointScope: "admin.channels.auth");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+
+            return Results.Json(new ChannelAuthStatusResponse
+            {
+                Items = authEventStore.GetAll().Select(MapChannelAuthStatusItem).ToArray()
+            }, CoreJsonContext.Default.ChannelAuthStatusResponse);
+        });
+
+        app.MapGet("/admin/channels/{channelId}/auth", (HttpContext ctx, string channelId, string? accountId) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: false, endpointScope: "admin.channels.auth");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+
+            var items = accountId is not null
+                ? authEventStore.GetLatest(channelId, accountId) is { } evt ? [MapChannelAuthStatusItem(evt)] : []
+                : authEventStore.GetAll(channelId).Select(MapChannelAuthStatusItem).ToArray();
+            if (items.Length == 0)
+                return Results.NotFound(new MutationResponse { Success = false, Error = "No auth event recorded for this channel." });
+
+            return Results.Json(new ChannelAuthStatusResponse
+            {
+                Items = items
+            }, CoreJsonContext.Default.ChannelAuthStatusResponse);
+        });
+
+        app.MapGet("/admin/channels/{channelId}/auth/stream", async (HttpContext ctx, string channelId, string? accountId) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: false, endpointScope: "admin.channels.auth");
+            if (authResult.Failure is not null)
+            {
+                ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                return;
+            }
+
+            ctx.Response.ContentType = "text/event-stream";
+            ctx.Response.Headers.CacheControl = "no-cache";
+            ctx.Response.Headers.Connection = "keep-alive";
+
+            using var subscription = authEventStore.Subscribe();
+            var ct = ctx.RequestAborted;
+
+            // Send current state as first event
+            var currentItems = accountId is not null
+                ? authEventStore.GetLatest(channelId, accountId) is { } currentEvt ? [currentEvt] : []
+                : authEventStore.GetAll(channelId);
+            foreach (var current in currentItems)
+            {
+                var json = JsonSerializer.Serialize(MapChannelAuthStatusItem(current), CoreJsonContext.Default.ChannelAuthStatusItem);
+                await ctx.Response.WriteAsync($"data: {json}\n\n", ct);
+                await ctx.Response.Body.FlushAsync(ct);
+            }
+
+            // Stream subsequent events
+            await foreach (var evt in subscription.Reader.ReadAllAsync(ct))
+            {
+                if (!string.Equals(evt.ChannelId, channelId, StringComparison.Ordinal))
+                    continue;
+                if (accountId is not null && !string.Equals(evt.AccountId, accountId, StringComparison.Ordinal))
+                    continue;
+
+                var evtJson = JsonSerializer.Serialize(MapChannelAuthStatusItem(evt), CoreJsonContext.Default.ChannelAuthStatusItem);
+                await ctx.Response.WriteAsync($"data: {evtJson}\n\n", ct);
+                await ctx.Response.Body.FlushAsync(ct);
+            }
+        });
+
+        app.MapGet("/admin/channels/whatsapp/auth", (HttpContext ctx, string? accountId) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: false, endpointScope: "admin.channels.auth");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+
+            var items = accountId is not null
+                ? authEventStore.GetLatest("whatsapp", accountId) is { } evt ? [MapChannelAuthStatusItem(evt)] : []
+                : authEventStore.GetAll("whatsapp").Select(MapChannelAuthStatusItem).ToArray();
+            if (items.Length == 0)
+                return Results.NotFound(new MutationResponse { Success = false, Error = "No WhatsApp auth event recorded." });
+
+            return Results.Json(new ChannelAuthStatusResponse
+            {
+                Items = items
+            }, CoreJsonContext.Default.ChannelAuthStatusResponse);
+        });
+
+        app.MapGet("/admin/channels/whatsapp/auth/stream", async (HttpContext ctx, string? accountId) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: false, endpointScope: "admin.channels.auth");
+            if (authResult.Failure is not null)
+            {
+                ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                return;
+            }
+
+            ctx.Response.ContentType = "text/event-stream";
+            ctx.Response.Headers.CacheControl = "no-cache";
+            ctx.Response.Headers.Connection = "keep-alive";
+
+            using var subscription = authEventStore.Subscribe();
+            var ct = ctx.RequestAborted;
+
+            var currentItems = accountId is not null
+                ? authEventStore.GetLatest("whatsapp", accountId) is { } currentEvt ? [currentEvt] : []
+                : authEventStore.GetAll("whatsapp");
+            foreach (var current in currentItems)
+            {
+                var json = JsonSerializer.Serialize(MapChannelAuthStatusItem(current), CoreJsonContext.Default.ChannelAuthStatusItem);
+                await ctx.Response.WriteAsync($"data: {json}\n\n", ct);
+                await ctx.Response.Body.FlushAsync(ct);
+            }
+
+            await foreach (var evt in subscription.Reader.ReadAllAsync(ct))
+            {
+                if (!string.Equals(evt.ChannelId, "whatsapp", StringComparison.Ordinal))
+                    continue;
+                if (accountId is not null && !string.Equals(evt.AccountId, accountId, StringComparison.Ordinal))
+                    continue;
+
+                var evtJson = JsonSerializer.Serialize(MapChannelAuthStatusItem(evt), CoreJsonContext.Default.ChannelAuthStatusItem);
+                await ctx.Response.WriteAsync($"data: {evtJson}\n\n", ct);
+                await ctx.Response.Body.FlushAsync(ct);
+            }
+        });
+
+        app.MapGet("/admin/channels/whatsapp/auth/qr.svg", (HttpContext ctx, string? accountId) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: false, endpointScope: "admin.channels.auth");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+
+            var evt = accountId is not null
+                ? authEventStore.GetLatest("whatsapp", accountId)
+                : authEventStore.GetAll("whatsapp").FirstOrDefault(static item =>
+                    string.Equals(item.State, "qr_code", StringComparison.Ordinal) && !string.IsNullOrWhiteSpace(item.Data));
+            if (evt is null || !string.Equals(evt.State, "qr_code", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(evt.Data))
+            {
+                return Results.NotFound(new MutationResponse
+                {
+                    Success = false,
+                    Error = "No active WhatsApp QR code is available."
+                });
+            }
+
+            using var generator = new QRCodeGenerator();
+            using var qrData = generator.CreateQrCode(evt.Data, QRCodeGenerator.ECCLevel.Q);
+            var svg = new SvgQRCode(qrData).GetGraphic(6);
+            return Results.Text(svg, "image/svg+xml", Encoding.UTF8);
+        });
+
+        app.MapGet("/admin/channels/whatsapp/setup", (HttpContext ctx) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: false, endpointScope: "admin.channels.auth");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+
+            var response = BuildWhatsAppSetupResponse(startup, runtime, adminSettings, pluginAdminSettings, message: "WhatsApp setup loaded.");
+            return Results.Json(response, CoreJsonContext.Default.WhatsAppSetupResponse);
+        });
+
+        app.MapPut("/admin/channels/whatsapp/setup", async (HttpContext ctx) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: true, endpointScope: "admin.channels.auth");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+            var auth = authResult.Authorization!;
+
+            var requestPayload = await ReadJsonBodyAsync(ctx, CoreJsonContext.Default.WhatsAppSetupRequest);
+            if (requestPayload.Failure is not null)
+                return requestPayload.Failure;
+            var request = requestPayload.Value;
+            if (request is null)
+                return Results.BadRequest(new MutationResponse { Success = false, Error = "WhatsApp setup payload is required." });
+
+            var normalizedRequestResult = NormalizeWhatsAppSetupRequest(request);
+            if (normalizedRequestResult.Errors.Count > 0)
+            {
+                var invalidResponse = BuildWhatsAppSetupResponse(
+                    startup,
+                    runtime,
+                    adminSettings,
+                    pluginAdminSettings,
+                    message: "WhatsApp setup validation failed.",
+                    validationErrors: normalizedRequestResult.Errors);
+                return Results.Json(invalidResponse, CoreJsonContext.Default.WhatsAppSetupResponse, statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            var normalizedRequest = normalizedRequestResult.Request;
+            var builtInResult = adminSettings.UpdateWhatsAppSettings(normalizedRequest);
+            var validationErrors = ValidateWhatsAppPluginConfig(startup, runtime, normalizedRequest, out var pluginId, out var pluginConfig, out var pluginWarning);
+            var pluginChanged = false;
+            if (builtInResult.Success && validationErrors.Count == 0 && pluginId is not null)
+            {
+                pluginAdminSettings.Upsert(pluginId, pluginConfig, enabled: true);
+                pluginChanged = true;
+            }
+            var response = BuildWhatsAppSetupResponse(
+                startup,
+                runtime,
+                adminSettings,
+                pluginAdminSettings,
+                message: builtInResult.Success && validationErrors.Count == 0 ? "WhatsApp setup saved." : "WhatsApp setup validation failed.",
+                restartRequired: builtInResult.RestartRequired || pluginChanged,
+                validationErrors: [.. builtInResult.Errors, .. validationErrors],
+                pluginWarningOverride: pluginWarning);
+
+            if (builtInResult.Success && validationErrors.Count == 0)
+            {
+                RecordOperatorAudit(
+                    ctx,
+                    operations,
+                    auth,
+                    "whatsapp_setup_update",
+                    "whatsapp",
+                    "Updated WhatsApp setup.",
+                    success: true,
+                    before: null,
+                    after: normalizedRequest);
+                return Results.Json(response, CoreJsonContext.Default.WhatsAppSetupResponse);
+            }
+
+            return Results.Json(response, CoreJsonContext.Default.WhatsAppSetupResponse, statusCode: StatusCodes.Status400BadRequest);
+        });
+
+        app.MapPost("/admin/channels/whatsapp/restart", async (HttpContext ctx) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: true, endpointScope: "admin.channels.auth");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+            var auth = authResult.Authorization!;
+
+            if (!runtime.ChannelAdapters.TryGetValue("whatsapp", out var adapter) || adapter is not IRestartableChannelAdapter restartable)
+            {
+                return Results.Json(
+                    new MutationResponse { Success = false, Error = "Runtime restart is only available for plugin-backed WhatsApp channels." },
+                    CoreJsonContext.Default.MutationResponse,
+                    statusCode: StatusCodes.Status409Conflict);
+            }
+
+            authEventStore.ClearChannel("whatsapp");
+            await restartable.RestartAsync(ctx.RequestAborted);
+            RecordOperatorAudit(ctx, operations, auth, "whatsapp_restart", "whatsapp", "Restarted WhatsApp channel.", success: true, before: null, after: null);
+
+            var response = BuildWhatsAppSetupResponse(startup, runtime, adminSettings, pluginAdminSettings, message: "WhatsApp channel restarted.");
+            return Results.Json(response, CoreJsonContext.Default.WhatsAppSetupResponse);
         });
     }
 
@@ -1092,6 +1461,307 @@ internal static class AdminEndpoints
             Success = success
         });
     }
+
+    private static ChannelAuthStatusItem MapChannelAuthStatusItem(BridgeChannelAuthEvent evt)
+        => new()
+        {
+            ChannelId = evt.ChannelId,
+            State = evt.State,
+            Data = evt.Data,
+            AccountId = evt.AccountId,
+            UpdatedAtUtc = evt.UpdatedAtUtc
+        };
+
+    private static WhatsAppSetupResponse BuildWhatsAppSetupResponse(
+        GatewayStartupContext startup,
+        GatewayAppRuntime runtime,
+        AdminSettingsService adminSettings,
+        PluginAdminSettingsService pluginAdminSettings,
+        string message = "",
+        bool restartRequired = false,
+        IReadOnlyList<string>? validationErrors = null,
+        string? pluginWarningOverride = null)
+    {
+        var snapshot = adminSettings.GetSnapshot();
+        var readiness = MapChannelReadiness(ChannelReadinessEvaluator.Evaluate(startup.Config, startup.IsNonLoopbackBind))
+            .FirstOrDefault(static item => string.Equals(item.ChannelId, "whatsapp", StringComparison.Ordinal));
+        var isFirstPartyWorker = string.Equals(snapshot.WhatsAppType, "first_party_worker", StringComparison.OrdinalIgnoreCase)
+            || runtime.WhatsAppWorkerHost is not null;
+        var pluginTarget = isFirstPartyWorker
+            ? new WhatsAppPluginTarget(null, null, null)
+            : ResolveWhatsAppPluginTarget(startup, runtime, pluginIdOverride: null);
+        var pluginId = pluginTarget.PluginId;
+        var pluginEntry = pluginId is null ? null : pluginAdminSettings.GetEntry(pluginId);
+        if (pluginEntry is null && pluginId is not null && startup.Config.Plugins.Entries.TryGetValue(pluginId, out var configuredPluginEntry))
+            pluginEntry = configuredPluginEntry;
+
+        var warnings = new List<string>();
+        if (!string.IsNullOrWhiteSpace(pluginWarningOverride))
+            warnings.Add(pluginWarningOverride);
+        else if (!string.IsNullOrWhiteSpace(pluginTarget.Warning))
+            warnings.Add(pluginTarget.Warning);
+        if (readiness is not null)
+            warnings.AddRange(readiness.Warnings);
+
+        var restartSupported = runtime.ChannelAdapters.TryGetValue("whatsapp", out var adapter)
+            && adapter is IRestartableChannelAdapter;
+
+        return new WhatsAppSetupResponse
+        {
+            ActiveBackend = DetermineActiveWhatsAppBackend(runtime, snapshot),
+            ConfiguredType = snapshot.WhatsAppType,
+            Message = message,
+            RestartRequired = restartRequired,
+            Enabled = snapshot.WhatsAppEnabled,
+            DmPolicy = snapshot.WhatsAppDmPolicy,
+            WebhookPath = snapshot.WhatsAppWebhookPath,
+            WebhookPublicBaseUrl = snapshot.WhatsAppWebhookPublicBaseUrl,
+            WebhookVerifyToken = snapshot.WhatsAppWebhookVerifyToken,
+            WebhookVerifyTokenRef = snapshot.WhatsAppWebhookVerifyTokenRef,
+            ValidateSignature = snapshot.WhatsAppValidateSignature,
+            WebhookAppSecret = snapshot.WhatsAppWebhookAppSecret,
+            WebhookAppSecretRef = snapshot.WhatsAppWebhookAppSecretRef,
+            CloudApiToken = snapshot.WhatsAppCloudApiToken,
+            CloudApiTokenRef = snapshot.WhatsAppCloudApiTokenRef,
+            PhoneNumberId = snapshot.WhatsAppPhoneNumberId,
+            BusinessAccountId = snapshot.WhatsAppBusinessAccountId,
+            BridgeUrl = snapshot.WhatsAppBridgeUrl,
+            BridgeToken = snapshot.WhatsAppBridgeToken,
+            BridgeTokenRef = snapshot.WhatsAppBridgeTokenRef,
+            BridgeSuppressSendExceptions = snapshot.WhatsAppBridgeSuppressSendExceptions,
+            FirstPartyWorker = snapshot.WhatsAppFirstPartyWorker,
+            FirstPartyWorkerConfigJson = PrettyJson(JsonSerializer.SerializeToElement(snapshot.WhatsAppFirstPartyWorker, CoreJsonContext.Default.WhatsAppFirstPartyWorkerConfig)),
+            FirstPartyWorkerConfigSchemaJson = GetWhatsAppFirstPartyWorkerConfigSchemaJson(),
+            PluginDetected = pluginId is not null,
+            PluginId = pluginId,
+            PluginConfigJson = pluginEntry?.Config is { } pluginConfig ? PrettyJson(pluginConfig) : null,
+            PluginConfigSchemaJson = pluginTarget.Plugin?.Manifest.ConfigSchema is { } pluginSchema ? PrettyJson(pluginSchema) : null,
+            PluginUiHintsJson = pluginTarget.Plugin?.Manifest.UiHints is { } uiHints ? PrettyJson(uiHints) : null,
+            PluginWarning = pluginWarningOverride ?? pluginTarget.Warning,
+            RestartSupported = restartSupported,
+            RestartHint = restartSupported
+                ? "Runtime restart is available for the active plugin-backed WhatsApp channel."
+                : "Built-in WhatsApp configuration changes require a gateway restart.",
+            DerivedWebhookUrl = BuildDerivedWebhookUrl(snapshot.WhatsAppWebhookPublicBaseUrl, snapshot.WhatsAppWebhookPath),
+            Readiness = readiness,
+            AuthStates = runtime.ChannelAuthEvents.GetAll("whatsapp").Select(MapChannelAuthStatusItem).ToArray(),
+            Warnings = warnings.Distinct(StringComparer.Ordinal).ToArray(),
+            ValidationErrors = validationErrors?.ToArray() ?? []
+        };
+    }
+
+    private static List<string> ValidateWhatsAppPluginConfig(
+        GatewayStartupContext startup,
+        GatewayAppRuntime runtime,
+        WhatsAppSetupRequest request,
+        out string? pluginId,
+        out JsonElement? pluginConfig,
+        out string? pluginWarning)
+    {
+        pluginId = null;
+        pluginConfig = null;
+        pluginWarning = null;
+
+        if (string.IsNullOrWhiteSpace(request.PluginConfigJson) && string.IsNullOrWhiteSpace(request.PluginId))
+            return [];
+
+        var pluginTarget = ResolveWhatsAppPluginTarget(startup, runtime, request.PluginId);
+        pluginWarning = pluginTarget.Warning;
+        pluginId = pluginTarget.PluginId;
+        if (pluginId is null)
+            return [pluginWarning ?? "No unique plugin-backed WhatsApp channel is available for bridge configuration."];
+
+        if (!string.IsNullOrWhiteSpace(request.PluginConfigJson))
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(request.PluginConfigJson);
+                pluginConfig = document.RootElement.Clone();
+            }
+            catch (Exception ex)
+            {
+                return [$"Plugin config JSON is invalid: {ex.Message}"];
+            }
+        }
+
+        if (pluginTarget.Plugin?.Manifest is { } manifest)
+        {
+            var diagnostics = PluginConfigValidator.Validate(manifest, pluginConfig);
+            var errors = diagnostics
+                .Where(static diagnostic => !string.Equals(diagnostic.Severity, "warning", StringComparison.OrdinalIgnoreCase))
+                .Select(static diagnostic => diagnostic.Message)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            if (errors.Count > 0)
+                return errors;
+        }
+        return [];
+    }
+
+    private static string DetermineActiveWhatsAppBackend(GatewayAppRuntime runtime, AdminSettingsSnapshot snapshot)
+    {
+        if (runtime.ChannelAdapters.TryGetValue("whatsapp", out var adapter))
+        {
+            if (runtime.WhatsAppWorkerHost is not null && adapter is BridgedChannelAdapter)
+                return "first_party_worker";
+
+            return adapter switch
+            {
+                BridgedChannelAdapter => "plugin_bridge",
+                WhatsAppBridgeChannel => "built_in_bridge",
+                WhatsAppChannel => "official",
+                _ => snapshot.WhatsAppType
+            };
+        }
+
+        if (!snapshot.WhatsAppEnabled)
+            return "disabled";
+
+        if (string.Equals(snapshot.WhatsAppType, "first_party_worker", StringComparison.OrdinalIgnoreCase))
+            return "first_party_worker";
+
+        return string.Equals(snapshot.WhatsAppType, "bridge", StringComparison.OrdinalIgnoreCase)
+            ? "built_in_bridge"
+            : "official";
+    }
+
+    private static (WhatsAppSetupRequest Request, List<string> Errors) NormalizeWhatsAppSetupRequest(WhatsAppSetupRequest request)
+    {
+        var errors = new List<string>();
+        var workerConfig = request.FirstPartyWorker;
+        if (!string.IsNullOrWhiteSpace(request.FirstPartyWorkerConfigJson))
+        {
+            try
+            {
+                workerConfig = JsonSerializer.Deserialize(
+                    request.FirstPartyWorkerConfigJson,
+                    CoreJsonContext.Default.WhatsAppFirstPartyWorkerConfig);
+            }
+            catch (Exception ex)
+            {
+                errors.Add($"First-party worker config JSON is invalid: {ex.Message}");
+            }
+        }
+
+        return (new WhatsAppSetupRequest
+        {
+            Enabled = request.Enabled,
+            Type = request.Type,
+            DmPolicy = request.DmPolicy,
+            WebhookPath = request.WebhookPath,
+            WebhookPublicBaseUrl = request.WebhookPublicBaseUrl,
+            WebhookVerifyToken = request.WebhookVerifyToken,
+            WebhookVerifyTokenRef = request.WebhookVerifyTokenRef,
+            ValidateSignature = request.ValidateSignature,
+            WebhookAppSecret = request.WebhookAppSecret,
+            WebhookAppSecretRef = request.WebhookAppSecretRef,
+            CloudApiToken = request.CloudApiToken,
+            CloudApiTokenRef = request.CloudApiTokenRef,
+            PhoneNumberId = request.PhoneNumberId,
+            BusinessAccountId = request.BusinessAccountId,
+            BridgeUrl = request.BridgeUrl,
+            BridgeToken = request.BridgeToken,
+            BridgeTokenRef = request.BridgeTokenRef,
+            BridgeSuppressSendExceptions = request.BridgeSuppressSendExceptions,
+            PluginId = request.PluginId,
+            PluginConfigJson = request.PluginConfigJson,
+            FirstPartyWorker = workerConfig,
+            FirstPartyWorkerConfigJson = request.FirstPartyWorkerConfigJson
+        }, errors);
+    }
+
+    private static string? BuildDerivedWebhookUrl(string? publicBaseUrl, string webhookPath)
+    {
+        if (string.IsNullOrWhiteSpace(publicBaseUrl) || string.IsNullOrWhiteSpace(webhookPath))
+            return null;
+
+        try
+        {
+            var baseUri = new Uri(publicBaseUrl.TrimEnd('/') + "/", UriKind.Absolute);
+            return new Uri(baseUri, webhookPath.TrimStart('/')).ToString();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string PrettyJson(JsonElement value)
+        => value.GetRawText();
+
+    private static string GetWhatsAppFirstPartyWorkerConfigSchemaJson()
+        => """
+           {
+             "type": "object",
+             "properties": {
+               "driver": { "type": "string", "enum": ["baileys_csharp", "simulated"] },
+               "executablePath": { "type": "string" },
+               "workingDirectory": { "type": "string" },
+               "storagePath": { "type": "string" },
+               "mediaCachePath": { "type": "string" },
+               "historySync": { "type": "boolean" },
+               "proxy": { "type": "string" },
+               "accounts": {
+                 "type": "array",
+                 "items": {
+                   "type": "object",
+                   "properties": {
+                     "accountId": { "type": "string" },
+                     "sessionPath": { "type": "string" },
+                     "deviceName": { "type": "string" },
+                     "pairingMode": { "type": "string", "enum": ["qr", "pairing_code"] },
+                     "phoneNumber": { "type": "string" },
+                     "sendReadReceipts": { "type": "boolean" },
+                     "ackReaction": { "type": "boolean" },
+                     "mediaCachePath": { "type": "string" },
+                     "historySync": { "type": "boolean" },
+                     "proxy": { "type": "string" }
+                   },
+                   "required": ["accountId", "sessionPath", "pairingMode"]
+                 }
+               }
+             },
+             "required": ["driver", "accounts"]
+           }
+           """;
+
+    private static WhatsAppPluginTarget ResolveWhatsAppPluginTarget(
+        GatewayStartupContext startup,
+        GatewayAppRuntime runtime,
+        string? pluginIdOverride)
+    {
+        if (runtime.PluginHost is null)
+            return new(null, pluginIdOverride is null ? null : $"Plugin '{pluginIdOverride}' is not loaded.", null);
+
+        var registrations = runtime.PluginHost.ChannelRegistrations
+            .Where(registration => string.Equals(registration.ChannelId, "whatsapp", StringComparison.Ordinal))
+            .ToArray();
+
+        if (!string.IsNullOrWhiteSpace(pluginIdOverride))
+            registrations = registrations
+                .Where(registration => string.Equals(registration.PluginId, pluginIdOverride, StringComparison.Ordinal))
+                .ToArray();
+
+        if (registrations.Length == 0)
+        {
+            return new(
+                null,
+                pluginIdOverride is null
+                    ? null
+                    : $"Plugin '{pluginIdOverride}' is not currently loaded for channel 'whatsapp'.",
+                null);
+        }
+
+        if (registrations.Length > 1)
+            return new(null, "Multiple plugins register channel 'whatsapp'. Configure a specific plugin id.", null);
+
+        var pluginId = registrations[0].PluginId;
+        var discovered = PluginDiscovery.DiscoverWithDiagnostics(startup.Config.Plugins, startup.WorkspacePath).Plugins
+            .FirstOrDefault(plugin => string.Equals(plugin.Manifest.Id, pluginId, StringComparison.Ordinal));
+        return new(pluginId, null, discovered);
+    }
+
+    private sealed record WhatsAppPluginTarget(string? PluginId, string? Warning, DiscoveredPlugin? Plugin);
 
     private static string? SerializeAuditValue(object? value)
     {
@@ -1248,6 +1918,167 @@ internal static class AdminEndpoints
         var index = branchId.IndexOf(marker, StringComparison.Ordinal);
         return index > 0 ? branchId[..index] : null;
     }
+
+    private static async Task<ApprovalSimulationResponse> SimulateApprovalAsync(
+        GatewayStartupContext startup,
+        GatewayAppRuntime runtime,
+        ApprovalSimulationRequest request,
+        CancellationToken ct)
+    {
+        var effectiveTooling = CloneToolingConfig(startup.Config.Tooling, request.AutonomyMode);
+        var argumentsJson = string.IsNullOrWhiteSpace(request.ArgumentsJson) ? "{}" : request.ArgumentsJson;
+        var normalizedToolName = NormalizeApprovalToolName(request.ToolName!);
+        var requireToolApproval = request.RequireToolApproval ?? runtime.EffectiveRequireToolApproval;
+        var approvalRequiredTools = (request.ApprovalRequiredTools is { Length: > 0 }
+                ? request.ApprovalRequiredTools
+                : runtime.EffectiveApprovalRequiredTools.ToArray())
+            .Where(static item => !string.IsNullOrWhiteSpace(item))
+            .Select(NormalizeApprovalToolName)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var autonomyHook = new AutonomyHook(effectiveTooling, NullLogger.Instance);
+        var allowed = await autonomyHook.BeforeExecuteAsync(normalizedToolName, argumentsJson, ct);
+        if (!allowed)
+        {
+            return new ApprovalSimulationResponse
+            {
+                Decision = "deny",
+                Reason = "Autonomy or path policy would deny this tool execution.",
+                ToolName = request.ToolName!,
+                AutonomyMode = (effectiveTooling.AutonomyMode ?? "full").Trim().ToLowerInvariant(),
+                RequireToolApproval = requireToolApproval,
+                ApprovalRequiredTools = approvalRequiredTools
+            };
+        }
+
+        if (requireToolApproval && approvalRequiredTools.Contains(normalizedToolName, StringComparer.OrdinalIgnoreCase))
+        {
+            return new ApprovalSimulationResponse
+            {
+                Decision = "requires_approval",
+                Reason = "The effective approval policy requires approval for this tool.",
+                ToolName = request.ToolName!,
+                AutonomyMode = (effectiveTooling.AutonomyMode ?? "full").Trim().ToLowerInvariant(),
+                RequireToolApproval = requireToolApproval,
+                ApprovalRequiredTools = approvalRequiredTools
+            };
+        }
+
+        return new ApprovalSimulationResponse
+        {
+            Decision = "allow",
+            Reason = "The tool passes autonomy checks and is not currently approval-gated.",
+            ToolName = request.ToolName!,
+            AutonomyMode = (effectiveTooling.AutonomyMode ?? "full").Trim().ToLowerInvariant(),
+            RequireToolApproval = requireToolApproval,
+            ApprovalRequiredTools = approvalRequiredTools
+        };
+    }
+
+    private static ToolingConfig CloneToolingConfig(ToolingConfig source, string? autonomyModeOverride)
+        => new()
+        {
+            AutonomyMode = string.IsNullOrWhiteSpace(autonomyModeOverride) ? source.AutonomyMode : autonomyModeOverride,
+            WorkspaceRoot = source.WorkspaceRoot,
+            WorkspaceOnly = source.WorkspaceOnly,
+            AllowedShellCommandGlobs = source.AllowedShellCommandGlobs,
+            ForbiddenPathGlobs = source.ForbiddenPathGlobs,
+            AllowShell = source.AllowShell,
+            ReadOnlyMode = source.ReadOnlyMode,
+            AllowedReadRoots = source.AllowedReadRoots,
+            AllowedWriteRoots = source.AllowedWriteRoots,
+            ToolTimeoutSeconds = source.ToolTimeoutSeconds,
+            ParallelToolExecution = source.ParallelToolExecution,
+            RequireToolApproval = source.RequireToolApproval,
+            ApprovalRequiredTools = source.ApprovalRequiredTools,
+            ToolApprovalTimeoutSeconds = source.ToolApprovalTimeoutSeconds,
+            EnableBrowserTool = source.EnableBrowserTool,
+            AllowBrowserEvaluate = source.AllowBrowserEvaluate,
+            BrowserHeadless = source.BrowserHeadless,
+            BrowserTimeoutSeconds = source.BrowserTimeoutSeconds
+        };
+
+    private static string NormalizeApprovalToolName(string toolName)
+        => string.Equals(toolName.Trim(), "file_write", StringComparison.Ordinal)
+            ? "write_file"
+            : toolName.Trim();
+
+    private static ApprovalHistoryEntry RedactApprovalHistory(ApprovalHistoryEntry entry)
+        => new()
+        {
+            EventType = entry.EventType,
+            ApprovalId = entry.ApprovalId,
+            SessionId = entry.SessionId,
+            ChannelId = entry.ChannelId,
+            SenderId = entry.SenderId,
+            ToolName = entry.ToolName,
+            ArgumentsPreview = RedactSensitiveText(entry.ArgumentsPreview),
+            TimestampUtc = entry.TimestampUtc,
+            DecisionAtUtc = entry.DecisionAtUtc,
+            ActorChannelId = entry.ActorChannelId,
+            ActorSenderId = entry.ActorSenderId,
+            DecisionSource = entry.DecisionSource,
+            Approved = entry.Approved
+        };
+
+    private static RuntimeEventEntry RedactRuntimeEvent(RuntimeEventEntry entry)
+        => new()
+        {
+            Id = entry.Id,
+            TimestampUtc = entry.TimestampUtc,
+            SessionId = entry.SessionId,
+            ChannelId = entry.ChannelId,
+            SenderId = entry.SenderId,
+            CorrelationId = entry.CorrelationId,
+            Component = entry.Component,
+            Action = entry.Action,
+            Severity = entry.Severity,
+            Summary = RedactSensitiveText(entry.Summary),
+            Metadata = entry.Metadata?.ToDictionary(
+                static kvp => kvp.Key,
+                static kvp => ShouldRedactKey(kvp.Key) ? "[redacted]" : RedactSensitiveText(kvp.Value),
+                StringComparer.Ordinal)
+        };
+
+    private static WebhookDeadLetterEntry RedactDeadLetter(WebhookDeadLetterEntry entry)
+        => new()
+        {
+            Id = entry.Id,
+            Source = entry.Source,
+            DeliveryKey = entry.DeliveryKey,
+            EndpointName = entry.EndpointName,
+            ChannelId = entry.ChannelId,
+            SenderId = entry.SenderId,
+            SessionId = entry.SessionId,
+            CreatedAtUtc = entry.CreatedAtUtc,
+            Error = RedactSensitiveText(entry.Error),
+            PayloadPreview = RedactSensitiveText(entry.PayloadPreview),
+            Discarded = entry.Discarded,
+            ReplayedAtUtc = entry.ReplayedAtUtc
+        };
+
+    private static string RedactSensitiveText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        var redacted = value.Replace("raw:", "raw:[redacted]", StringComparison.OrdinalIgnoreCase);
+        foreach (var marker in new[] { "token", "secret", "password", "apikey", "authorization" })
+        {
+            if (redacted.IndexOf(marker, StringComparison.OrdinalIgnoreCase) >= 0)
+                return "[redacted]";
+        }
+
+        return redacted;
+    }
+
+    private static bool ShouldRedactKey(string key)
+        => key.Contains("token", StringComparison.OrdinalIgnoreCase)
+           || key.Contains("secret", StringComparison.OrdinalIgnoreCase)
+           || key.Contains("password", StringComparison.OrdinalIgnoreCase)
+           || key.Contains("authorization", StringComparison.OrdinalIgnoreCase)
+           || key.Contains("apikey", StringComparison.OrdinalIgnoreCase);
 
     private readonly record struct JsonBodyReadResult<T>(
         T? Value,

@@ -610,6 +610,33 @@ internal static class Program
         }
     }
 
+    private static void WritePosture(SecurityPostureResponse posture)
+    {
+        Console.WriteLine($"public_bind: {ToBoolWord(posture.PublicBind)}");
+        Console.WriteLine($"auth_token_configured: {ToBoolWord(posture.AuthTokenConfigured)}");
+        Console.WriteLine($"autonomy_mode: {posture.AutonomyMode}");
+        Console.WriteLine($"tool_approval_required: {ToBoolWord(posture.ToolApprovalRequired)}");
+        Console.WriteLine($"requester_match_http_tool_approval: {ToBoolWord(posture.RequireRequesterMatchForHttpToolApproval)}");
+        Console.WriteLine($"browser_session_cookie_secure_effective: {ToBoolWord(posture.BrowserSessionCookieSecureEffective)}");
+        Console.WriteLine($"trust_forwarded_headers: {ToBoolWord(posture.TrustForwardedHeaders)}");
+        Console.WriteLine($"plugin_bridge: enabled={ToBoolWord(posture.PluginBridgeEnabled)} transport={posture.PluginBridgeTransportMode} security={posture.PluginBridgeSecurityMode}");
+        Console.WriteLine($"sandbox_configured: {ToBoolWord(posture.SandboxConfigured)}");
+
+        if (posture.RiskFlags.Count > 0)
+        {
+            Console.WriteLine("risk_flags:");
+            foreach (var risk in posture.RiskFlags)
+                Console.WriteLine($"- {risk}");
+        }
+
+        if (posture.Recommendations.Count > 0)
+        {
+            Console.WriteLine("recommendations:");
+            foreach (var recommendation in posture.Recommendations)
+                Console.WriteLine($"- {recommendation}");
+        }
+    }
+
     private static string Prompt(string label, string defaultValue)
     {
         Console.Write($"{label} [{defaultValue}]: ");
@@ -686,6 +713,18 @@ internal static class Program
         return string.IsNullOrWhiteSpace(text) ? null : text.TrimEnd();
     }
 
+    internal static string? ResolveAuthToken(CliArgs parsed, TextWriter error)
+    {
+        var cliToken = parsed.GetOption("--token");
+        if (!string.IsNullOrWhiteSpace(cliToken))
+        {
+            error.WriteLine("Warning: --token is deprecated because command-line arguments can be exposed in process listings. Prefer OPENCLAW_AUTH_TOKEN.");
+            return cliToken;
+        }
+
+        return Environment.GetEnvironmentVariable(EnvAuthToken);
+    }
+
     private static float? ParseFloat(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw))
@@ -717,44 +756,5 @@ internal static class Program
         };
     }
 
-    internal static string? ResolveAuthToken(CliArgs parsed, TextWriter error)
-    {
-        var cliToken = parsed.GetOption("--token");
-        if (!string.IsNullOrWhiteSpace(cliToken))
-        {
-            error.WriteLine("Warning: --token is deprecated because command-line arguments can be exposed in process listings. Prefer OPENCLAW_AUTH_TOKEN.");
-            return cliToken;
-        }
-
-        return Environment.GetEnvironmentVariable(EnvAuthToken);
-    }
-
     private static string ToBoolWord(bool value) => value ? "true" : "false";
-
-    private static void WritePosture(SecurityPostureResponse posture)
-    {
-        Console.WriteLine($"public_bind: {ToBoolWord(posture.PublicBind)}");
-        Console.WriteLine($"auth_token_configured: {ToBoolWord(posture.AuthTokenConfigured)}");
-        Console.WriteLine($"autonomy_mode: {posture.AutonomyMode}");
-        Console.WriteLine($"tool_approval_required: {ToBoolWord(posture.ToolApprovalRequired)}");
-        Console.WriteLine($"requester_match_http_tool_approval: {ToBoolWord(posture.RequireRequesterMatchForHttpToolApproval)}");
-        Console.WriteLine($"browser_session_cookie_secure_effective: {ToBoolWord(posture.BrowserSessionCookieSecureEffective)}");
-        Console.WriteLine($"trust_forwarded_headers: {ToBoolWord(posture.TrustForwardedHeaders)}");
-        Console.WriteLine($"plugin_bridge: enabled={ToBoolWord(posture.PluginBridgeEnabled)} transport={posture.PluginBridgeTransportMode} security={posture.PluginBridgeSecurityMode}");
-        Console.WriteLine($"sandbox_configured: {ToBoolWord(posture.SandboxConfigured)}");
-
-        if (posture.RiskFlags.Count > 0)
-        {
-            Console.WriteLine("risk_flags:");
-            foreach (var risk in posture.RiskFlags)
-                Console.WriteLine($"- {risk}");
-        }
-
-        if (posture.Recommendations.Count > 0)
-        {
-            Console.WriteLine("recommendations:");
-            foreach (var recommendation in posture.Recommendations)
-                Console.WriteLine($"- {recommendation}");
-        }
-    }
 }

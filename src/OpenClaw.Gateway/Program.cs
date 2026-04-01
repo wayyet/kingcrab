@@ -26,6 +26,7 @@ builder.Services.AddOpenClawCoreServices(startup);
 builder.Services.AddOpenClawChannelServices(startup);
 builder.Services.AddOpenClawToolServices(startup);
 builder.Services.AddOpenClawSecurityServices(startup);
+builder.Services.AddOpenClawMcpServices(startup);
 builder.Services.ApplyOpenClawRuntimeProfile(startup);
 builder.Services.AddMicrosoftAgentFramework(builder.Configuration);
 #if OPENCLAW_ENABLE_OPENSANDBOX
@@ -56,8 +57,7 @@ app.Use(async (ctx, next) =>
 // Enable ASP.NET Core authentication middleware when OIDC is configured.
 if (!string.IsNullOrEmpty(startup.Config.Security.OidcAuthority))
     app.UseAuthentication();
-// Apply token-auth middleware for /mcp before route matching.
-app.UseOpenClawMcpAuth(startup);
+app.UseOpenClawMcpAuth(startup, runtime);
 
 app.UseOpenClawPipeline(startup, runtime);
 app.MapOpenApi("/openapi/{documentName}.json");

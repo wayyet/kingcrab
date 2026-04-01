@@ -9,7 +9,6 @@ using OpenClaw.Core.Security;
 using OpenClaw.Core.Sessions;
 using OpenClaw.Gateway.Bootstrap;
 using OpenClaw.Gateway.Extensions;
-using OpenClaw.Gateway.Mcp;
 
 namespace OpenClaw.Gateway.Composition;
 
@@ -49,7 +48,8 @@ internal static class CoreServicesExtensions
             new SessionManager(
                 sp.GetRequiredService<IMemoryStore>(),
                 config,
-                sp.GetRequiredService<ILoggerFactory>().CreateLogger("SessionManager")));
+                sp.GetRequiredService<ILoggerFactory>().CreateLogger("SessionManager"),
+                sp.GetRequiredService<RuntimeMetrics>()));
         services.AddSingleton<MemoryRetentionSweeperService>();
         services.AddSingleton<IMemoryRetentionCoordinator>(sp => sp.GetRequiredService<MemoryRetentionSweeperService>());
         services.AddHostedService(sp => sp.GetRequiredService<MemoryRetentionSweeperService>());
@@ -57,8 +57,6 @@ internal static class CoreServicesExtensions
         services.AddSingleton(new WebSocketChannel(config.WebSocket));
         services.AddSingleton<ChatCommandProcessor>();
         services.AddSingleton<GatewayLlmExecutionService>();
-
-        services.AddOpenClawMcpSdkServices(startup);
 
         return services;
     }

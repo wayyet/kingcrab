@@ -106,11 +106,11 @@ public sealed class PluginsConfig
     /// <summary>Configuration for native plugin replicas.</summary>
     public NativePluginsConfig Native { get; set; } = new();
 
+    /// <summary>Configuration for MCP servers exposed as native tools.</summary>
+    public McpPluginsConfig Mcp { get; set; } = new();
+
     /// <summary>Configuration for in-process dynamic .NET plugins. JIT mode only.</summary>
     public NativeDynamicPluginsConfig DynamicNative { get; set; } = new();
-
-    /// <summary>Configuration for MCP (Model Context Protocol) server connections.</summary>
-    public McpPluginsConfig Mcp { get; set; } = new();
 }
 
 public sealed class McpPluginsConfig
@@ -549,9 +549,6 @@ public sealed class PluginLoadConfig
 {
     /// <summary>Extra plugin paths to scan (file or directory).</summary>
     public string[] Paths { get; set; } = [];
-
-    /// <summary>When true, scan the global extensions directory under the user profile.</summary>
-    public bool IncludeGlobalExtensions { get; set; } = true;
 }
 
 /// <summary>

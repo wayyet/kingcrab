@@ -28,7 +28,7 @@ public static class GatewaySecurityExtensions
                 "or explicitly opt in via OpenClaw:Security:AllowUnsafeToolingOnPublicBind=true.");
         }
 
-        if ((config.Plugins.Enabled || config.Plugins.DynamicNative.Enabled) && !config.Security.AllowPluginBridgeOnPublicBind)
+        if ((config.Plugins.Enabled || config.Plugins.DynamicNative.Enabled || config.Plugins.Mcp.Enabled) && !config.Security.AllowPluginBridgeOnPublicBind)
         {
             throw new InvalidOperationException(
                 "Refusing to start with third-party plugin execution enabled on a non-loopback bind. " +
@@ -65,6 +65,13 @@ public static class GatewaySecurityExtensions
                         "Refusing to start with WhatsApp bridge webhooks on a non-loopback bind without inbound authentication. " +
                         "Set OpenClaw:Channels:WhatsApp:BridgeTokenRef (recommended) or BridgeToken.");
                 }
+            }
+            else if (string.Equals(config.Channels.WhatsApp.Type, "first_party_worker", StringComparison.OrdinalIgnoreCase) &&
+                config.Channels.WhatsApp.FirstPartyWorker.Accounts.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    "Refusing to start with first-party WhatsApp worker enabled without any configured accounts. " +
+                    "Set OpenClaw:Channels:WhatsApp:FirstPartyWorker:Accounts.");
             }
         }
 

@@ -245,27 +245,34 @@ internal static class WebhookEndpoints
             });
         }
 
-        if (startup.Config.Channels.WhatsApp.Enabled)
+        if (startup.Config.Channels.WhatsApp.Enabled &&
+            !string.Equals(startup.Config.Channels.WhatsApp.Type, "first_party_worker", StringComparison.OrdinalIgnoreCase))
         {
             var whatsappWebhookHandler = app.Services.GetRequiredService<WhatsAppWebhookHandler>();
             app.MapMethods(startup.Config.Channels.WhatsApp.WebhookPath, ["GET", "POST"], async (HttpContext ctx) =>
             {
-                ctx.Request.EnableBuffering();
-                var (bodyOk, bodyText) = await EndpointHelpers.TryReadBodyTextAsync(ctx, Math.Max(4 * 1024, startup.Config.Channels.WhatsApp.MaxRequestBytes), ctx.RequestAborted);
-                if (!bodyOk)
+                var isPost = HttpMethods.IsPost(ctx.Request.Method);
+                string bodyText = "";
+                if (isPost)
                 {
-                    ctx.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
-                    await ctx.Response.WriteAsync("Request too large.", ctx.RequestAborted);
-                    return;
-                }
+                    ctx.Request.EnableBuffering();
+                    var (bodyOk, requestBodyText) = await EndpointHelpers.TryReadBodyTextAsync(ctx, Math.Max(4 * 1024, startup.Config.Channels.WhatsApp.MaxRequestBytes), ctx.RequestAborted);
+                    if (!bodyOk)
+                    {
+                        ctx.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+                        await ctx.Response.WriteAsync("Request too large.", ctx.RequestAborted);
+                        return;
+                    }
 
-                ctx.Request.Body.Position = 0;
-                var deliveryKey = TryResolveWhatsAppDeliveryKey(bodyText);
-                if (!deliveries.TryBegin("whatsapp", deliveryKey, TimeSpan.FromHours(6)))
-                {
-                    ctx.Response.StatusCode = StatusCodes.Status200OK;
-                    await ctx.Response.WriteAsync("Duplicate ignored.", ctx.RequestAborted);
-                    return;
+                    bodyText = requestBodyText;
+                    ctx.Request.Body.Position = 0;
+                    var deliveryKey = TryResolveWhatsAppDeliveryKey(bodyText);
+                    if (!deliveries.TryBegin("whatsapp", deliveryKey, TimeSpan.FromHours(6)))
+                    {
+                        ctx.Response.StatusCode = StatusCodes.Status200OK;
+                        await ctx.Response.WriteAsync("Duplicate ignored.", ctx.RequestAborted);
+                        return;
+                    }
                 }
 
                 InboundMessage? replayMessage = null;
@@ -295,7 +302,7 @@ internal static class WebhookEndpoints
                         {
                             Id = $"whdl_{Guid.NewGuid():N}"[..20],
                             Source = "whatsapp",
-                            DeliveryKey = deliveryKey,
+                            DeliveryKey = isPost ? TryResolveWhatsAppDeliveryKey(bodyText) : "",
                             ChannelId = "whatsapp",
                             SenderId = replayMessage?.SenderId,
                             SessionId = replayMessage?.SessionId,
@@ -381,8 +388,9 @@ internal static class WebhookEndpoints
                     return;
                 }
 
-                if (body.Length > hookCfg.MaxBodyLength)
-                    body = body[..hookCfg.MaxBodyLength];
+                var bodyForPrompt = body.Length > hookCfg.MaxBodyLength
+                    ? body[..hookCfg.MaxBodyLength]
+                    : body;
 
                 var headerKey = ctx.Request.Headers["Idempotency-Key"].ToString();
                 if (string.IsNullOrWhiteSpace(headerKey))
@@ -414,7 +422,7 @@ internal static class WebhookEndpoints
                     }
                 }
 
-                var prompt = hookCfg.PromptTemplate.Replace("{body}", body);
+                var prompt = hookCfg.PromptTemplate.Replace("{body}", bodyForPrompt);
                 var msg = new InboundMessage
                 {
                     ChannelId = "webhook",
@@ -442,7 +450,7 @@ internal static class WebhookEndpoints
                             ChannelId = "webhook",
                             SessionId = msg.SessionId,
                             Error = ex.Message,
-                            PayloadPreview = body.Length <= 500 ? body : body[..500] + "…"
+                            PayloadPreview = bodyForPrompt.Length <= 500 ? bodyForPrompt : bodyForPrompt[..500] + "…"
                         },
                         ReplayMessage = msg
                     });
@@ -459,6 +467,8 @@ internal static class WebhookEndpoints
         {
             using var document = JsonDocument.Parse(bodyText);
             var root = document.RootElement;
+            if (root.TryGetProperty("message_id", out var bridgeMessageId) && bridgeMessageId.ValueKind == JsonValueKind.String)
+                return bridgeMessageId.GetString() ?? WebhookDeliveryStore.HashDeliveryKey(bodyText);
             if (root.TryGetProperty("entry", out var entries) && entries.ValueKind == JsonValueKind.Array)
             {
                 foreach (var entry in entries.EnumerateArray())

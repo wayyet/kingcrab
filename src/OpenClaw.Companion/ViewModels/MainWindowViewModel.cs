@@ -328,6 +328,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             await _client.ConnectAsync(uri, string.IsNullOrWhiteSpace(AuthToken) ? null : AuthToken, CancellationToken.None);
             IsConnected = true;
             Status = "Connected";
+            await LoadWhatsAppSetupAsync();
         }
         catch (Exception ex)
         {
@@ -358,6 +359,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         }
         finally
         {
+            CancelWhatsAppAuthStream();
             IsConnected = false;
             Status = "Disconnected";
             IsBusy = false;

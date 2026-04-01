@@ -10,7 +10,9 @@ using OpenClaw.Channels;
 using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Middleware;
 using OpenClaw.Core.Models;
+using OpenClaw.Core.Observability;
 using OpenClaw.Core.Pipeline;
+using OpenClaw.Agent.Plugins;
 using OpenClaw.Core.Security;
 using OpenClaw.Core.Sessions;
 using OpenClaw.Gateway;
@@ -39,10 +41,11 @@ internal static class GatewayWorkers
         ApprovalAuditStore approvalAuditStore,
         PairingManager pairingManager,
         ChatCommandProcessor commandProcessor,
-        RuntimeOperationsState operations)
+        RuntimeOperationsState operations,
+        RuntimeMetrics? runtimeMetrics = null)
     {
         StartSessionCleanup(lifetime, logger, sessionManager, sessionLocks, lockLastUsed);
-        StartInboundWorkers(lifetime, logger, workerCount, isNonLoopbackBind, sessionManager, sessionLocks, lockLastUsed, pipeline, middlewarePipeline, wsChannel, agentRuntime, config, cronScheduler, heartbeatService, toolApprovalService, approvalAuditStore, pairingManager, commandProcessor, operations);
+        StartInboundWorkers(lifetime, logger, workerCount, isNonLoopbackBind, sessionManager, sessionLocks, lockLastUsed, pipeline, middlewarePipeline, wsChannel, agentRuntime, channelAdapters, config, cronScheduler, heartbeatService, toolApprovalService, approvalAuditStore, pairingManager, commandProcessor, operations, runtimeMetrics);
         StartOutboundWorkers(lifetime, logger, workerCount, pipeline, channelAdapters, heartbeatService);
     }
 
@@ -64,50 +67,13 @@ internal static class GatewayWorkers
                     if (evicted > 0)
                         logger.LogDebug("Proactive active-session sweep evicted {Count} expired sessions", evicted);
 
-                    var now = DateTimeOffset.UtcNow;
-                    var orphanThreshold = TimeSpan.FromHours(2);
-                    
-                    foreach (var kvp in sessionLocks)
-                    {
-                        var sessionKey = kvp.Key;
-                        var semaphore = kvp.Value;
-                        
-                        if (!lockLastUsed.ContainsKey(sessionKey))
-                            lockLastUsed[sessionKey] = now;
-                        
-                        if (!sessionManager.IsActive(sessionKey))
-                        {
-                            var lastUsed = lockLastUsed.GetValueOrDefault(sessionKey, now);
-                            var isOrphaned = (now - lastUsed) > orphanThreshold;
-                            
-                            if (isOrphaned && semaphore.CurrentCount == 1 && semaphore.Wait(0))
-                            {
-                                try
-                                {
-                                    if (!sessionManager.IsActive(sessionKey))
-                                    {
-                                        if (sessionLocks.TryRemove(sessionKey, out _))
-                                        {
-                                            lockLastUsed.TryRemove(sessionKey, out _);
-                                            logger.LogDebug("Cleaned up session lock for {SessionKey}", sessionKey);
-                                        }
-                                    }
-                                    else
-                                    {
-                                        lockLastUsed[sessionKey] = now;
-                                    }
-                                }
-                                finally
-                                {
-                                    try { semaphore.Release(); } catch { /* ignore */ }
-                                }
-                            }
-                        }
-                        else
-                        {
-                            lockLastUsed[sessionKey] = now;
-                        }
-                    }
+                    CleanupSessionLocksOnce(
+                        sessionManager,
+                        sessionLocks,
+                        lockLastUsed,
+                        DateTimeOffset.UtcNow,
+                        TimeSpan.FromHours(2),
+                        logger);
                 }
                 catch (Exception ex)
                 {
@@ -115,6 +81,80 @@ internal static class GatewayWorkers
                 }
             }
         }, lifetime.ApplicationStopping);
+    }
+
+    internal static void CleanupSessionLocksOnce(
+        SessionManager sessionManager,
+        ConcurrentDictionary<string, SemaphoreSlim> sessionLocks,
+        ConcurrentDictionary<string, DateTimeOffset> lockLastUsed,
+        DateTimeOffset now,
+        TimeSpan orphanThreshold,
+        ILogger logger)
+    {
+        foreach (var kvp in sessionLocks)
+        {
+            var sessionKey = kvp.Key;
+            var semaphore = kvp.Value;
+
+            lockLastUsed.TryAdd(sessionKey, now);
+
+            if (sessionManager.IsActive(sessionKey))
+            {
+                lockLastUsed[sessionKey] = now;
+                continue;
+            }
+
+            var lastUsed = lockLastUsed.GetValueOrDefault(sessionKey, now);
+            var isOrphaned = (now - lastUsed) > orphanThreshold;
+            if (!isOrphaned || semaphore.CurrentCount != 1 || !semaphore.Wait(0))
+                continue;
+
+            var removed = false;
+            try
+            {
+                if (sessionManager.IsActive(sessionKey))
+                {
+                    lockLastUsed[sessionKey] = now;
+                    continue;
+                }
+
+                if (sessionLocks.TryRemove(sessionKey, out var removedSemaphore))
+                {
+                    removed = true;
+                    lockLastUsed.TryRemove(sessionKey, out _);
+                    try { removedSemaphore.Release(); } catch { }
+                    removedSemaphore.Dispose();
+                    logger.LogDebug("Cleaned up session lock for {SessionKey}", sessionKey);
+                }
+            }
+            finally
+            {
+                if (!removed)
+                {
+                    try { semaphore.Release(); } catch { }
+                }
+            }
+        }
+    }
+
+    internal static void DisposeSessionLocks(
+        ConcurrentDictionary<string, SemaphoreSlim> sessionLocks,
+        ILogger logger)
+    {
+        foreach (var sessionKey in sessionLocks.Keys)
+        {
+            if (!sessionLocks.TryRemove(sessionKey, out var semaphore))
+                continue;
+
+            try
+            {
+                semaphore.Dispose();
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "Failed to dispose session lock for {SessionKey}", sessionKey);
+            }
+        }
     }
 
     private static void StartInboundWorkers(
@@ -129,6 +169,7 @@ internal static class GatewayWorkers
         MiddlewarePipeline middlewarePipeline,
         WebSocketChannel wsChannel,
         IAgentRuntime agentRuntime,
+        IReadOnlyDictionary<string, IChannelAdapter> channelAdapters,
         GatewayConfig config,
         CronScheduler? cronScheduler,
         HeartbeatService heartbeatService,
@@ -136,7 +177,8 @@ internal static class GatewayWorkers
         ApprovalAuditStore approvalAuditStore,
         PairingManager pairingManager,
         ChatCommandProcessor commandProcessor,
-        RuntimeOperationsState operations)
+        RuntimeOperationsState operations,
+        RuntimeMetrics? runtimeMetrics)
     {
         for (var i = 0; i < workerCount; i++)
         {
@@ -148,9 +190,12 @@ internal static class GatewayWorkers
                     {
                         Session? session = null;
                         SemaphoreSlim? lockObj = null;
+                        IBridgedChannelControl? bridgedAdapter = null;
                         var lockAcquired = false;
+                        var bridgedTypingStarted = false;
                         long initialInputTokens = 0;
                         long initialOutputTokens = 0;
+                        var conversationRecipientId = ResolveConversationRecipientId(msg);
                         try
                         {
                             if (!msg.IsSystem)
@@ -160,20 +205,20 @@ internal static class GatewayWorkers
                                     await pipeline.OutboundWriter.WriteAsync(new OutboundMessage
                                     {
                                         ChannelId = msg.ChannelId,
-                                        RecipientId = msg.SenderId,
+                                        RecipientId = conversationRecipientId,
                                         Text = "Rate limit exceeded. Please slow down.",
                                         ReplyToMessageId = msg.MessageId
                                     }, lifetime.ApplicationStopping);
                                     continue;
                                 }
 
-                                var effectiveSessionKey = msg.SessionId ?? $"{msg.ChannelId}:{msg.SenderId}";
+                                var effectiveSessionKey = msg.SessionId ?? $"{msg.ChannelId}:{conversationRecipientId}";
                                 if (!operations.ActorRateLimits.TryConsume("session", effectiveSessionKey, "inbound_chat", out _))
                                 {
                                     await pipeline.OutboundWriter.WriteAsync(new OutboundMessage
                                     {
                                         ChannelId = msg.ChannelId,
-                                        RecipientId = msg.SenderId,
+                                        RecipientId = conversationRecipientId,
                                         Text = "Session rate limit exceeded. Please retry shortly.",
                                         ReplyToMessageId = msg.MessageId
                                     }, lifetime.ApplicationStopping);
@@ -195,6 +240,7 @@ internal static class GatewayWorkers
 
                                 if (decisionOutcome.Result == ToolApprovalDecisionResult.Recorded && decisionOutcome.Request is not null)
                                 {
+                                    runtimeMetrics?.IncrementApprovalDecisionsRecorded();
                                     approvalAuditStore.RecordDecision(
                                         decisionOutcome.Request,
                                         msg.Approved.Value,
@@ -211,6 +257,7 @@ internal static class GatewayWorkers
                                 }
                                 else if (decisionOutcome.Result == ToolApprovalDecisionResult.Unauthorized)
                                 {
+                                    runtimeMetrics?.IncrementApprovalDecisionsRejected();
                                     RecordApprovalDecisionRejectedEvent(
                                         operations,
                                         decisionOutcome.Request,
@@ -230,7 +277,7 @@ internal static class GatewayWorkers
                                 await pipeline.OutboundWriter.WriteAsync(new OutboundMessage
                                 {
                                     ChannelId = msg.ChannelId,
-                                    RecipientId = msg.SenderId,
+                                    RecipientId = conversationRecipientId,
                                     Text = ack,
                                     ReplyToMessageId = msg.MessageId
                                 }, lifetime.ApplicationStopping);
@@ -264,11 +311,12 @@ internal static class GatewayWorkers
                                             msg.SenderId,
                                             requireRequesterMatch: true);
 
-                                        if (decisionOutcome.Result == ToolApprovalDecisionResult.Recorded && decisionOutcome.Request is not null)
-                                        {
-                                            approvalAuditStore.RecordDecision(
-                                                decisionOutcome.Request,
-                                                approved,
+                                    if (decisionOutcome.Result == ToolApprovalDecisionResult.Recorded && decisionOutcome.Request is not null)
+                                    {
+                                        runtimeMetrics?.IncrementApprovalDecisionsRecorded();
+                                        approvalAuditStore.RecordDecision(
+                                            decisionOutcome.Request,
+                                            approved,
                                                 "chat",
                                                 msg.ChannelId,
                                                 msg.SenderId);
@@ -279,12 +327,13 @@ internal static class GatewayWorkers
                                                 "chat",
                                                 msg.ChannelId,
                                                 msg.SenderId);
-                                        }
-                                        else if (decisionOutcome.Result == ToolApprovalDecisionResult.Unauthorized)
-                                        {
-                                            RecordApprovalDecisionRejectedEvent(
-                                                operations,
-                                                decisionOutcome.Request,
+                                    }
+                                    else if (decisionOutcome.Result == ToolApprovalDecisionResult.Unauthorized)
+                                    {
+                                        runtimeMetrics?.IncrementApprovalDecisionsRejected();
+                                        RecordApprovalDecisionRejectedEvent(
+                                            operations,
+                                            decisionOutcome.Request,
                                                 approvalId,
                                                 "requester_mismatch",
                                                 msg.ChannelId,
@@ -301,7 +350,7 @@ internal static class GatewayWorkers
                                         await pipeline.OutboundWriter.WriteAsync(new OutboundMessage
                                         {
                                             ChannelId = msg.ChannelId,
-                                            RecipientId = msg.SenderId,
+                                            RecipientId = conversationRecipientId,
                                             Text = ack,
                                             ReplyToMessageId = msg.MessageId
                                         }, lifetime.ApplicationStopping);
@@ -316,6 +365,7 @@ internal static class GatewayWorkers
                             if (msg.ChannelId == "sms") policy = config.Channels.Sms.DmPolicy;
                             if (msg.ChannelId == "telegram") policy = config.Channels.Telegram.DmPolicy;
                             if (msg.ChannelId == "whatsapp") policy = config.Channels.WhatsApp.DmPolicy;
+                            if (msg.ChannelId == "teams") policy = config.Channels.Teams.DmPolicy;
 
                             if (policy is "closed")
                                 continue; // Silently drop all inbound messages
@@ -328,7 +378,7 @@ internal static class GatewayWorkers
                                 await pipeline.OutboundWriter.WriteAsync(new OutboundMessage
                                 {
                                     ChannelId = msg.ChannelId,
-                                    RecipientId = msg.SenderId,
+                                    RecipientId = conversationRecipientId,
                                     Text = pairingMsg,
                                     ReplyToMessageId = msg.MessageId
                                 }, lifetime.ApplicationStopping);
@@ -337,8 +387,8 @@ internal static class GatewayWorkers
                             }
 
                             session = msg.SessionId is not null
-                                ? await sessionManager.GetOrCreateByIdAsync(msg.SessionId, msg.ChannelId, msg.SenderId, lifetime.ApplicationStopping)
-                                : await sessionManager.GetOrCreateAsync(msg.ChannelId, msg.SenderId, lifetime.ApplicationStopping);
+                                ? await sessionManager.GetOrCreateByIdAsync(msg.SessionId, msg.ChannelId, conversationRecipientId, lifetime.ApplicationStopping)
+                                : await sessionManager.GetOrCreateAsync(msg.ChannelId, conversationRecipientId, lifetime.ApplicationStopping);
                             if (session is null)
                                 throw new InvalidOperationException("Session manager returned null session.");
 
@@ -358,7 +408,7 @@ internal static class GatewayWorkers
                                     await pipeline.OutboundWriter.WriteAsync(new OutboundMessage
                                     {
                                         ChannelId = msg.ChannelId,
-                                        RecipientId = msg.SenderId,
+                                        RecipientId = conversationRecipientId,
                                         Text = cmdResponse,
                                         Subject = msg.Subject,
                                         ReplyToMessageId = msg.MessageId
@@ -392,7 +442,7 @@ internal static class GatewayWorkers
                                     await pipeline.OutboundWriter.WriteAsync(new OutboundMessage
                                     {
                                         ChannelId = msg.ChannelId,
-                                        RecipientId = msg.SenderId,
+                                        RecipientId = conversationRecipientId,
                                         Text = shortCircuitText,
                                         Subject = msg.Subject,
                                         ReplyToMessageId = msg.MessageId
@@ -474,7 +524,7 @@ internal static class GatewayWorkers
                                     await pipeline.OutboundWriter.WriteAsync(new OutboundMessage
                                     {
                                         ChannelId = msg.ChannelId,
-                                        RecipientId = msg.SenderId,
+                                        RecipientId = conversationRecipientId,
                                         Text = prompt,
                                         ReplyToMessageId = msg.MessageId
                                     }, ct);
@@ -511,6 +561,24 @@ internal static class GatewayWorkers
                             }
                             else
                             {
+                                // Send read receipt and typing indicator for bridged channels
+                                bridgedAdapter = channelAdapters.TryGetValue(msg.ChannelId, out var adapter)
+                                    ? adapter as IBridgedChannelControl : null;
+                                var isSelfChat = bridgedAdapter?.SelfIds.Any(selfId =>
+                                    string.Equals(selfId, msg.SenderId, StringComparison.Ordinal)) == true;
+
+                                if (bridgedAdapter is not null && !isSelfChat)
+                                {
+                                    if (msg.MessageId is not null)
+                                    {
+                                        var receiptJid = msg.IsGroup ? msg.GroupId : msg.SenderId;
+                                        var receiptParticipant = msg.IsGroup ? msg.SenderId : null;
+                                        _ = bridgedAdapter.SendReadReceiptAsync(msg.MessageId, receiptJid, receiptParticipant, lifetime.ApplicationStopping);
+                                    }
+                                    _ = bridgedAdapter.SendTypingAsync(conversationRecipientId, true, lifetime.ApplicationStopping);
+                                    bridgedTypingStarted = true;
+                                }
+
                                 var responseText = await agentRuntime.RunAsync(session, messageText, lifetime.ApplicationStopping, approvalCallback: ApprovalCallback);
                                 await sessionManager.PersistAsync(session, lifetime.ApplicationStopping);
 
@@ -529,7 +597,7 @@ internal static class GatewayWorkers
                                     await pipeline.OutboundWriter.WriteAsync(new OutboundMessage
                                     {
                                         ChannelId = msg.ChannelId,
-                                        RecipientId = msg.SenderId,
+                                        RecipientId = conversationRecipientId,
                                         Text = responseText,
                                         SessionId = session.Id,
                                         CronJobName = msg.CronJobName,
@@ -583,7 +651,7 @@ internal static class GatewayWorkers
                                     await pipeline.OutboundWriter.WriteAsync(new OutboundMessage
                                     {
                                         ChannelId = msg.ChannelId,
-                                        RecipientId = msg.SenderId,
+                                        RecipientId = conversationRecipientId,
                                         Text = errorText,
                                         Subject = msg.Subject,
                                         ReplyToMessageId = msg.MessageId
@@ -594,6 +662,9 @@ internal static class GatewayWorkers
                         }
                         finally
                         {
+                            if (bridgedAdapter is not null && bridgedTypingStarted)
+                                _ = bridgedAdapter.SendTypingAsync(conversationRecipientId, false, lifetime.ApplicationStopping);
+
                             cronScheduler?.MarkJobCompleted(msg.CronJobName);
 
                             if (lockAcquired && lockObj is not null)
@@ -664,6 +735,11 @@ internal static class GatewayWorkers
             }, lifetime.ApplicationStopping);
         }
     }
+
+    private static string ResolveConversationRecipientId(InboundMessage msg)
+        => msg.IsGroup && !string.IsNullOrWhiteSpace(msg.GroupId)
+            ? msg.GroupId!
+            : msg.SenderId;
 
     private static void RecordApprovalDecisionEvent(
         RuntimeOperationsState operations,

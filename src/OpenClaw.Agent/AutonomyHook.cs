@@ -261,4 +261,3 @@ public sealed class AutonomyHook : IToolHook
         return path;
     }
 }
-

@@ -31,6 +31,7 @@ public sealed class OpenClawToolExecutor
     private readonly GatewayConfig _config;
     private readonly IToolSandbox? _toolSandbox;
     private readonly ToolUsageTracker? _toolUsageTracker;
+
     public OpenClawToolExecutor(
         IReadOnlyList<ITool> tools,
         int toolTimeoutSeconds,
