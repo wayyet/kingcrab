@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.AI;
 using OpenClaw.Core.Models;
 
 namespace OpenClaw.Agent;
@@ -12,6 +13,12 @@ public interface IAgentRuntime
 {
     CircuitState CircuitBreakerState { get; }
     IReadOnlyList<string> LoadedSkillNames { get; }
+
+    /// <summary>
+    /// The full set of AI tools currently available to this runtime, including name,
+    /// description, and JSON schema. Populated after skill/plugin loading completes.
+    /// </summary>
+    IReadOnlyList<AITool> LoadedTools { get; }
 
     Task<string> RunAsync(
         Session session,

@@ -102,6 +102,8 @@ public sealed class DelegateToolTests
 
         public IReadOnlyList<string> LoadedSkillNames => [];
 
+        public IReadOnlyList<AITool> LoadedTools => throw new NotImplementedException();
+
         public Task<string> RunAsync(
             Session session,
             string userMessage,

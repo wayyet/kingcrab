@@ -29,6 +29,8 @@ builder.Services.AddOpenClawSecurityServices(startup);
 builder.Services.AddOpenClawMcpServices(startup);
 builder.Services.ApplyOpenClawRuntimeProfile(startup);
 builder.Services.AddMicrosoftAgentFramework(builder.Configuration);
+if (builder.Environment.IsDevelopment())
+    builder.Services.AddOpenClawDevUI(startup.Config);
 #if OPENCLAW_ENABLE_OPENSANDBOX
 builder.Services.AddOpenSandboxIntegration(builder.Configuration);
 #endif
@@ -63,5 +65,8 @@ app.UseOpenClawPipeline(startup, runtime);
 app.MapOpenApi("/openapi/{documentName}.json");
 app.MapOpenClawEndpoints(startup, runtime);
 app.MapMcp("/mcp");
+
+if (app.Environment.IsDevelopment())
+    app.MapOpenClawDevUI();
 
 app.Run($"http://{startup.Config.BindAddress}:{startup.Config.Port}");

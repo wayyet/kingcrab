@@ -114,6 +114,8 @@ public sealed class MafAgentRuntime : IAgentRuntime
         }
     }
 
+    public IReadOnlyList<AITool> LoadedTools => _mafTools is IReadOnlyList<AITool> r ? r : [.. _mafTools];
+
     public Task<IReadOnlyList<string>> ReloadSkillsAsync(CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
