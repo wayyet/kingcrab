@@ -99,6 +99,53 @@ public sealed class ConfigValidatorTests
     }
 
     [Fact]
+    public void Validate_TeamsEnabledWithoutCredentials_ReturnsErrors()
+    {
+        var config = new GatewayConfig
+        {
+            Channels = new ChannelsConfig
+            {
+                Teams = new TeamsChannelConfig
+                {
+                    Enabled = true,
+                    AppIdRef = "",
+                    AppPasswordRef = "",
+                    TenantIdRef = ""
+                }
+            }
+        };
+
+        var errors = ConfigValidator.Validate(config);
+        Assert.Contains(errors, e => e.Contains("Channels.Teams.AppId", StringComparison.Ordinal));
+        Assert.Contains(errors, e => e.Contains("Channels.Teams.AppPassword", StringComparison.Ordinal));
+        Assert.Contains(errors, e => e.Contains("Channels.Teams.TenantId", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_TeamsInvalidPolicies_ReturnsErrors()
+    {
+        var config = new GatewayConfig
+        {
+            Channels = new ChannelsConfig
+            {
+                Teams = new TeamsChannelConfig
+                {
+                    GroupPolicy = "custom",
+                    ReplyStyle = "reply",
+                    ChunkMode = "words",
+                    TextChunkLimit = 0
+                }
+            }
+        };
+
+        var errors = ConfigValidator.Validate(config);
+        Assert.Contains(errors, e => e.Contains("Channels.Teams.GroupPolicy", StringComparison.Ordinal));
+        Assert.Contains(errors, e => e.Contains("Channels.Teams.ReplyStyle", StringComparison.Ordinal));
+        Assert.Contains(errors, e => e.Contains("Channels.Teams.ChunkMode", StringComparison.Ordinal));
+        Assert.Contains(errors, e => e.Contains("Channels.Teams.TextChunkLimit", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Validate_RetentionLimitsBelowMinimum_ReturnsErrors()
     {
         var config = new GatewayConfig
@@ -170,6 +217,92 @@ public sealed class ConfigValidatorTests
 
         var errors = ConfigValidator.Validate(config);
         Assert.Contains(errors, e => e.Contains("Runtime.Orchestrator", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_McpHttpServerWithoutUrl_ReturnsError()
+    {
+        var config = new GatewayConfig
+        {
+            Plugins = new PluginsConfig
+            {
+                Mcp = new McpPluginsConfig
+                {
+                    Enabled = true,
+                    Servers = new Dictionary<string, McpServerConfig>(StringComparer.Ordinal)
+                    {
+                        ["demo"] = new()
+                        {
+                            Transport = "http",
+                            Url = ""
+                        }
+                    }
+                }
+            }
+        };
+
+        var errors = ConfigValidator.Validate(config);
+        Assert.Contains(errors, e => e.Contains("Plugins.Mcp.Servers.demo.Url", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_McpStdioServerWithoutCommand_ReturnsError()
+    {
+        var config = new GatewayConfig
+        {
+            Plugins = new PluginsConfig
+            {
+                Mcp = new McpPluginsConfig
+                {
+                    Enabled = true,
+                    Servers = new Dictionary<string, McpServerConfig>(StringComparer.Ordinal)
+                    {
+                        ["demo"] = new()
+                        {
+                            Transport = "stdio",
+                            Command = ""
+                        }
+                    }
+                }
+            }
+        };
+
+        var errors = ConfigValidator.Validate(config);
+        Assert.Contains(errors, e => e.Contains("Plugins.Mcp.Servers.demo.Command", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_DisabledMcpServerWithMissingRequiredFields_DoesNotReturnError()
+    {
+        var config = new GatewayConfig
+        {
+            Plugins = new PluginsConfig
+            {
+                Mcp = new McpPluginsConfig
+                {
+                    Enabled = true,
+                    Servers = new Dictionary<string, McpServerConfig>(StringComparer.Ordinal)
+                    {
+                        ["stdio-disabled"] = new()
+                        {
+                            Enabled = false,
+                            Transport = "stdio",
+                            Command = ""
+                        },
+                        ["http-disabled"] = new()
+                        {
+                            Enabled = false,
+                            Transport = "http",
+                            Url = ""
+                        }
+                    }
+                }
+            }
+        };
+
+        var errors = ConfigValidator.Validate(config);
+        Assert.DoesNotContain(errors, e => e.Contains("Plugins.Mcp.Servers.stdio-disabled", StringComparison.Ordinal));
+        Assert.DoesNotContain(errors, e => e.Contains("Plugins.Mcp.Servers.http-disabled", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -257,5 +390,73 @@ public sealed class ConfigValidatorTests
 
         var errors = ConfigValidator.Validate(config);
         Assert.DoesNotContain(errors, error => error.Contains("Sandbox.", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_NotionEnabledWithoutToken_ReturnsError()
+    {
+        var config = new GatewayConfig
+        {
+            Plugins = new PluginsConfig
+            {
+                Native = new NativePluginsConfig
+                {
+                    Notion = new NotionConfig
+                    {
+                        Enabled = true,
+                        ApiKeyRef = "",
+                        DefaultPageId = "page-1"
+                    }
+                }
+            }
+        };
+
+        var errors = ConfigValidator.Validate(config);
+        Assert.Contains(errors, error => error.Contains("Plugins.Native.Notion.ApiKeyRef", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_NotionEnabledWithoutTargets_ReturnsError()
+    {
+        var config = new GatewayConfig
+        {
+            Plugins = new PluginsConfig
+            {
+                Native = new NativePluginsConfig
+                {
+                    Notion = new NotionConfig
+                    {
+                        Enabled = true,
+                        ApiKeyRef = "raw:test-token"
+                    }
+                }
+            }
+        };
+
+        var errors = ConfigValidator.Validate(config);
+        Assert.Contains(errors, error => error.Contains("at least one allowed/default page or database id", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_NotionDefaultTargets_AreSufficient()
+    {
+        var config = new GatewayConfig
+        {
+            Plugins = new PluginsConfig
+            {
+                Native = new NativePluginsConfig
+                {
+                    Notion = new NotionConfig
+                    {
+                        Enabled = true,
+                        ApiKeyRef = "raw:test-token",
+                        DefaultDatabaseId = "db-1"
+                    }
+                }
+            }
+        };
+
+        var errors = ConfigValidator.Validate(config);
+        Assert.DoesNotContain(errors, error => error.Contains("Plugins.Native.Notion", StringComparison.Ordinal));
     }
 }

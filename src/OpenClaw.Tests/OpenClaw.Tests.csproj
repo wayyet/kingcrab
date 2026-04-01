@@ -1,19 +1,20 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <IsPackable>false</IsPackable>
+    <OpenClawEnableMafExperiment Condition="'$(OpenClawEnableMafExperiment)' == ''">false</OpenClawEnableMafExperiment>
     <OpenClawEnableOpenSandbox Condition="'$(OpenClawEnableOpenSandbox)' == ''">false</OpenClawEnableOpenSandbox>
     <RootNamespace>OpenClaw.Tests</RootNamespace>
     <InterceptorsNamespaces>$(InterceptorsNamespaces);Microsoft.AspNetCore.OpenApi.Generated</InterceptorsNamespaces>
   </PropertyGroup>
+
   <ItemGroup>
-    <ProjectReference Include="..\..\src\OpenClaw.Agent\OpenClaw.Agent.csproj" />
-    <ProjectReference Include="..\..\src\OpenClaw.Channels\OpenClaw.Channels.csproj" />
-    <ProjectReference Include="..\..\src\OpenClaw.Cli\OpenClaw.Cli.csproj" />
-    <ProjectReference Include="..\..\src\OpenClaw.Core\OpenClaw.Core.csproj" />
-    <ProjectReference Include="..\..\src\OpenClaw.Gateway\OpenClaw.Gateway.csproj" />
-    <ProjectReference Include="..\..\src\OpenClaw.PluginKit\OpenClaw.PluginKit.csproj" />
-    <ProjectReference Include="..\..\src\OpenClawNet.Sandbox.OpenSandbox\OpenClawNet.Sandbox.OpenSandbox.csproj" />
-    <ProjectReference Include="..\OpenClaw.TestPluginFixtures\OpenClaw.TestPluginFixtures.csproj" />
+    <ProjectReference Include="..\OpenClaw.Core\OpenClaw.Core.csproj" />
+    <ProjectReference Include="..\OpenClaw.Agent\OpenClaw.Agent.csproj" />
+    <ProjectReference Include="..\OpenClaw.Channels\OpenClaw.Channels.csproj" />
+    <ProjectReference Include="..\OpenClaw.Cli\OpenClaw.Cli.csproj" />
+    <ProjectReference Include="..\OpenClaw.Companion\OpenClaw.Companion.csproj" />
+    <ProjectReference Include="..\OpenClaw.Gateway\OpenClaw.Gateway.csproj" />
+    <ProjectReference Include="..\OpenClaw.PluginKit\OpenClaw.PluginKit.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

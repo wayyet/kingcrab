@@ -32,14 +32,7 @@ public class PluginDiscoveryTests : IDisposable
             """{"id":"test-plugin","name":"Test Plugin","version":"1.0.0"}""");
         File.WriteAllText(Path.Combine(pluginDir, "index.ts"), "export default function() {}");
 
-        var config = new PluginsConfig
-        {
-            Load = new PluginLoadConfig
-            {
-                Paths = [_tempDir],
-                IncludeGlobalExtensions = false
-            }
-        };
+        var config = new PluginsConfig { Load = new PluginLoadConfig { Paths = [_tempDir] } };
 
         // Act
         var discovered = PluginDiscovery.Discover(config);
@@ -60,14 +53,7 @@ public class PluginDiscoveryTests : IDisposable
         File.WriteAllText(Path.Combine(pluginDir, "openclaw.plugin.json"), "{ this is not valid json");
         File.WriteAllText(Path.Combine(pluginDir, "index.ts"), "export default function() {}");
 
-        var config = new PluginsConfig
-        {
-            Load = new PluginLoadConfig
-            {
-                Paths = [_tempDir],
-                IncludeGlobalExtensions = false
-            }
-        };
+        var config = new PluginsConfig { Load = new PluginLoadConfig { Paths = [_tempDir] } };
 
         // Act
         var discovered = PluginDiscovery.Discover(config);
@@ -84,10 +70,7 @@ public class PluginDiscoveryTests : IDisposable
         Directory.CreateDirectory(extDir);
         File.WriteAllText(Path.Combine(extDir, "my-tool.ts"), "// tool code");
 
-        var config = new PluginsConfig
-        {
-            Load = new PluginLoadConfig { IncludeGlobalExtensions = false }
-        };
+        var config = new PluginsConfig();
 
         // Act
         var discovered = PluginDiscovery.Discover(config, workspacePath: _tempDir);
@@ -115,11 +98,7 @@ public class PluginDiscoveryTests : IDisposable
 
         var config = new PluginsConfig
         {
-            Load = new PluginLoadConfig
-            {
-                Paths = [Path.Combine(_tempDir, "plugins")],
-                IncludeGlobalExtensions = false
-            }
+            Load = new PluginLoadConfig { Paths = [Path.Combine(_tempDir, "plugins")] }
         };
 
         // Act
@@ -216,6 +195,34 @@ public class PluginDiscoveryTests : IDisposable
         var result = PluginDiscovery.Filter([a, b], config);
 
         Assert.Equal(2, result.Count);
+    }
+
+    [Fact]
+    public void DiscoverWithDiagnostics_PackageEntryOutsideRoot_IsRejected()
+    {
+        var pluginDir = Path.Combine(_tempDir, "packed-plugin");
+        Directory.CreateDirectory(pluginDir);
+        File.WriteAllText(
+            Path.Combine(pluginDir, "package.json"),
+            """
+            {
+              "name": "packed-plugin",
+              "openclaw": {
+                "extensions": ["../escape.js"]
+              }
+            }
+            """);
+
+        var config = new PluginsConfig
+        {
+            Load = new PluginLoadConfig { Paths = [pluginDir] }
+        };
+
+        var result = PluginDiscovery.DiscoverWithDiagnostics(config);
+
+        Assert.Empty(result.Plugins);
+        var report = Assert.Single(result.Reports);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "entry_outside_root");
     }
 
     private static DiscoveredPlugin MakePlugin(string id, string? kind = null)

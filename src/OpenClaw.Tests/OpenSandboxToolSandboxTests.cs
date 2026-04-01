@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Text;
 using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Models;
+using OpenClaw.Core.Observability;
 using OpenClawNet.Sandbox.OpenSandbox;
 using Xunit;
 
@@ -57,6 +58,54 @@ public sealed class OpenSandboxToolSandboxTests
         await sandbox.DisposeAsync();
 
         Assert.Equal(1, handler.CountRequests("/v1/sandboxes/sb-1", HttpMethod.Delete));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RecordsLeaseCreateReuseAndRecoveryMetrics()
+    {
+        var createCount = 0;
+        var renewCount = 0;
+        var metrics = new RuntimeMetrics();
+        var handler = new RecordingHandler((request, _) =>
+        {
+            if (request.Method == HttpMethod.Post && request.RequestUri?.AbsolutePath.EndsWith("/v1/sandboxes", StringComparison.Ordinal) == true)
+            {
+                createCount++;
+                return JsonResponse($$"""{"id":"sb-{{createCount}}","expiresAt":"2030-01-01T00:00:00Z"}""");
+            }
+
+            if (request.Method == HttpMethod.Post && request.RequestUri?.AbsolutePath.EndsWith("/renew-expiration", StringComparison.Ordinal) == true)
+            {
+                renewCount++;
+                return renewCount == 2
+                    ? new HttpResponseMessage(HttpStatusCode.NotFound)
+                    : JsonResponse("""{"expiresAt":"2030-01-01T00:00:00Z"}""");
+            }
+
+            if (request.Method == HttpMethod.Post && request.RequestUri?.AbsolutePath.EndsWith("/exec", StringComparison.Ordinal) == true)
+                return JsonResponse("""{"exitCode":0,"stdOut":"ok","stdErr":""}""");
+
+            if (request.Method == HttpMethod.Delete)
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+
+            throw new InvalidOperationException("Unexpected request.");
+        });
+
+        await using var sandbox = CreateSandbox(handler, metrics);
+        var request = new SandboxExecutionRequest
+        {
+            Command = "echo",
+            Arguments = ["hello"],
+            Template = "ghcr.io/example/shell:latest",
+            LeaseKey = "session:shell"
+        };
+
+        await sandbox.ExecuteAsync(request);
+        await sandbox.ExecuteAsync(request);
+
+        Assert.Equal(2, metrics.SandboxLeaseCreates);
+        Assert.Equal(1, metrics.SandboxLeaseReuses);
+        Assert.Equal(1, metrics.SandboxLeaseRecoveries);
     }
 
     [Fact]
@@ -184,6 +233,93 @@ public sealed class OpenSandboxToolSandboxTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_InvalidEnvironmentVariableName_Throws()
+    {
+        var handler = new RecordingHandler((request, _) =>
+        {
+            if (request.Method == HttpMethod.Post && request.RequestUri?.AbsolutePath.EndsWith("/v1/sandboxes", StringComparison.Ordinal) == true)
+                return JsonResponse("""{"id":"sb-invalid-env","expiresAt":"2030-01-01T00:00:00Z"}""");
+
+            if (request.Method == HttpMethod.Post && request.RequestUri?.AbsolutePath.EndsWith("/renew-expiration", StringComparison.Ordinal) == true)
+                return JsonResponse("""{"expiresAt":"2030-01-01T00:00:00Z"}""");
+
+            if (request.Method == HttpMethod.Post && request.RequestUri?.AbsolutePath.EndsWith("/exec", StringComparison.Ordinal) == true)
+                return JsonResponse("""{"exitCode":0,"stdOut":"ok","stdErr":""}""");
+
+            if (request.Method == HttpMethod.Delete)
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+
+            throw new InvalidOperationException("Unexpected request.");
+        });
+
+        await using var sandbox = CreateSandbox(handler);
+
+        await Assert.ThrowsAsync<ToolSandboxException>(() =>
+            sandbox.ExecuteAsync(new SandboxExecutionRequest
+            {
+                Command = "echo",
+                Arguments = ["hello"],
+                Template = "ghcr.io/example/shell:latest",
+                LeaseKey = "session:invalid-env",
+                Environment = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["BAD-NAME"] = "value"
+                }
+            }));
+
+        Assert.Equal(0, handler.CountRequests("/exec", HttpMethod.Post));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ConcurrentMissingLeaseRecovery_CreatesSingleReplacementSandbox()
+    {
+        var createCount = 0;
+        var returnMissingLease = false;
+        var handler = new RecordingHandler((request, _) =>
+        {
+            if (request.Method == HttpMethod.Post && request.RequestUri?.AbsolutePath.EndsWith("/v1/sandboxes", StringComparison.Ordinal) == true)
+            {
+                createCount++;
+                return JsonResponse($$"""{"id":"sb-{{createCount}}","expiresAt":"2030-01-01T00:00:00Z"}""");
+            }
+
+            if (request.Method == HttpMethod.Post && request.RequestUri?.AbsolutePath.EndsWith("/renew-expiration", StringComparison.Ordinal) == true)
+            {
+                if (returnMissingLease && request.RequestUri?.AbsolutePath.Contains("/sb-1/", StringComparison.Ordinal) == true)
+                    return new HttpResponseMessage(HttpStatusCode.NotFound);
+
+                return JsonResponse("""{"expiresAt":"2030-01-01T00:00:00Z"}""");
+            }
+
+            if (request.Method == HttpMethod.Post && request.RequestUri?.AbsolutePath.EndsWith("/exec", StringComparison.Ordinal) == true)
+                return JsonResponse("""{"exitCode":0,"stdOut":"ok","stdErr":""}""");
+
+            if (request.Method == HttpMethod.Delete)
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+
+            throw new InvalidOperationException("Unexpected request.");
+        });
+
+        await using var sandbox = CreateSandbox(handler);
+        var request = new SandboxExecutionRequest
+        {
+            Command = "echo",
+            Arguments = ["hello"],
+            Template = "ghcr.io/example/shell:latest",
+            LeaseKey = "session:shared-recovery"
+        };
+
+        await sandbox.ExecuteAsync(request);
+        returnMissingLease = true;
+
+        await Task.WhenAll(
+            sandbox.ExecuteAsync(request),
+            sandbox.ExecuteAsync(request));
+
+        Assert.Equal(2, createCount);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_HttpRequestException_MapsToUnavailableException()
     {
         var handler = new ThrowingHandler(new HttpRequestException("connection refused"));
@@ -198,14 +334,15 @@ public sealed class OpenSandboxToolSandboxTests
             }));
     }
 
-    private static OpenSandboxToolSandbox CreateSandbox(HttpMessageHandler handler)
+    private static OpenSandboxToolSandbox CreateSandbox(HttpMessageHandler handler, RuntimeMetrics? metrics = null)
         => new(
             new HttpClient(handler),
             new OpenSandboxOptions
             {
                 Endpoint = "http://localhost:5000",
                 DefaultTTL = 300
-            });
+            },
+            metrics: metrics);
 
     private static HttpResponseMessage JsonResponse(string json)
         => new(HttpStatusCode.OK)
