@@ -1,3 +1,5 @@
+using OpenSandbox.Config;
+
 namespace OpenClawNet.Sandbox.OpenSandbox;
 
 public sealed class OpenSandboxOptions
@@ -6,13 +8,26 @@ public sealed class OpenSandboxOptions
     public string? ApiKey { get; set; }
     public int DefaultTTL { get; set; } = 300;
 
-    public Uri GetApiBaseUri()
+    /// <summary>
+    /// Builds a <see cref="ConnectionConfig"/> from <see cref="Endpoint"/> and <see cref="ApiKey"/>.
+    /// Endpoint format: http[s]://host[:port]
+    /// </summary>
+    public ConnectionConfig BuildConnectionConfig()
     {
-        var normalized = Endpoint.Trim().TrimEnd('/');
-        if (!normalized.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
-            normalized += "/v1";
+        var uri = new Uri(Endpoint.Trim());
+        var protocol = uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase)
+            ? ConnectionProtocol.Https
+            : ConnectionProtocol.Http;
 
-        return new Uri(normalized + "/", UriKind.Absolute);
+        // ConnectionConfigOptions.Domain expects "host" or "host:port"
+        var domain = uri.IsDefaultPort ? uri.Host : $"{uri.Host}:{uri.Port}";
+
+        return new ConnectionConfig(new ConnectionConfigOptions
+        {
+            Domain = domain,
+            Protocol = protocol,
+            ApiKey = string.IsNullOrWhiteSpace(ApiKey) ? null : ApiKey,
+        });
     }
 }
 

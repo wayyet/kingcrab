@@ -1,42 +1,26 @@
-using System.Net;
-using System.Net.Http.Headers;
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization.Metadata;
+﻿using System.Text;
 using Microsoft.Extensions.Logging;
 using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Models;
+using OpenSandbox;
+using OpenSandbox.Core;
 
 namespace OpenClawNet.Sandbox.OpenSandbox;
 
 public sealed class OpenSandboxToolSandbox : IToolSandbox, IAsyncDisposable
 {
-    private readonly HttpClient _httpClient;
     private readonly OpenSandboxOptions _options;
     private readonly ILogger<OpenSandboxToolSandbox>? _logger;
     private readonly SemaphoreSlim _leaseGate = new(1, 1);
-    private readonly Dictionary<string, SandboxLease> _leases = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, SandboxEntry> _leases = new(StringComparer.Ordinal);
     private bool _disposed;
 
     public OpenSandboxToolSandbox(
-        HttpClient httpClient,
         OpenSandboxOptions options,
         ILogger<OpenSandboxToolSandbox>? logger = null)
     {
-        _httpClient = httpClient;
         _options = options;
         _logger = logger;
-
-        _httpClient.BaseAddress = options.GetApiBaseUri();
-        _httpClient.Timeout = Timeout.InfiniteTimeSpan;
-        if (!_httpClient.DefaultRequestHeaders.Accept.Any(header =>
-                string.Equals(header.MediaType, "application/json", StringComparison.OrdinalIgnoreCase)))
-        {
-            _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        }
-
-        if (!string.IsNullOrWhiteSpace(_options.ApiKey))
-            _httpClient.DefaultRequestHeaders.TryAddWithoutValidation("OPEN-SANDBOX-API-KEY", _options.ApiKey);
     }
 
     public async Task<SandboxResult> ExecuteAsync(
@@ -59,19 +43,19 @@ public sealed class OpenSandboxToolSandbox : IToolSandbox, IAsyncDisposable
 
         if (string.IsNullOrWhiteSpace(request.LeaseKey))
         {
-            var oneShotLease = await CreateLeaseAsync(request.Template, ttl, leaseKey: null, cancellationToken);
+            var oneShotEntry = await CreateEntryAsync(request.Template, ttl, leaseKey: null, cancellationToken);
             try
             {
-                return await ExecuteAgainstLeaseAsync(oneShotLease, request, ttl, cancellationToken);
+                return await RunCommandAsync(oneShotEntry.Sandbox, request, ttl, cancellationToken);
             }
             finally
             {
-                await DeleteSandboxBestEffortAsync(oneShotLease.SandboxId, CancellationToken.None);
+                await KillBestEffortAsync(oneShotEntry.Sandbox, CancellationToken.None);
             }
         }
 
-        var lease = await EnsureLeaseAsync(request.LeaseKey, request.Template, ttl, cancellationToken);
-        return await ExecuteAgainstLeaseAsync(lease, request, ttl, cancellationToken);
+        var entry = await EnsureEntryAsync(request.LeaseKey, request.Template, ttl, cancellationToken);
+        return await RunCommandWithRecoveryAsync(entry, request, ttl, cancellationToken);
     }
 
     public async ValueTask DisposeAsync()
@@ -81,11 +65,11 @@ public sealed class OpenSandboxToolSandbox : IToolSandbox, IAsyncDisposable
 
         _disposed = true;
 
-        List<SandboxLease> leases;
+        List<SandboxEntry> entries;
         await _leaseGate.WaitAsync();
         try
         {
-            leases = [.. _leases.Values];
+            entries = [.. _leases.Values];
             _leases.Clear();
         }
         finally
@@ -93,59 +77,88 @@ public sealed class OpenSandboxToolSandbox : IToolSandbox, IAsyncDisposable
             _leaseGate.Release();
         }
 
-        foreach (var lease in leases)
-            await DeleteSandboxBestEffortAsync(lease.SandboxId, CancellationToken.None);
+        foreach (var entry in entries)
+            await KillBestEffortAsync(entry.Sandbox, CancellationToken.None);
 
         _leaseGate.Dispose();
     }
 
-    private async Task<SandboxResult> ExecuteAgainstLeaseAsync(
-        SandboxLease lease,
+    // ── Execution ────────────────────────────────────────────────────────────
+
+    private async Task<SandboxResult> RunCommandWithRecoveryAsync(
+        SandboxEntry entry,
         SandboxExecutionRequest request,
         int ttl,
         CancellationToken cancellationToken)
     {
         try
         {
-            await RenewLeaseAsync(lease, ttl, cancellationToken);
-
-            var command = BuildCommandText(request);
-            var response = await SendAsync(
-                HttpMethod.Post,
-                $"sandboxes/{Uri.EscapeDataString(lease.SandboxId)}/exec",
-                new OpenSandboxExecRequest { Command = command },
-                OpenSandboxJsonContext.Default.OpenSandboxExecRequest,
-                cancellationToken);
-
-            return await DeserializeAsync(
-                response,
-                OpenSandboxJsonContext.Default.OpenSandboxExecResponse,
-                static payload => new SandboxResult
-                {
-                    ExitCode = payload.ExitCode,
-                    Stdout = payload.StdOut,
-                    Stderr = payload.StdErr
-                },
-                cancellationToken);
+            return await RunCommandAsync(entry.Sandbox, request, ttl, cancellationToken);
         }
-        catch (OpenSandboxMissingLeaseException)
+        catch (SandboxGoneException)
         {
             if (string.IsNullOrWhiteSpace(request.LeaseKey))
-                throw;
+                throw new ToolSandboxException("Error: One-shot sandbox was unexpectedly evicted.");
 
-            await RemoveLeaseAsync(request.LeaseKey);
-            var recreatedLease = await EnsureLeaseAsync(request.LeaseKey, request.Template!, ttl, cancellationToken);
-            return await ExecuteAgainstLeaseAsync(recreatedLease, request, ttl, cancellationToken);
+            await RemoveEntryAsync(request.LeaseKey);
+            var recreated = await EnsureEntryAsync(request.LeaseKey, request.Template!, ttl, cancellationToken);
+            return await RunCommandAsync(recreated.Sandbox, request, ttl, cancellationToken);
         }
     }
 
-    private async Task<SandboxLease> EnsureLeaseAsync(
+    private async Task<SandboxResult> RunCommandAsync(
+        global::OpenSandbox.Sandbox sandbox,
+        SandboxExecutionRequest request,
+        int ttl,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await sandbox.RenewAsync(ttl, cancellationToken);
+
+            var command = BuildCommandText(request);
+            var result = await sandbox.Commands.RunAsync(command, cancellationToken: cancellationToken);
+
+            var stdout = string.Concat(result.Logs.Stdout.Select(static m => m.Text));
+            var stderr = string.Concat(result.Logs.Stderr.Select(static m => m.Text));
+
+            return new SandboxResult
+            {
+                ExitCode = result.ExitCode ?? 0,
+                Stdout = stdout,
+                Stderr = stderr,
+            };
+        }
+        catch (SandboxApiException ex) when (IsSandboxGone(ex))
+        {
+            throw new SandboxGoneException();
+        }
+        catch (SandboxApiException ex) when (IsServerError(ex))
+        {
+            throw new ToolSandboxUnavailableException(
+                $"OpenSandbox returned a server error: {ex.Error?.Message ?? ex.Message}", ex);
+        }
+        catch (SandboxApiException ex)
+        {
+            throw new ToolSandboxException(
+                $"OpenSandbox request failed: {ex.Error?.Message ?? ex.Message}", ex);
+        }
+        catch (SandboxException ex)
+        {
+            throw new ToolSandboxUnavailableException("OpenSandbox is unreachable.", ex);
+        }
+    }
+
+    // ── Lease management ─────────────────────────────────────────────────────
+
+    private async Task<SandboxEntry> EnsureEntryAsync(
         string leaseKey,
         string template,
         int ttl,
         CancellationToken cancellationToken)
     {
         await _leaseGate.WaitAsync(cancellationToken);
+        SandboxEntry? stale = null;
         try
         {
             if (_leases.TryGetValue(leaseKey, out var existing) &&
@@ -155,106 +168,79 @@ public sealed class OpenSandboxToolSandbox : IToolSandbox, IAsyncDisposable
                 return existing;
             }
 
-            // Keep the lease gate held while provisioning so only one sandbox is created
-            // for a given lease key at a time.
-            var created = await CreateLeaseAsync(template, ttl, leaseKey, cancellationToken);
+            if (existing is not null)
+            {
+                stale = existing;
+                _leases.Remove(leaseKey);
+            }
+
+            var created = await CreateEntryAsync(template, ttl, leaseKey, cancellationToken);
             _leases[leaseKey] = created;
             return created;
         }
         finally
         {
             _leaseGate.Release();
+            if (stale is not null)
+                _ = KillBestEffortAsync(stale.Sandbox, CancellationToken.None);
         }
     }
 
-    private async Task<SandboxLease> CreateLeaseAsync(
+    private async Task<SandboxEntry> CreateEntryAsync(
         string template,
         int ttl,
         string? leaseKey,
         CancellationToken cancellationToken)
     {
-        var response = await SendAsync(
-            HttpMethod.Post,
-            "sandboxes",
-            new OpenSandboxCreateRequest
+        var metadata = leaseKey is null
+            ? null
+            : new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                Image = new OpenSandboxImageSpec { Uri = template },
-                Timeout = ttl,
-                Metadata = leaseKey is null
-                    ? null
-                    : new Dictionary<string, string>(StringComparer.Ordinal)
-                    {
-                        ["leaseKey"] = leaseKey,
-                        ["toolTemplate"] = template
-                    }
-            },
-            OpenSandboxJsonContext.Default.OpenSandboxCreateRequest,
-            cancellationToken);
+                ["leaseKey"] = leaseKey,
+                ["toolTemplate"] = template
+            };
 
-        return await DeserializeAsync(
-            response,
-            OpenSandboxJsonContext.Default.OpenSandboxCreateResponse,
-            payload => new SandboxLease(
-                payload.Id,
-                template,
-                payload.ExpiresAt ?? DateTimeOffset.UtcNow.AddSeconds(ttl)),
-            cancellationToken);
-    }
+        _logger?.LogDebug("Creating OpenSandbox container (image={Image}, ttl={Ttl}s)", template, ttl);
 
-    private async Task RenewLeaseAsync(
-        SandboxLease lease,
-        int ttl,
-        CancellationToken cancellationToken)
-    {
-        var targetExpiration = DateTimeOffset.UtcNow.AddSeconds(ttl);
-        try
+        var sandbox = await global::OpenSandbox.Sandbox.CreateAsync(new global::OpenSandbox.SandboxCreateOptions
         {
-            var response = await SendAsync(
-                HttpMethod.Post,
-                $"sandboxes/{Uri.EscapeDataString(lease.SandboxId)}/renew-expiration",
-                new OpenSandboxRenewRequest { ExpiresAt = targetExpiration.ToString("O") },
-                OpenSandboxJsonContext.Default.OpenSandboxRenewRequest,
-                cancellationToken);
+            ConnectionConfig = _options.BuildConnectionConfig(),
+            Image = template,
+            TimeoutSeconds = ttl,
+            Metadata = metadata,
+        }, cancellationToken);
 
-            var renewedAt = await DeserializeAsync(
-                response,
-                OpenSandboxJsonContext.Default.OpenSandboxRenewResponse,
-                payload => payload.ExpiresAt ?? targetExpiration,
-                cancellationToken);
+        _logger?.LogDebug("OpenSandbox container created: {SandboxId}", sandbox.Id);
 
-            lease.ExpiresAt = renewedAt;
-        }
-        catch (OpenSandboxMissingLeaseException)
-        {
-            throw;
-        }
+        return new SandboxEntry(sandbox, template, DateTimeOffset.UtcNow.AddSeconds(ttl));
     }
 
     private async Task EvictExpiredLeasesAsync(CancellationToken cancellationToken)
     {
-        List<(string LeaseKey, SandboxLease Lease)> expired;
+        List<SandboxEntry> expired;
         await _leaseGate.WaitAsync(cancellationToken);
         try
         {
             var now = DateTimeOffset.UtcNow;
-            expired = _leases
-                .Where(static pair => pair.Value.ExpiresAt <= DateTimeOffset.UtcNow)
-                .Select(static pair => (pair.Key, pair.Value))
+            var expiredKeys = _leases
+                .Where(pair => pair.Value.ExpiresAt <= now)
+                .Select(pair => pair.Key)
                 .ToList();
 
-            foreach (var (leaseKey, _) in expired)
-                _leases.Remove(leaseKey);
+            expired = expiredKeys.Select(k => _leases[k]).ToList();
+            foreach (var key in expiredKeys)
+                _leases.Remove(key);
         }
         finally
         {
             _leaseGate.Release();
         }
 
-        foreach (var (_, lease) in expired)
-            await DeleteSandboxBestEffortAsync(lease.SandboxId, cancellationToken);
+        foreach (var entry in expired)
+            await KillBestEffortAsync(entry.Sandbox, cancellationToken);
     }
 
-    private async Task RemoveLeaseAsync(string leaseKey)
+    private async Task RemoveEntryAsync(string leaseKey)
     {
         await _leaseGate.WaitAsync();
         try
@@ -267,87 +253,24 @@ public sealed class OpenSandboxToolSandbox : IToolSandbox, IAsyncDisposable
         }
     }
 
-    private async Task<HttpResponseMessage> SendAsync<TPayload>(
-        HttpMethod method,
-        string path,
-        TPayload? payload,
-        JsonTypeInfo<TPayload> payloadTypeInfo,
-        CancellationToken cancellationToken)
-    {
-        using var request = new HttpRequestMessage(method, path);
-        if (payload is not null)
-        {
-            request.Content = new StringContent(
-                JsonSerializer.Serialize(payload, payloadTypeInfo),
-                Encoding.UTF8,
-                "application/json");
-        }
-
-        try
-        {
-            var response = await _httpClient.SendAsync(request, cancellationToken);
-            if (response.StatusCode == HttpStatusCode.NotFound)
-            {
-                response.Dispose();
-                throw new OpenSandboxMissingLeaseException();
-            }
-
-            if (response.IsSuccessStatusCode)
-                return response;
-
-            var responseBody = response.Content is null
-                ? null
-                : await response.Content.ReadAsStringAsync(cancellationToken);
-            var message = $"OpenSandbox request failed ({(int)response.StatusCode}).";
-            response.Dispose();
-
-            if ((int)response.StatusCode >= 500)
-                throw new ToolSandboxUnavailableException(message);
-
-            throw new ToolSandboxException(string.IsNullOrWhiteSpace(responseBody) ? message : $"{message} {responseBody}");
-        }
-        catch (OpenSandboxMissingLeaseException)
-        {
-            throw;
-        }
-        catch (HttpRequestException ex)
-        {
-            throw new ToolSandboxUnavailableException("OpenSandbox is unreachable.", ex);
-        }
-        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
-        {
-            throw new ToolSandboxUnavailableException("OpenSandbox request timed out.", ex);
-        }
-    }
-
-    private static async Task<TResult> DeserializeAsync<TPayload, TResult>(
-        HttpResponseMessage response,
-        JsonTypeInfo<TPayload> payloadTypeInfo,
-        Func<TPayload, TResult> projector,
-        CancellationToken cancellationToken)
-    {
-        await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        var payload = await JsonSerializer.DeserializeAsync(responseStream, payloadTypeInfo, cancellationToken);
-        response.Dispose();
-
-        if (payload is null)
-            throw new ToolSandboxException("OpenSandbox returned an invalid response.");
-
-        return projector(payload);
-    }
-
-    private async Task DeleteSandboxBestEffortAsync(string sandboxId, CancellationToken cancellationToken)
+    private async Task KillBestEffortAsync(global::OpenSandbox.Sandbox sandbox, CancellationToken cancellationToken)
     {
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Delete, $"sandboxes/{Uri.EscapeDataString(sandboxId)}");
-            using var response = await _httpClient.SendAsync(request, cancellationToken);
+            await sandbox.KillAsync(cancellationToken);
+            _logger?.LogDebug("Killed OpenSandbox container: {SandboxId}", sandbox.Id);
         }
         catch (Exception ex)
         {
-            _logger?.LogDebug(ex, "Failed to delete OpenSandbox lease {SandboxId}", sandboxId);
+            _logger?.LogWarning(ex, "Failed to kill OpenSandbox container {SandboxId}", sandbox.Id);
+        }
+        finally
+        {
+            await sandbox.DisposeAsync();
         }
     }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static string BuildCommandText(SandboxExecutionRequest request)
     {
@@ -376,19 +299,28 @@ public sealed class OpenSandboxToolSandbox : IToolSandbox, IAsyncDisposable
         return builder.ToString();
     }
 
-    private sealed class SandboxLease
+    private static bool IsSandboxGone(SandboxApiException ex)
     {
-        public SandboxLease(string sandboxId, string template, DateTimeOffset expiresAt)
-        {
-            SandboxId = sandboxId;
-            Template = template;
-            ExpiresAt = expiresAt;
-        }
-
-        public string SandboxId { get; }
-        public string Template { get; }
-        public DateTimeOffset ExpiresAt { get; set; }
+        var code = ex.Error?.Code ?? string.Empty;
+        return code.Contains("NOT_FOUND", StringComparison.OrdinalIgnoreCase);
     }
 
-    private sealed class OpenSandboxMissingLeaseException : Exception;
+    private static bool IsServerError(SandboxApiException ex)
+    {
+        var code = ex.Error?.Code ?? string.Empty;
+        return code.StartsWith("INTERNAL", StringComparison.OrdinalIgnoreCase) ||
+               code.StartsWith("UNAVAILABLE", StringComparison.OrdinalIgnoreCase) ||
+               code.StartsWith("SERVER", StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ── Inner types ───────────────────────────────────────────────────────────
+
+    private sealed class SandboxEntry(global::OpenSandbox.Sandbox sandbox, string template, DateTimeOffset expiresAt)
+    {
+        public global::OpenSandbox.Sandbox Sandbox { get; } = sandbox;
+        public string Template { get; } = template;
+        public DateTimeOffset ExpiresAt { get; set; } = expiresAt;
+    }
+
+    private sealed class SandboxGoneException : Exception;
 }

@@ -31,14 +31,8 @@ public static class OpenSandboxServiceCollectionExtensions
         };
 
         services.AddSingleton(options);
-        services.AddHttpClient(nameof(OpenSandboxToolSandbox), client =>
-        {
-            client.BaseAddress = options.GetApiBaseUri();
-            client.Timeout = Timeout.InfiniteTimeSpan;
-        });
         services.AddSingleton<IToolSandbox>(sp =>
             new OpenSandboxToolSandbox(
-                sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(OpenSandboxToolSandbox)),
                 sp.GetRequiredService<OpenSandboxOptions>(),
                 sp.GetService<Microsoft.Extensions.Logging.ILogger<OpenSandboxToolSandbox>>()));
 
