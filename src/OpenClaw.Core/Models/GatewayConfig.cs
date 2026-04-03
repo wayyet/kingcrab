@@ -61,6 +61,13 @@ public sealed class LlmProviderConfig
     public int MaxTokens { get; set; } = 4096;
     public float Temperature { get; set; } = 0.7f;
 
+    /// <summary>
+    /// When true, image markers in user messages are converted to native image content
+    /// parts and sent directly to the model (requires a vision-capable model such as gpt-4o).
+    /// When false, image analysis is delegated to the <c>image_analyze</c> tool (Layer 2).
+    /// </summary>
+    public bool SupportsVision { get; set; } = false;
+
     /// <summary>Per-call timeout in seconds for LLM requests. 0 = no timeout.</summary>
     public int TimeoutSeconds { get; set; } = 120;
 

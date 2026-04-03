@@ -571,9 +571,18 @@ public sealed class MafAgentRuntime : IAgentRuntime
             }
             else if (turn.Role is "user" or "assistant" && turn.Content != "[tool_use]")
             {
-                messages.Add(new ChatMessage(
-                    turn.Role == "user" ? ChatRole.User : ChatRole.Assistant,
-                    turn.Content));
+                // Layer 1: when vision is enabled and this is a user turn, extract image markers
+                // and inline them as native ImageContent parts understood by the vision model.
+                if (turn.Role == "user" && _config.SupportsVision)
+                {
+                    messages.Add(BuildUserMessageWithImages(turn.Content));
+                }
+                else
+                {
+                    messages.Add(new ChatMessage(
+                        turn.Role == "user" ? ChatRole.User : ChatRole.Assistant,
+                        turn.Content));
+                }
             }
             else if (turn.Content == "[tool_use]" && turn.ToolCalls is { Count: > 0 })
             {
@@ -586,6 +595,66 @@ public sealed class MafAgentRuntime : IAgentRuntime
         }
 
         return messages;
+    }
+
+    /// <summary>
+    /// Parses <c>[IMAGE_URL:...]</c> and <c>[IMAGE_PATH:...]</c> markers out of a user turn
+    /// and builds a multi-part <see cref="ChatMessage"/> with native <see cref="ImageContent"/>
+    /// entries that vision-capable models can process directly.
+    /// Falls back to a plain text message when no image markers are present.
+    /// </summary>
+    private static ChatMessage BuildUserMessageWithImages(string turnContent)
+    {
+        var (markers, remainingText) = MediaMarkerProtocol.Extract(turnContent);
+
+        var imageMarkers = markers.Where(m =>
+            m.Kind is MediaMarkerKind.ImageUrl or MediaMarkerKind.ImagePath).ToList();
+
+        if (imageMarkers.Count == 0)
+            return new ChatMessage(ChatRole.User, turnContent);
+
+        var parts = new List<AIContent>();
+
+        if (!string.IsNullOrWhiteSpace(remainingText))
+            parts.Add(new TextContent(remainingText));
+
+        foreach (var marker in imageMarkers)
+        {
+            if (marker.Kind == MediaMarkerKind.ImageUrl)
+            {
+                // UriContent for remote URLs — the model fetches the image itself.
+                parts.Add(new UriContent(marker.Value, "image/*"));
+            }
+            else // ImagePath
+            {
+                if (!File.Exists(marker.Value))
+                    continue;
+
+                try
+                {
+                    var bytes = File.ReadAllBytes(marker.Value);
+                    var mime = Path.GetExtension(marker.Value).ToLowerInvariant() switch
+                    {
+                        ".jpg" or ".jpeg" => "image/jpeg",
+                        ".gif" => "image/gif",
+                        ".webp" => "image/webp",
+                        _ => "image/png"
+                    };
+                    // DataContent sends the raw bytes as a data URI inline.
+                    parts.Add(new DataContent(bytes, mime));
+                }
+                catch
+                {
+                    // Skip unreadable local images rather than failing the whole turn.
+                }
+            }
+        }
+
+        // Ensure there is always at least some text so models that require a text part don't error.
+        if (!parts.OfType<TextContent>().Any())
+            parts.Insert(0, new TextContent("Please analyze the attached image(s)."));
+
+        return new ChatMessage(ChatRole.User, parts);
     }
 
     private void ApplySkills(IReadOnlyList<SkillDefinition> skills)

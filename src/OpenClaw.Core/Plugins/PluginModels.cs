@@ -164,6 +164,7 @@ public sealed class NativePluginsConfig
     public GitToolsConfig GitTools { get; set; } = new();
     public CodeExecConfig CodeExec { get; set; } = new();
     public ImageGenConfig ImageGen { get; set; } = new();
+    public ImageAnalyzeConfig ImageAnalyze { get; set; } = new();
     public PdfReadConfig PdfRead { get; set; } = new();
     public CalendarConfig Calendar { get; set; } = new();
     public EmailConfig Email { get; set; } = new();
@@ -397,6 +398,35 @@ public sealed class ImageGenConfig
 
     /// <summary>Default quality ("standard" or "hd" for DALL-E 3).</summary>
     public string Quality { get; set; } = "standard";
+}
+
+public sealed class ImageAnalyzeConfig
+{
+    public bool Enabled { get; set; } = false;
+
+    /// <summary>
+    /// Provider for the vision model: "openai", "azure-openai", "openai-compatible", etc.
+    /// Can differ from the main LLM provider to route vision calls to a dedicated model.
+    /// </summary>
+    public string Provider { get; set; } = "openai";
+
+    /// <summary>API key (or env: / raw: secret ref). Inherits from main LLM config if null.</summary>
+    public string? ApiKey { get; set; }
+
+    /// <summary>API endpoint. Required for openai-compatible providers.</summary>
+    public string? Endpoint { get; set; }
+
+    /// <summary>Vision model name (e.g. "gpt-4o", "gpt-4.1").</summary>
+    public string Model { get; set; } = "gpt-4o";
+
+    /// <summary>Maximum images per single analyze call.</summary>
+    public int MaxImagesPerCall { get; set; } = 5;
+
+    /// <summary>Maximum output characters for the analysis result.</summary>
+    public int MaxOutputChars { get; set; } = 8_000;
+
+    /// <summary>Per-call timeout in seconds.</summary>
+    public int TimeoutSeconds { get; set; } = 60;
 }
 
 public sealed class PdfReadConfig
