@@ -168,6 +168,12 @@ internal static class RuntimeInitializationExtensions
             ? defaultRegistration.Client
             : LlmClientFactory.CreateChatClient(config.Llm);
 
+        if (config.Plugins.Mcp.Enabled)
+        {
+            var mcpRegistry = app.Services.GetRequiredService<McpServerToolRegistry>();
+            await mcpRegistry.RegisterToolsAsync(nativeRegistry, app.Lifetime.ApplicationStopping);
+        }
+
         var resolveLogger = loggerFactory.CreateLogger("PluginResolver");
         IReadOnlyList<ITool> tools = NativePluginRegistry.ResolvePreference(
             builtInTools,
