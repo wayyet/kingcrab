@@ -2,7 +2,13 @@
 using Microsoft.Extensions.Logging;
 using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Models;
-using OpenSandbox;
+// Within namespace OpenClawNet.Sandbox.OpenSandbox, bare 'Sandbox' resolves to the
+// enclosing namespace segment 'OpenClawNet.Sandbox' (parent namespace lookup wins over
+// using-alias lookup per the C# spec). Using a distinct alias name sidesteps the
+// collision cleanly, without the original global:: workaround on every reference.
+using SdkSandbox = OpenSandbox.Sandbox;
+using SandboxCreateOptions = OpenSandbox.SandboxCreateOptions;
+using OpenSandbox.Config;
 using OpenSandbox.Core;
 
 namespace OpenClawNet.Sandbox.OpenSandbox;
@@ -11,6 +17,8 @@ public sealed class OpenSandboxToolSandbox : IToolSandbox, IAsyncDisposable
 {
     private readonly OpenSandboxOptions _options;
     private readonly ILogger<OpenSandboxToolSandbox>? _logger;
+    // ConnectionConfig is stateless and safe to reuse across calls.
+    private readonly ConnectionConfig _connectionConfig;
     private readonly SemaphoreSlim _leaseGate = new(1, 1);
     private readonly Dictionary<string, SandboxEntry> _leases = new(StringComparer.Ordinal);
     private bool _disposed;
@@ -20,6 +28,7 @@ public sealed class OpenSandboxToolSandbox : IToolSandbox, IAsyncDisposable
         ILogger<OpenSandboxToolSandbox>? logger = null)
     {
         _options = options;
+        _connectionConfig = options.BuildConnectionConfig();
         _logger = logger;
     }
 
@@ -43,10 +52,12 @@ public sealed class OpenSandboxToolSandbox : IToolSandbox, IAsyncDisposable
 
         if (string.IsNullOrWhiteSpace(request.LeaseKey))
         {
+            // One-shot: the container was just created with `ttl` seconds already set;
+            // there is no need to RenewAsync before running: skip the extra round-trip.
             var oneShotEntry = await CreateEntryAsync(request.Template, ttl, leaseKey: null, cancellationToken);
             try
             {
-                return await RunCommandAsync(oneShotEntry.Sandbox, request, ttl, cancellationToken);
+                return await RunCommandAsync(oneShotEntry.Sandbox, request, ttl, renewBeforeRun: false, cancellationToken);
             }
             finally
             {
@@ -93,7 +104,15 @@ public sealed class OpenSandboxToolSandbox : IToolSandbox, IAsyncDisposable
     {
         try
         {
-            return await RunCommandAsync(entry.Sandbox, request, ttl, cancellationToken);
+            // Capture the timestamp before RenewAsync (called inside RunCommandAsync) so that
+            // ExpiresAt never exceeds the actual server-side expiry.
+            // If we set ExpiresAt = UtcNow.AddSeconds(ttl) *after* the command completes,
+            // ExpiresAt would be (command_duration) seconds past the real server expiry,
+            // causing the next call to hit a dead container (404 → recovery round-trip).
+            var renewedAt = DateTimeOffset.UtcNow;
+            var result = await RunCommandAsync(entry.Sandbox, request, ttl, renewBeforeRun: true, cancellationToken);
+            entry.ExpiresAt = renewedAt.AddSeconds(ttl);
+            return result;
         }
         catch (SandboxGoneException)
         {
@@ -102,19 +121,26 @@ public sealed class OpenSandboxToolSandbox : IToolSandbox, IAsyncDisposable
 
             await RemoveEntryAsync(request.LeaseKey);
             var recreated = await EnsureEntryAsync(request.LeaseKey, request.Template!, ttl, cancellationToken);
-            return await RunCommandAsync(recreated.Sandbox, request, ttl, cancellationToken);
+            var renewedAt = DateTimeOffset.UtcNow;
+            var recovered = await RunCommandAsync(recreated.Sandbox, request, ttl, renewBeforeRun: true, cancellationToken);
+            recreated.ExpiresAt = renewedAt.AddSeconds(ttl);
+            return recovered;
         }
     }
 
     private async Task<SandboxResult> RunCommandAsync(
-        global::OpenSandbox.Sandbox sandbox,
+        SdkSandbox sandbox,
         SandboxExecutionRequest request,
         int ttl,
+        bool renewBeforeRun,
         CancellationToken cancellationToken)
     {
         try
         {
-            await sandbox.RenewAsync(ttl, cancellationToken);
+            // Leased containers are renewed before each command to reset the server-side TTL.
+            // One-shot containers skip this: they were just created with `ttl` seconds already.
+            if (renewBeforeRun)
+                await sandbox.RenewAsync(ttl, cancellationToken);
 
             var command = BuildCommandText(request);
             var result = await sandbox.Commands.RunAsync(command, cancellationToken: cancellationToken);
@@ -157,8 +183,9 @@ public sealed class OpenSandboxToolSandbox : IToolSandbox, IAsyncDisposable
         int ttl,
         CancellationToken cancellationToken)
     {
-        await _leaseGate.WaitAsync(cancellationToken);
+        // ── Fast path: return existing valid lease without creating anything ──────
         SandboxEntry? stale = null;
+        await _leaseGate.WaitAsync(cancellationToken);
         try
         {
             if (_leases.TryGetValue(leaseKey, out var existing) &&
@@ -173,16 +200,41 @@ public sealed class OpenSandboxToolSandbox : IToolSandbox, IAsyncDisposable
                 stale = existing;
                 _leases.Remove(leaseKey);
             }
+        }
+        finally
+        {
+            _leaseGate.Release();
+        }
 
-            var created = await CreateEntryAsync(template, ttl, leaseKey, cancellationToken);
+        // Kill stale entry outside the lock so we don't block other lease lookups.
+        if (stale is not null)
+            _ = KillBestEffortAsync(stale.Sandbox, CancellationToken.None);
+
+        // ── Slow path: create sandbox outside the lock ────────────────────────────
+        // Network I/O must not hold _leaseGate; doing so would serialize all
+        // concurrent sandbox operations (including lookups for different lease keys)
+        // behind a single container-creation round-trip.
+        var created = await CreateEntryAsync(template, ttl, leaseKey, cancellationToken);
+
+        // Register under lock. If a concurrent call for the same key beat us,
+        // discard our duplicate and return the winner.
+        await _leaseGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (_leases.TryGetValue(leaseKey, out var winner) &&
+                winner.ExpiresAt > DateTimeOffset.UtcNow &&
+                string.Equals(winner.Template, template, StringComparison.Ordinal))
+            {
+                _ = KillBestEffortAsync(created.Sandbox, CancellationToken.None);
+                return winner;
+            }
+
             _leases[leaseKey] = created;
             return created;
         }
         finally
         {
             _leaseGate.Release();
-            if (stale is not null)
-                _ = KillBestEffortAsync(stale.Sandbox, CancellationToken.None);
         }
     }
 
@@ -202,11 +254,14 @@ public sealed class OpenSandboxToolSandbox : IToolSandbox, IAsyncDisposable
 
         _logger?.LogDebug("Creating OpenSandbox container (image={Image}, ttl={Ttl}s)", template, ttl);
 
-        var sandbox = await global::OpenSandbox.Sandbox.CreateAsync(new global::OpenSandbox.SandboxCreateOptions
+        var sandbox = await SdkSandbox.CreateAsync(new SandboxCreateOptions
         {
-            ConnectionConfig = _options.BuildConnectionConfig(),
+            ConnectionConfig = _connectionConfig,
             Image = template,
             TimeoutSeconds = ttl,
+            // Give the container enough time to reach Running state, especially on first
+            // pull.  SDK default is 30 s; we use the configurable value (default 60 s).
+            ReadyTimeoutSeconds = _options.ReadyTimeoutSeconds > 0 ? _options.ReadyTimeoutSeconds : null,
             Metadata = metadata,
         }, cancellationToken);
 
@@ -236,8 +291,11 @@ public sealed class OpenSandboxToolSandbox : IToolSandbox, IAsyncDisposable
             _leaseGate.Release();
         }
 
+        // Use CancellationToken.None: entries are already deregistered from _leases above.
+        // Honouring the caller's token here would silently abort the kill (exception caught
+        // inside KillBestEffortAsync) and leak the containers.
         foreach (var entry in expired)
-            await KillBestEffortAsync(entry.Sandbox, cancellationToken);
+            await KillBestEffortAsync(entry.Sandbox, CancellationToken.None);
     }
 
     private async Task RemoveEntryAsync(string leaseKey)
@@ -253,7 +311,7 @@ public sealed class OpenSandboxToolSandbox : IToolSandbox, IAsyncDisposable
         }
     }
 
-    private async Task KillBestEffortAsync(global::OpenSandbox.Sandbox sandbox, CancellationToken cancellationToken)
+    private async Task KillBestEffortAsync(SdkSandbox sandbox, CancellationToken cancellationToken)
     {
         try
         {
@@ -301,6 +359,10 @@ public sealed class OpenSandboxToolSandbox : IToolSandbox, IAsyncDisposable
 
     private static bool IsSandboxGone(SandboxApiException ex)
     {
+        // HTTP 404 with no parseable JSON body yields SandboxErrorCodes.UnexpectedResponse,
+        // not "NOT_FOUND", so check the status code as the primary signal.
+        if (ex.StatusCode == 404)
+            return true;
         var code = ex.Error?.Code ?? string.Empty;
         return code.Contains("NOT_FOUND", StringComparison.OrdinalIgnoreCase);
     }
@@ -315,9 +377,9 @@ public sealed class OpenSandboxToolSandbox : IToolSandbox, IAsyncDisposable
 
     // ── Inner types ───────────────────────────────────────────────────────────
 
-    private sealed class SandboxEntry(global::OpenSandbox.Sandbox sandbox, string template, DateTimeOffset expiresAt)
+    private sealed class SandboxEntry(SdkSandbox sandbox, string template, DateTimeOffset expiresAt)
     {
-        public global::OpenSandbox.Sandbox Sandbox { get; } = sandbox;
+        public SdkSandbox Sandbox { get; } = sandbox;
         public string Template { get; } = template;
         public DateTimeOffset ExpiresAt { get; set; } = expiresAt;
     }

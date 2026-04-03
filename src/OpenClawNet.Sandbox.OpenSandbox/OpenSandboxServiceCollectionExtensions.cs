@@ -27,7 +27,10 @@ public static class OpenSandboxServiceCollectionExtensions
             ApiKey = ResolveSecretRefOrValue(sandboxSection["ApiKey"]),
             DefaultTTL = int.TryParse(sandboxSection["DefaultTTL"], out var defaultTtl)
                 ? defaultTtl
-                : 300
+                : 300,
+            ReadyTimeoutSeconds = int.TryParse(sandboxSection["ReadyTimeoutSeconds"], out var readyTimeout) && readyTimeout > 0
+                ? readyTimeout
+                : 60
         };
 
         services.AddSingleton(options);

@@ -9,6 +9,13 @@ public sealed class OpenSandboxOptions
     public int DefaultTTL { get; set; } = 300;
 
     /// <summary>
+    /// How long to wait (seconds) for a newly created sandbox to reach Running state.
+    /// Maps to <see cref="SandboxCreateOptions.ReadyTimeoutSeconds"/>.
+    /// SDK default is 30 s; 60 s gives room for image pulls on first use.
+    /// </summary>
+    public int ReadyTimeoutSeconds { get; set; } = 60;
+
+    /// <summary>
     /// Builds a <see cref="ConnectionConfig"/> from <see cref="Endpoint"/> and <see cref="ApiKey"/>.
     /// Endpoint format: http[s]://host[:port]
     /// </summary>
