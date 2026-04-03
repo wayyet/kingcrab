@@ -104,14 +104,8 @@ public sealed class OpenSandboxToolSandbox : IToolSandbox, IAsyncDisposable
     {
         try
         {
-            // Capture the timestamp before RenewAsync (called inside RunCommandAsync) so that
-            // ExpiresAt never exceeds the actual server-side expiry.
-            // If we set ExpiresAt = UtcNow.AddSeconds(ttl) *after* the command completes,
-            // ExpiresAt would be (command_duration) seconds past the real server expiry,
-            // causing the next call to hit a dead container (404 → recovery round-trip).
-            var renewedAt = DateTimeOffset.UtcNow;
             var result = await RunCommandAsync(entry.Sandbox, request, ttl, renewBeforeRun: true, cancellationToken);
-            entry.ExpiresAt = renewedAt.AddSeconds(ttl);
+            entry.ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(ttl);
             return result;
         }
         catch (SandboxGoneException)
@@ -119,11 +113,11 @@ public sealed class OpenSandboxToolSandbox : IToolSandbox, IAsyncDisposable
             if (string.IsNullOrWhiteSpace(request.LeaseKey))
                 throw new ToolSandboxException("Error: One-shot sandbox was unexpectedly evicted.");
 
+            _logger?.LogWarning("Leased sandbox gone for key {LeaseKey}, recreating", request.LeaseKey);
             await RemoveEntryAsync(request.LeaseKey);
             var recreated = await EnsureEntryAsync(request.LeaseKey, request.Template!, ttl, cancellationToken);
-            var renewedAt = DateTimeOffset.UtcNow;
-            var recovered = await RunCommandAsync(recreated.Sandbox, request, ttl, renewBeforeRun: true, cancellationToken);
-            recreated.ExpiresAt = renewedAt.AddSeconds(ttl);
+            // Freshly created — SDK already waited for Ready state; skip Renew.
+            var recovered = await RunCommandAsync(recreated.Sandbox, request, ttl, renewBeforeRun: false, cancellationToken);
             return recovered;
         }
     }
@@ -248,8 +242,10 @@ public sealed class OpenSandboxToolSandbox : IToolSandbox, IAsyncDisposable
             ? null
             : new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                ["leaseKey"] = leaseKey,
-                ["toolTemplate"] = template
+                // Kubernetes label values only allow [a-zA-Z0-9._-]; sanitize colons
+                // from values like "websocket:0HNKHBFTMIA4B:shell" or "alpine:3.23".
+                ["leaseKey"] = SanitizeLabelValue(leaseKey),
+                ["toolTemplate"] = SanitizeLabelValue(template)
             };
 
         _logger?.LogDebug("Creating OpenSandbox container (image={Image}, ttl={Ttl}s)", template, ttl);
@@ -259,9 +255,7 @@ public sealed class OpenSandboxToolSandbox : IToolSandbox, IAsyncDisposable
             ConnectionConfig = _connectionConfig,
             Image = template,
             TimeoutSeconds = ttl,
-            // Give the container enough time to reach Running state, especially on first
-            // pull.  SDK default is 30 s; we use the configurable value (default 60 s).
-            ReadyTimeoutSeconds = _options.ReadyTimeoutSeconds > 0 ? _options.ReadyTimeoutSeconds : null,
+            ReadyTimeoutSeconds = Math.Max(_options.ReadyTimeoutSeconds, 60),
             Metadata = metadata,
         }, cancellationToken);
 
@@ -373,6 +367,25 @@ public sealed class OpenSandboxToolSandbox : IToolSandbox, IAsyncDisposable
         return code.StartsWith("INTERNAL", StringComparison.OrdinalIgnoreCase) ||
                code.StartsWith("UNAVAILABLE", StringComparison.OrdinalIgnoreCase) ||
                code.StartsWith("SERVER", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Replaces characters not allowed in Kubernetes label values with underscores.
+    /// Valid chars: [a-zA-Z0-9._-], max 63 chars.
+    /// </summary>
+    private static string SanitizeLabelValue(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return value;
+
+        var span = value.Length > 63 ? value.AsSpan(0, 63) : value.AsSpan();
+        Span<char> buf = stackalloc char[span.Length];
+        for (var i = 0; i < span.Length; i++)
+        {
+            var c = span[i];
+            buf[i] = char.IsLetterOrDigit(c) || c is '.' or '-' or '_' ? c : '_';
+        }
+        return new string(buf);
     }
 
     // ── Inner types ───────────────────────────────────────────────────────────
