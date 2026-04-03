@@ -630,6 +630,236 @@
                 max-width: 90%;
             }
         }
+
+        /* ─── Session History Sidebar ─── */
+        #app-layout {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+            min-height: 0;
+        }
+
+        #sidebar {
+            width: 280px;
+            min-width: 260px;
+            background: rgba(8, 8, 10, 0.92);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            flex-shrink: 0;
+            transition: width 0.3s ease, min-width 0.3s ease, opacity 0.3s ease;
+        }
+
+        #sidebar.collapsed {
+            width: 0;
+            min-width: 0;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        #sidebar-header {
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+
+        #new-chat-btn {
+            background: var(--primary-gradient);
+            color: #fff;
+            border: none;
+            padding: 0.65rem 1rem;
+            border-radius: 10px;
+            font-family: 'Outfit', sans-serif;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            width: 100%;
+        }
+
+        #new-chat-btn:hover {
+            opacity: 0.88;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.35);
+        }
+
+        #session-search {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 0.45rem 0.85rem;
+            border-radius: 8px;
+            font-family: 'Outfit', sans-serif;
+            font-size: 0.88rem;
+            width: 100%;
+            box-sizing: border-box;
+            transition: border-color 0.2s;
+        }
+
+        #session-search:focus {
+            outline: none;
+            border-color: rgba(168, 85, 247, 0.5);
+            background: rgba(255, 255, 255, 0.07);
+        }
+
+        #session-search::placeholder {
+            color: rgba(255, 255, 255, 0.3);
+        }
+
+        #session-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0.5rem;
+        }
+
+        .session-item {
+            padding: 0.7rem 0.85rem;
+            border-radius: 10px;
+            cursor: pointer;
+            margin-bottom: 2px;
+            transition: background 0.15s ease;
+            border: 1px solid transparent;
+        }
+
+        .session-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .session-item.active {
+            background: rgba(99, 102, 241, 0.12);
+            border-color: rgba(99, 102, 241, 0.28);
+        }
+
+        .session-item-title {
+            font-size: 0.88rem;
+            font-weight: 500;
+            color: var(--text);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-bottom: 0.28rem;
+        }
+
+        .session-item-meta {
+            font-size: 0.76rem;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+        }
+
+        .session-active-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #22c55e;
+            box-shadow: 0 0 5px #22c55e;
+            flex-shrink: 0;
+            display: inline-block;
+            animation: pulse-dot 2s infinite;
+        }
+
+        .session-turns-badge {
+            background: rgba(255, 255, 255, 0.08);
+            padding: 1px 6px;
+            border-radius: 99px;
+            font-size: 0.72rem;
+        }
+
+        #sidebar-empty {
+            padding: 1.5rem 1rem;
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+
+        #chat-area {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            overflow: hidden;
+            min-width: 0;
+        }
+
+        #history-banner {
+            background: rgba(20, 184, 166, 0.08);
+            border-bottom: 1px solid rgba(20, 184, 166, 0.18);
+            padding: 0.55rem 1.5rem;
+            display: none;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+            gap: 1rem;
+        }
+
+        #history-banner.visible {
+            display: flex;
+        }
+
+        #history-banner-text {
+            font-size: 0.83rem;
+            color: var(--secondary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        #back-to-live-btn {
+            background: transparent;
+            border: 1px solid rgba(20, 184, 166, 0.35);
+            color: var(--secondary);
+            padding: 0.28rem 0.85rem;
+            border-radius: 99px;
+            font-family: 'Outfit', sans-serif;
+            font-size: 0.8rem;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+
+        #back-to-live-btn:hover {
+            background: rgba(20, 184, 166, 0.12);
+        }
+
+        #sidebar-toggle {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border);
+            color: var(--text);
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            padding: 0;
+            flex-shrink: 0;
+        }
+
+        #sidebar-toggle:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(168, 85, 247, 0.45);
+        }
+
+        @media (max-width: 768px) {
+            #sidebar {
+                position: absolute;
+                top: 0;
+                left: 0;
+                height: 100%;
+                z-index: 50;
+            }
+        }
     </style>
 </head>
 
@@ -643,6 +873,9 @@
             <h2>OpenClaw.NET</h2>
         </div>
         <div class="header-right">
+            <button id="sidebar-toggle" title="Toggle session history">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+            </button>
             <button id="doctor-button" title="Fetch /doctor/text">Doctor</button>
             <button id="oidc-login-button" title="Sign in with OIDC">OIDC Login</button>
             <button id="oidc-logout-button" title="Sign out from OIDC">OIDC Logout</button>
@@ -654,30 +887,52 @@
         </div>
     </div>
 
-    <div id="chat-wrapper">
-        <div id="chat-container">
-            <!-- Messages will render here -->
-            <div class="message-row typing-row" id="typing-row">
-                <div class="agent-avatar"><img src="image.png" alt="Agent" /></div>
-                <div class="typing-indicator">
-                    <div class="dot"></div>
-                    <div class="dot"></div>
-                    <div class="dot"></div>
-                </div>
+    <div id="app-layout">
+        <div id="sidebar">
+            <div id="sidebar-header">
+                <button id="new-chat-btn">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                    New Chat
+                </button>
+                <input id="session-search" type="text" placeholder="Search sessions…">
+            </div>
+            <div id="session-list">
+                <div id="sidebar-empty">Loading sessions…</div>
             </div>
         </div>
-    </div>
 
-    <div id="input-wrapper">
-        <div id="input-container">
-            <textarea id="message-input" rows="1" placeholder="Message OpenClaw.NET..." disabled></textarea>
-            <button id="send-button" disabled title="Send Message">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
-                    stroke-linecap="round" stroke-linejoin="round">
-                    <line x1="22" y1="2" x2="11" y2="13"></line>
-                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                </svg>
-            </button>
+        <div id="chat-area">
+            <div id="history-banner">
+                <span id="history-banner-text">Viewing session history (read-only)</span>
+                <button id="back-to-live-btn">↩ Back to Live Chat</button>
+            </div>
+
+            <div id="chat-wrapper">
+                <div id="chat-container">
+                    <!-- Messages will render here -->
+                    <div class="message-row typing-row" id="typing-row">
+                        <div class="agent-avatar"><img src="image.png" alt="Agent" /></div>
+                        <div class="typing-indicator">
+                            <div class="dot"></div>
+                            <div class="dot"></div>
+                            <div class="dot"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="input-wrapper">
+                <div id="input-container">
+                    <textarea id="message-input" rows="1" placeholder="Message OpenClaw.NET..." disabled></textarea>
+                    <button id="send-button" disabled title="Send Message">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                            stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                        </svg>
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -724,6 +979,10 @@
         let reconnectTimer = null;
         let streamRenderTimer = null;
         let oidcClient = null;
+        let viewMode = 'live'; // 'live' | 'history'
+        let sidebarVisible = true;
+        let sessionSearchTimer = null;
+        let liveChatNodes = []; // snapshot of live chat nodes
 
         const WEBCHAT_CONFIG = {
             streamRenderDebounceMs: Math.max(20, Number(window.OPENCLAW_WEBCHAT_CONFIG?.streamRenderDebounceMs ?? 120)),
@@ -1006,6 +1265,8 @@
                 messageInput.disabled = false;
                 sendButton.disabled = false;
                 messageInput.focus();
+                setViewMode('live');
+                setTimeout(() => loadSessions(), 600);
             };
 
             ws.onmessage = (event) => {
@@ -1250,6 +1511,220 @@
                 appendSystem('Doctor request failed.', true);
             }
         });
+
+        // ─── Session History Panel ─────────────────────────────────────────────
+        const sidebar = document.getElementById('sidebar');
+        const sessionList = document.getElementById('session-list');
+        const sessionSearch = document.getElementById('session-search');
+        const historyBanner = document.getElementById('history-banner');
+        const historyBannerText = document.getElementById('history-banner-text');
+        const backToLiveBtn = document.getElementById('back-to-live-btn');
+        const newChatBtn = document.getElementById('new-chat-btn');
+        const sidebarToggleBtn = document.getElementById('sidebar-toggle');
+
+        // On mobile start collapsed
+        if (window.innerWidth <= 768) {
+            sidebarVisible = false;
+            sidebar.classList.add('collapsed');
+        }
+
+        function toggleSidebar() {
+            sidebarVisible = !sidebarVisible;
+            sidebar.classList.toggle('collapsed', !sidebarVisible);
+        }
+
+        function setViewMode(mode, label) {
+            viewMode = mode;
+            if (mode === 'history') {
+                historyBanner.classList.add('visible');
+                historyBannerText.textContent = label || 'Viewing session history (read-only)';
+                messageInput.disabled = true;
+                sendButton.disabled = true;
+            } else {
+                historyBanner.classList.remove('visible');
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    messageInput.disabled = false;
+                    sendButton.disabled = false;
+                }
+            }
+        }
+
+        function relativeTime(iso) {
+            const ms = Date.now() - new Date(iso).getTime();
+            const sec = Math.floor(ms / 1000);
+            if (sec < 60) return 'just now';
+            const min = Math.floor(sec / 60);
+            if (min < 60) return `${min}m ago`;
+            const hr = Math.floor(min / 60);
+            if (hr < 24) return `${hr}h ago`;
+            const day = Math.floor(hr / 24);
+            if (day < 7) return `${day}d ago`;
+            return new Date(iso).toLocaleDateString();
+        }
+
+        function renderSessionItem(summary) {
+            const item = document.createElement('div');
+            item.className = 'session-item';
+            item.dataset.id = summary.id;
+
+            const title = document.createElement('div');
+            title.className = 'session-item-title';
+            const rawLabel = summary.senderId || summary.id;
+            title.textContent = rawLabel.length > 26 ? rawLabel.slice(0, 24) + '…' : rawLabel;
+            title.title = `${summary.senderId} | ch: ${summary.channelId}`;
+
+            const meta = document.createElement('div');
+            meta.className = 'session-item-meta';
+
+            if (summary.isActive) {
+                const dot = document.createElement('span');
+                dot.className = 'session-active-dot';
+                meta.appendChild(dot);
+            }
+
+            const time = document.createElement('span');
+            time.textContent = relativeTime(summary.lastActiveAt);
+
+            const badge = document.createElement('span');
+            badge.className = 'session-turns-badge';
+            badge.textContent = `${summary.historyTurns} turns`;
+
+            meta.appendChild(time);
+            meta.appendChild(badge);
+            item.appendChild(title);
+            item.appendChild(meta);
+
+            item.addEventListener('click', () => openSessionHistory(summary.id, !!summary.isActive));
+            return item;
+        }
+
+        async function loadSessions(search) {
+            const headers = await getAuthHeaders(10);
+            const q = search ? `&search=${encodeURIComponent(search)}` : '';
+            try {
+                const resp = await fetch(`${getBasePath()}/admin/sessions?pageSize=60${q}`, { headers });
+                if (!resp.ok) return;
+                const data = await resp.json();
+                renderSessionList(data.active || [], (data.persisted && data.persisted.items) || []);
+            } catch (e) {
+                // silent – admin API unavailable in some modes
+            }
+        }
+
+        function renderSessionList(active, persisted) {
+            sessionList.innerHTML = '';
+            const all = [
+                ...active.map(s => ({ ...s, isActive: true })),
+                ...persisted.map(s => ({ ...s, isActive: !!s.isActive }))
+            ];
+            const seen = new Set();
+            const deduped = all.filter(s => { if (seen.has(s.id)) return false; seen.add(s.id); return true; });
+            deduped.sort((a, b) => new Date(b.lastActiveAt) - new Date(a.lastActiveAt));
+
+            if (deduped.length === 0) {
+                const empty = document.createElement('div');
+                empty.id = 'sidebar-empty';
+                empty.textContent = 'No sessions found.';
+                sessionList.appendChild(empty);
+                return;
+            }
+            deduped.forEach(s => sessionList.appendChild(renderSessionItem(s)));
+        }
+
+        async function openSessionHistory(id, isActive) {
+            document.querySelectorAll('.session-item').forEach(el => {
+                el.classList.toggle('active', el.dataset.id === id);
+            });
+            const headers = await getAuthHeaders(10);
+            try {
+                const resp = await fetch(`${getBasePath()}/admin/sessions/${encodeURIComponent(id)}`, { headers });
+                if (!resp.ok) { appendSystem('Failed to load session history.', true); return; }
+                const detail = await resp.json();
+                if (!detail.session) { appendSystem('Session data unavailable.', true); return; }
+                renderHistoryInChat(detail.session, isActive);
+            } catch (e) {
+                appendSystem('Error loading session history.', true);
+            }
+        }
+
+        function renderHistoryInChat(session, isActive) {
+            // Save current live chat nodes before overwriting
+            liveChatNodes = Array.from(chatContainer.childNodes)
+                .filter(n => n !== typingRow)
+                .map(n => n.cloneNode(true));
+            chatContainer.innerHTML = '';
+            chatContainer.appendChild(typingRow);
+            const turns = session.history || [];
+            turns.forEach(turn => {
+                if (turn.role === 'user') {
+                    const row = createRow('user');
+                    const div = document.createElement('div');
+                    div.className = 'message user';
+                    div.textContent = turn.content || '';
+                    row.appendChild(div);
+                    chatContainer.insertBefore(row, typingRow);
+                } else if (turn.role === 'assistant') {
+                    const row = createRow('assistant');
+                    const div = document.createElement('div');
+                    div.className = 'message assistant';
+                    div.innerHTML = DOMPurify.sanitize(marked.parse(preprocessMediaMarkers(turn.content || '')));
+                    div.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
+                    row.appendChild(div);
+                    chatContainer.insertBefore(row, typingRow);
+                }
+                if (turn.toolCalls && turn.toolCalls.length > 0) {
+                    turn.toolCalls.forEach(tc => appendToolPill(tc.toolName));
+                }
+            });
+            const sid = session.id.length > 10 ? session.id.slice(0, 10) + '…' : session.id;
+            setViewMode('history', `Session ${sid} · ${turns.length} turns · ${isActive ? '● Active' : 'Ended'}`);
+            scrollToBottom(false);
+        }
+
+        function startNewChatSession() {
+            liveChatNodes = []; // intentional new chat – discard snapshot
+            chatContainer.innerHTML = '';
+            chatContainer.appendChild(typingRow);
+            activeResponseDiv = null;
+            activeRawContent = '';
+            document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
+            setViewMode('live');
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                messageInput.disabled = false;
+                sendButton.disabled = false;
+                messageInput.focus();
+            } else {
+                connect();
+            }
+        }
+
+        newChatBtn.addEventListener('click', startNewChatSession);
+        sidebarToggleBtn.addEventListener('click', toggleSidebar);
+
+        backToLiveBtn.addEventListener('click', () => {
+            // Restore the live chat messages that were visible before
+            chatContainer.innerHTML = '';
+            liveChatNodes.forEach(n => chatContainer.appendChild(n));
+            chatContainer.appendChild(typingRow);
+            activeResponseDiv = null;
+            activeRawContent = '';
+            document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
+            setViewMode('live');
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                messageInput.disabled = false;
+                sendButton.disabled = false;
+                messageInput.focus();
+            } else {
+                connect();
+            }
+            scrollToBottom(false);
+        });
+
+        sessionSearch.addEventListener('input', () => {
+            clearTimeout(sessionSearchTimer);
+            sessionSearchTimer = setTimeout(() => loadSessions(sessionSearch.value.trim()), 400);
+        });
+        // ───────────────────────────────────────────────────────────────────────
 
         async function bootstrapAuth() {
             if (OIDC_CONFIG.enabled && OIDC_CONFIG.authority && OIDC_CONFIG.clientId && window.OpenClawOidc) {
