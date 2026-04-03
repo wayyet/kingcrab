@@ -622,8 +622,24 @@ public sealed class MafAgentRuntime : IAgentRuntime
         {
             if (marker.Kind == MediaMarkerKind.ImageUrl)
             {
-                // UriContent for remote URLs — the model fetches the image itself.
-                parts.Add(new UriContent(marker.Value, "image/*"));
+                if (marker.Value.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Inline data URI from browser FileReader — decode bytes for DataContent.
+                    try
+                    {
+                        var (mime, bytes) = ParseDataUri(marker.Value);
+                        parts.Add(new DataContent(bytes, mime));
+                    }
+                    catch
+                    {
+                        // Skip malformed data URIs rather than failing the whole turn.
+                    }
+                }
+                else
+                {
+                    // Remote HTTP/HTTPS URL — the model fetches the image itself.
+                    parts.Add(new UriContent(marker.Value, "image/*"));
+                }
             }
             else // ImagePath
             {
@@ -655,6 +671,34 @@ public sealed class MafAgentRuntime : IAgentRuntime
             parts.Insert(0, new TextContent("Please analyze the attached image(s)."));
 
         return new ChatMessage(ChatRole.User, parts);
+    }
+
+    /// <summary>
+    /// Parses a browser-generated data URI of the form
+    /// <c>data:[&lt;mediatype&gt;][;base64],&lt;data&gt;</c> into its MIME type and raw bytes.
+    /// Falls back to <c>application/octet-stream</c> when the type segment is absent.
+    /// </summary>
+    private static (string MimeType, byte[] Bytes) ParseDataUri(string dataUri)
+    {
+        // "data:".Length == 5
+        var commaIdx = dataUri.IndexOf(',', 5);
+        if (commaIdx < 0)
+            throw new FormatException("Invalid data URI: missing comma separator.");
+
+        var header = dataUri[5..commaIdx]; // e.g. "image/jpeg;base64"
+        var encodedData = dataUri[(commaIdx + 1)..];
+
+        bool isBase64 = header.EndsWith(";base64", StringComparison.OrdinalIgnoreCase);
+        var mimeType = isBase64 ? header[..^7] : header;
+
+        if (string.IsNullOrWhiteSpace(mimeType))
+            mimeType = "application/octet-stream";
+
+        var bytes = isBase64
+            ? Convert.FromBase64String(encodedData)
+            : System.Text.Encoding.UTF8.GetBytes(Uri.UnescapeDataString(encodedData));
+
+        return (mimeType, bytes);
     }
 
     private void ApplySkills(IReadOnlyList<SkillDefinition> skills)

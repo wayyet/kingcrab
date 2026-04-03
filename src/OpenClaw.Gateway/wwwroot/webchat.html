@@ -1742,16 +1742,69 @@
 
         attachBtn.addEventListener('click', () => fileInput.click());
 
+        // MIME type lookup by extension, used when file.type is absent (some browsers/OS combos).
+        const IMAGE_MIME_BY_EXT = {
+            jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+            gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
+            ico: 'image/x-icon', svg: 'image/svg+xml',
+            tiff: 'image/tiff', tif: 'image/tiff',
+            avif: 'image/avif', heic: 'image/heic', heif: 'image/heif'
+        };
+
+        // Compress/resize a raster image to JPEG at up to maxSide×maxSide using Canvas.
+        // SVG and GIF are returned as-is (Canvas would lose animation / vector data).
+        // Falls back to the original data URI on any error.
+        async function compressImageIfNeeded(file, originalDataUri) {
+            const mimeType = file.type || IMAGE_MIME_BY_EXT[file.name.split('.').pop()?.toLowerCase()] || '';
+            if (mimeType === 'image/svg+xml' || mimeType === 'image/gif') {
+                return originalDataUri;
+            }
+            const MAX_SIDE = 2048;
+            const QUALITY  = 0.85;
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.onload = () => {
+                    const scale = Math.min(1, MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight, 1));
+                    const w = Math.round(img.naturalWidth * scale);
+                    const h = Math.round(img.naturalHeight * scale);
+                    try {
+                        const canvas = document.createElement('canvas');
+                        canvas.width  = w;
+                        canvas.height = h;
+                        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                        resolve(canvas.toDataURL('image/jpeg', QUALITY));
+                    } catch (_) {
+                        resolve(originalDataUri);
+                    }
+                };
+                img.onerror = () => resolve(originalDataUri);
+                img.src = originalDataUri;
+            });
+        }
+
         fileInput.addEventListener('change', async () => {
             const files = Array.from(fileInput.files);
             fileInput.value = '';
             for (const file of files) {
-                if (!file.type.startsWith('image/')) continue;
-                const dataUri = await readFileAsDataUrl(file);
-                pendingImages.push({ name: file.name, dataUri, mimeType: file.type });
+                // Determine MIME type; fall back to extension map if file.type is empty.
+                let mimeType = file.type;
+                if (!mimeType || !mimeType.startsWith('image/')) {
+                    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+                    mimeType = IMAGE_MIME_BY_EXT[ext] || '';
+                }
+                if (!mimeType.startsWith('image/')) continue;
+
+                const rawDataUri = await readFileAsDataUrl(file);
+                // Compress large images so they fit within the WebSocket message limit.
+                const dataUri = await compressImageIfNeeded(file, rawDataUri);
+                pendingImages.push({ name: file.name, dataUri, mimeType });
             }
             renderImagePreviews();
         });
+
+        // Maximum WebSocket payload bytes we will send. Mirrors the server-side
+        // MaxMessageBytes setting (1 048 576) minus a small safety margin.
+        const MAX_WS_PAYLOAD_BYTES = 900 * 1024;
 
         function sendMessage() {
             const text = messageInput.value.trim();
@@ -1762,6 +1815,17 @@
             // Prepend [IMAGE_URL:data:...] markers so MafAgentRuntime can inject them as vision content
             const markers = pendingImages.map(img => `[IMAGE_URL:${img.dataUri}]`).join('\n');
             const fullText = markers ? (markers + (text ? '\n' + text : '')) : text;
+
+            // Preflight: abort if the serialised payload would exceed the server limit.
+            const payload = JSON.stringify({ type: "user_message", text: fullText });
+            if (payload.length > MAX_WS_PAYLOAD_BYTES) {
+                appendSystem(
+                    `Image(s) too large after compression (${Math.round(payload.length / 1024)} KB). ` +
+                    `Please use smaller or fewer images (limit ≈ 900 KB per message).`,
+                    true
+                );
+                return;
+            }
 
             // Render user bubble: thumbnails + text
             const row = createRow('user');
@@ -1782,7 +1846,7 @@
             row.appendChild(div);
             chatContainer.insertBefore(row, typingRow);
 
-            ws.send(JSON.stringify({ type: "user_message", text: fullText }));
+            ws.send(payload);
 
             messageInput.value = '';
             messageInput.style.height = 'auto';
