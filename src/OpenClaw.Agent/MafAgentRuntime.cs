@@ -579,9 +579,15 @@ public sealed class MafAgentRuntime : IAgentRuntime
                 }
                 else
                 {
+                    // Layer 2: for non-vision models, decode any inline data-URI image
+                    // markers to temporary files so the LLM sees a short [IMAGE_PATH:...]
+                    // it can pass to image_analyze, rather than a multi-thousand-token blob.
+                    var content = turn.Role == "user"
+                        ? DemoteDataUrisToTempFiles(turn.Content)
+                        : turn.Content;
                     messages.Add(new ChatMessage(
                         turn.Role == "user" ? ChatRole.User : ChatRole.Assistant,
-                        turn.Content));
+                        content));
                 }
             }
             else if (turn.Content == "[tool_use]" && turn.ToolCalls is { Count: > 0 })
@@ -700,6 +706,87 @@ public sealed class MafAgentRuntime : IAgentRuntime
 
         return (mimeType, bytes);
     }
+
+    /// <summary>
+    /// Rewrites a user-turn string so that any <c>[IMAGE_URL:data:...]</c> inline base64
+    /// data-URI markers are decoded to temporary files and replaced with
+    /// <c>[IMAGE_PATH:...]</c> markers. This keeps the context window small for non-vision
+    /// models (e.g. DeepSeek) while giving the <c>image_analyze</c> tool a local path it
+    /// can read and forward to the vision provider.
+    /// Temp files are written to <c>%TEMP%/openclaw_images/</c> (cross-platform via
+    /// <see cref="Path.GetTempPath"/>).
+    /// </summary>
+    private static string DemoteDataUrisToTempFiles(string turnContent)
+    {
+        if (!turnContent.Contains("[IMAGE_URL:data:", StringComparison.OrdinalIgnoreCase))
+            return turnContent;
+
+        var (markers, remainingText) = MediaMarkerProtocol.Extract(turnContent);
+
+        if (!markers.Any(m =>
+                m.Kind == MediaMarkerKind.ImageUrl &&
+                m.Value.StartsWith("data:", StringComparison.OrdinalIgnoreCase)))
+            return turnContent;
+
+        var tempDir = Path.Combine(Path.GetTempPath(), "openclaw_images");
+        Directory.CreateDirectory(tempDir);
+
+        var sb = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(remainingText))
+            sb.AppendLine(remainingText);
+
+        foreach (var marker in markers)
+        {
+            if (marker.Kind == MediaMarkerKind.ImageUrl &&
+                marker.Value.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    var (mime, bytes) = ParseDataUri(marker.Value);
+                    var ext = MimeToExtension(mime);
+                    var filePath = Path.Combine(tempDir, $"openclaw_{Guid.NewGuid():N}{ext}");
+                    File.WriteAllBytes(filePath, bytes);
+                    sb.AppendLine($"[IMAGE_PATH:{filePath}]");
+                }
+                catch
+                {
+                    // Skip malformed data URIs rather than failing the whole turn.
+                }
+            }
+            else
+            {
+                // Re-emit all other markers verbatim.
+                sb.AppendLine(ReconstructMarker(marker));
+            }
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static string ReconstructMarker(MediaMarker marker) =>
+        marker.Kind switch
+        {
+            MediaMarkerKind.ImageUrl            => $"[IMAGE_URL:{marker.Value}]",
+            MediaMarkerKind.ImagePath           => $"[IMAGE_PATH:{marker.Value}]",
+            MediaMarkerKind.FileUrl             => $"[FILE_URL:{marker.Value}]",
+            MediaMarkerKind.FilePath            => $"[FILE_PATH:{marker.Value}]",
+            MediaMarkerKind.VideoUrl            => $"[VIDEO_URL:{marker.Value}]",
+            MediaMarkerKind.AudioUrl            => $"[AUDIO_URL:{marker.Value}]",
+            MediaMarkerKind.DocumentUrl         => $"[DOCUMENT_URL:{marker.Value}]",
+            MediaMarkerKind.StickerUrl          => $"[STICKER_URL:{marker.Value}]",
+            MediaMarkerKind.TelegramImageFileId => $"[IMAGE:telegram:file_id={marker.Value}]",
+            _                                   => $"[{marker.Kind}:{marker.Value}]"
+        };
+
+    private static string MimeToExtension(string mime) =>
+        mime.ToLowerInvariant() switch
+        {
+            "image/jpeg" => ".jpg",
+            "image/gif"  => ".gif",
+            "image/webp" => ".webp",
+            "image/png"  => ".png",
+            _            => ".bin"
+        };
 
     private void ApplySkills(IReadOnlyList<SkillDefinition> skills)
     {
