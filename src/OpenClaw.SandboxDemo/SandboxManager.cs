@@ -137,6 +137,7 @@ public sealed class SandboxLifecycleManager
             Entrypoint = _settings.Entrypoint,
             NetworkPolicy = networkPolicy,
             Env = env,
+            ManualCleanup = true //默认创建的沙箱不会超时被清理 需要自己清理
         }, ct);
 
         Console.WriteLine($"  沙箱已创建: {sandbox.Id}");
