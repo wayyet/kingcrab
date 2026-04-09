@@ -1,5 +1,6 @@
 using OpenClaw.Gateway.Bootstrap;
 using OpenClaw.Gateway.Composition;
+using System.Net.Mime;
 
 namespace OpenClaw.Gateway.Endpoints;
 
@@ -15,7 +16,7 @@ internal static class WebUiEndpoints
             var htmlPath = Path.Combine(AppContext.BaseDirectory, "wwwroot", "admin.html");
             if (File.Exists(htmlPath))
             {
-                ctx.Response.ContentType = "text/html";
+                ctx.Response.ContentType = MediaTypeNames.Text.Html;
                 await ctx.Response.SendFileAsync(htmlPath);
                 return;
             }
@@ -26,14 +27,13 @@ internal static class WebUiEndpoints
         app.MapGet("/chat", async (HttpContext ctx) =>
         {
             var htmlPath = Path.Combine(AppContext.BaseDirectory, "wwwroot", "webchat.html");
+            ctx.Response.ContentType = MediaTypeNames.Text.Html;
             if (File.Exists(htmlPath))
             {
-                ctx.Response.ContentType = "text/html";
                 await ctx.Response.SendFileAsync(htmlPath);
                 return;
             }
 
-            ctx.Response.ContentType = "text/html";
             await ctx.Response.WriteAsync("""
                 <!DOCTYPE html>
                 <html lang="en"><head><meta charset="utf-8"><title>OpenClaw.NET</title>

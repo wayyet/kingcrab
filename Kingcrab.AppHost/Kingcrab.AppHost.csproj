@@ -1,0 +1,22 @@
+﻿<Project Sdk="Aspire.AppHost.Sdk/13.2.2">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UserSecretsId>7d1c6ad1-d43e-42bd-bc4a-5749f22697e2</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.Keycloak" Version="13.2.2-preview.1.26207.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kingcrab.ServiceDefaults\Kingcrab.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\src\OpenClaw.Cli\OpenClaw.Cli.csproj" />
+    <ProjectReference Include="..\src\OpenClaw.Companion\OpenClaw.Companion.csproj" />
+    <ProjectReference Include="..\src\OpenClaw.Gateway\OpenClaw.Gateway.csproj" />
+  </ItemGroup>
+
+</Project>

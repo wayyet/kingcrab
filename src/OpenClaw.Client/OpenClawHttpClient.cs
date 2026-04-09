@@ -1,8 +1,9 @@
+using OpenClaw.Core.Models;
 using System.Net.Http.Headers;
+using System.Net.Mime;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
-using OpenClaw.Core.Models;
 
 namespace OpenClaw.Client;
 
@@ -422,9 +423,9 @@ public sealed class OpenClawHttpClient : IDisposable
         {
             Content = new StreamContent(stream)
         };
-        req.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-        req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        req.Content.Headers.ContentType = new MediaTypeHeaderValue(MediaTypeNames.Application.Json);
+        req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(MediaTypeNames.Application.Json));
+        req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(MediaTypeNames.Text.EventStream));
 
         using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         if (!resp.IsSuccessStatusCode)
@@ -449,7 +450,7 @@ public sealed class OpenClawHttpClient : IDisposable
     {
         var contentType = resp.Content.Headers.ContentType?.MediaType;
 
-        if (string.Equals(contentType, "text/event-stream", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(contentType, MediaTypeNames.Text.EventStream, StringComparison.OrdinalIgnoreCase))
         {
             var body = await resp.Content.ReadAsStringAsync(cancellationToken);
             foreach (var line in body.Split('\n'))
