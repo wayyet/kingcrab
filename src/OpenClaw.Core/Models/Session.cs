@@ -362,6 +362,11 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(ChannelAuthStatusItem))]
 [JsonSerializable(typeof(WhatsAppSetupRequest))]
 [JsonSerializable(typeof(WhatsAppSetupResponse))]
+[JsonSerializable(typeof(SkillInstallRequest))]
+[JsonSerializable(typeof(SkillInfoDto))]
+[JsonSerializable(typeof(List<SkillInfoDto>))]
+[JsonSerializable(typeof(SkillsDetailResponse))]
+[JsonSerializable(typeof(SkillMutationResponse))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
