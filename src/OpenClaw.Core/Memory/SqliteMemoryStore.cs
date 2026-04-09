@@ -8,7 +8,7 @@ using OpenClaw.Core.Models;
 
 namespace OpenClaw.Core.Memory;
 
-public sealed class SqliteMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryRetentionStore, ISessionAdminStore, IDisposable
+public sealed class SqliteMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryRetentionStore, ISessionAdminStore, ISessionSearchStore, IDisposable
 {
     private readonly string _dbPath;
     private readonly bool _enableFtsRequested;
@@ -92,6 +92,7 @@ public sealed class SqliteMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemory
                 using var cmd = conn.CreateCommand();
                 cmd.CommandText = """
                     CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(key, content);
+                    CREATE VIRTUAL TABLE IF NOT EXISTS session_turns_fts USING fts5(session_id, channel_id, sender_id, role, content, timestamp UNINDEXED);
 
                     CREATE TRIGGER IF NOT EXISTS notes_ai AFTER INSERT ON notes BEGIN
                       INSERT INTO notes_fts(key, content) VALUES (new.key, new.content);
@@ -116,6 +117,8 @@ public sealed class SqliteMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemory
                     WHERE key NOT IN (SELECT key FROM notes_fts);
                     """;
                 backfill.ExecuteNonQuery();
+
+                BackfillSessionSearchIndex(conn);
 
                 _ftsEnabled = true;
             }
@@ -160,9 +163,14 @@ public sealed class SqliteMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemory
         {
             return JsonSerializer.Deserialize(json, CoreJsonContext.Default.Session);
         }
-        catch
+        catch (Exception ex)
         {
-            return null;
+            _logger?.LogError(ex, "Persisted sqlite session row for {SessionId} is corrupt or unreadable", sessionId);
+            throw new MemoryStoreCorruptionException(
+                $"Session '{sessionId}' could not be loaded because its persisted sqlite state is corrupt.",
+                sessionId,
+                $"{_dbPath}#sessions/{sessionId}",
+                ex);
         }
     }
 
@@ -190,6 +198,7 @@ public sealed class SqliteMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemory
         cmd.Parameters.AddWithValue("$updated_at", updatedAt);
 
         await cmd.ExecuteNonQueryAsync(ct);
+        await SyncSessionSearchIndexAsync(conn, session, ct);
     }
 
     public async ValueTask<string?> LoadNoteAsync(string key, CancellationToken ct)
@@ -332,17 +341,25 @@ public sealed class SqliteMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemory
                     cmd.Parameters.AddWithValue("$limit", widerLimit);
 
                     var candidates = new List<(string Key, string Content, DateTimeOffset UpdatedAt, double Bm25, byte[]? EmbeddingBlob)>();
-                    await using var reader = await cmd.ExecuteReaderAsync(ct);
-                    while (await reader.ReadAsync(ct))
+                    try
                     {
-                        var embBlob = reader.IsDBNull(4) ? null : (byte[])reader.GetValue(4);
-                        candidates.Add((
-                            reader.GetString(0),
-                            reader.GetString(1),
-                            DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(2)),
-                            reader.GetDouble(3),
-                            embBlob
-                        ));
+                        await using var reader = await cmd.ExecuteReaderAsync(ct);
+                        while (await reader.ReadAsync(ct))
+                        {
+                            var embBlob = reader.IsDBNull(4) ? null : (byte[])reader.GetValue(4);
+                            candidates.Add((
+                                reader.GetString(0),
+                                reader.GetString(1),
+                                DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(2)),
+                                reader.GetDouble(3),
+                                embBlob
+                            ));
+                        }
+                    }
+                    catch (SqliteException)
+                    {
+                        // Malformed FTS5 query syntax; treat as no matches.
+                        return [];
                     }
 
                     if (candidates.Count == 0)
@@ -397,21 +414,28 @@ public sealed class SqliteMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemory
                 cmd.Parameters.AddWithValue("$limit", limit);
 
                 var hits = new List<MemoryNoteHit>();
-                await using var reader = await cmd.ExecuteReaderAsync(ct);
-                while (await reader.ReadAsync(ct))
+                try
                 {
-                    var key = reader.GetString(0);
-                    var content = reader.GetString(1);
-                    var updatedAt = reader.GetInt64(2);
-                    var rank = reader.GetDouble(3);
-
-                    hits.Add(new MemoryNoteHit
+                    await using var reader = await cmd.ExecuteReaderAsync(ct);
+                    while (await reader.ReadAsync(ct))
                     {
-                        Key = key,
-                        Content = content,
-                        UpdatedAt = DateTimeOffset.FromUnixTimeSeconds(updatedAt),
-                        Score = (float)(-rank)
-                    });
+                        var key = reader.GetString(0);
+                        var content = reader.GetString(1);
+                        var updatedAt = reader.GetInt64(2);
+                        var rank = reader.GetDouble(3);
+
+                        hits.Add(new MemoryNoteHit
+                        {
+                            Key = key,
+                            Content = content,
+                            UpdatedAt = DateTimeOffset.FromUnixTimeSeconds(updatedAt),
+                            Score = (float)(-rank)
+                        });
+                    }
+                }
+                catch (SqliteException)
+                {
+                    return [];
                 }
                 return hits;
             }
@@ -497,9 +521,10 @@ public sealed class SqliteMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemory
         {
             return JsonSerializer.Deserialize(json, CoreJsonContext.Default.SessionBranch);
         }
-        catch
+        catch (Exception ex)
         {
-            return null;
+            _logger?.LogError(ex, "Persisted sqlite branch row for {BranchId} is corrupt or unreadable", branchId);
+            throw new InvalidDataException($"Branch '{branchId}' could not be loaded because its persisted sqlite state is corrupt.", ex);
         }
     }
 
@@ -720,7 +745,11 @@ public sealed class SqliteMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemory
         }
 
         if (pendingDeletes.Count > 0)
+        {
+            if (_ftsEnabled)
+                await DeleteSessionSearchRowsAsync(conn, pendingDeletes, ct);
             result.DeletedSessions += await DeleteSessionsByIdAsync(conn, pendingDeletes, ct);
+        }
 
         return remaining;
     }
@@ -735,19 +764,20 @@ public sealed class SqliteMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemory
         if (remaining <= 0)
             return 0;
 
-        var cutoff = request.BranchExpiresBeforeUtc.ToUnixTimeSeconds();
+        var cutoffIso = request.BranchExpiresBeforeUtc.ToString("O");
+        var scanLimit = Math.Min(Math.Max(remaining * 4, remaining), 20_000);
         var pendingDeletes = new List<string>(capacity: Math.Min(remaining, 256));
 
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT branch_id, json
             FROM branches
-            WHERE updated_at < $cutoff
-            ORDER BY updated_at ASC
+            WHERE json_extract(json, '$.createdAt') < $cutoff
+            ORDER BY json_extract(json, '$.createdAt') ASC
             LIMIT $limit;
             """;
-        cmd.Parameters.AddWithValue("$cutoff", cutoff);
-        cmd.Parameters.AddWithValue("$limit", remaining);
+        cmd.Parameters.AddWithValue("$cutoff", cutoffIso);
+        cmd.Parameters.AddWithValue("$limit", scanLimit);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
@@ -762,6 +792,25 @@ public sealed class SqliteMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemory
 
             var branchId = reader.GetString(0);
             var payloadJson = reader.GetString(1);
+
+            SessionBranch? branch;
+            try
+            {
+                branch = JsonSerializer.Deserialize(payloadJson, CoreJsonContext.Default.SessionBranch);
+            }
+            catch
+            {
+                branch = null;
+            }
+
+            if (branch is null)
+            {
+                result.SkippedCorruptBranchItems++;
+                continue;
+            }
+
+            if (branch.CreatedAt >= request.BranchExpiresBeforeUtc)
+                continue;
 
             result.EligibleBranches++;
             remaining--;
@@ -799,6 +848,22 @@ public sealed class SqliteMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemory
             result.DeletedBranches += await DeleteBranchesByIdAsync(conn, pendingDeletes, ct);
 
         return remaining;
+    }
+
+    private async ValueTask DeleteSessionSearchRowsAsync(
+        SqliteConnection conn,
+        IReadOnlyList<string> sessionIds,
+        CancellationToken ct)
+    {
+        if (!_ftsEnabled || sessionIds.Count == 0)
+            return;
+
+        await DeleteByIdInBatchesAsync(conn, sessionIds, ct, static (cmd, sessionId) =>
+        {
+            cmd.CommandText = "DELETE FROM session_turns_fts WHERE session_id = $id;";
+            cmd.Parameters.Clear();
+            cmd.Parameters.AddWithValue("$id", sessionId);
+        });
     }
 
     private static async ValueTask<int> DeleteSessionsByIdAsync(
@@ -896,11 +961,11 @@ public sealed class SqliteMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemory
         if (!_enableVectors || _embeddingGenerator is null)
             return;
 
+        await using var conn = new SqliteConnection(ConnectionString);
+        await conn.OpenAsync(ct);
+
         while (!ct.IsCancellationRequested)
         {
-            await using var conn = new SqliteConnection(ConnectionString);
-            await conn.OpenAsync(ct);
-
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = "SELECT key, content FROM notes WHERE embedding IS NULL LIMIT $limit;";
             cmd.Parameters.AddWithValue("$limit", batchSize);
@@ -913,6 +978,8 @@ public sealed class SqliteMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemory
             if (batch.Count == 0)
                 break;
 
+            var updates = new List<(string Key, byte[] Embedding)>(batch.Count);
+
             foreach (var (key, content) in batch)
             {
                 try
@@ -920,14 +987,7 @@ public sealed class SqliteMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemory
                     var result = await _embeddingGenerator.GenerateAsync([content], cancellationToken: ct);
                     if (result is { Count: > 0 })
                     {
-                        var blob = SerializeEmbedding(result[0]);
-                        await using var updateConn = new SqliteConnection(ConnectionString);
-                        await updateConn.OpenAsync(ct);
-                        await using var updateCmd = updateConn.CreateCommand();
-                        updateCmd.CommandText = "UPDATE notes SET embedding = $embedding WHERE key = $key;";
-                        updateCmd.Parameters.AddWithValue("$embedding", blob);
-                        updateCmd.Parameters.AddWithValue("$key", key);
-                        await updateCmd.ExecuteNonQueryAsync(ct);
+                        updates.Add((key, SerializeEmbedding(result[0])));
                     }
                 }
                 catch (Exception ex)
@@ -935,12 +995,33 @@ public sealed class SqliteMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemory
                     _logger?.LogWarning(ex, "Backfill embedding failed for note '{Key}'", key);
                 }
             }
+
+            if (updates.Count == 0)
+                continue;
+
+            await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
+            await using var updateCmd = conn.CreateCommand();
+            updateCmd.Transaction = tx;
+            updateCmd.CommandText = "UPDATE notes SET embedding = $embedding WHERE key = $key;";
+            var embeddingParam = updateCmd.Parameters.Add("$embedding", SqliteType.Blob);
+            var keyParam = updateCmd.Parameters.Add("$key", SqliteType.Text);
+
+            foreach (var update in updates)
+            {
+                embeddingParam.Value = update.Embedding;
+                keyParam.Value = update.Key;
+                await updateCmd.ExecuteNonQueryAsync(ct);
+            }
+
+            await tx.CommitAsync(ct);
         }
     }
 
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
+        // Clear only the pool for this instance's database, not all pools globally.
+        using var conn = new SqliteConnection(ConnectionString);
+        SqliteConnection.ClearPool(conn);
     }
 
     // ── ISessionAdminStore ────────────────────────────────────────────────
@@ -1032,5 +1113,204 @@ public sealed class SqliteMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemory
             HasMore = total > skip + pageSize,
             Items = items
         };
+    }
+
+    public async ValueTask<SessionSearchResult> SearchSessionsAsync(SessionSearchQuery query, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(query.Text))
+            return new SessionSearchResult { Query = query, Items = [] };
+
+        if (_ftsEnabled)
+        {
+            await using var conn = new SqliteConnection(ConnectionString);
+            await conn.OpenAsync(ct);
+            await using var cmd = conn.CreateCommand();
+            var sql = new System.Text.StringBuilder("""
+                SELECT session_id, channel_id, sender_id, role, timestamp, snippet(session_turns_fts, 4, '<<', '>>', '...', 16), bm25(session_turns_fts) AS rank
+                FROM session_turns_fts
+                WHERE session_turns_fts MATCH $q
+                """);
+            if (!string.IsNullOrWhiteSpace(query.ChannelId))
+                sql.AppendLine("  AND channel_id = $channelId");
+            if (!string.IsNullOrWhiteSpace(query.SenderId))
+                sql.AppendLine("  AND sender_id = $senderId");
+            if (query.FromUtc is not null)
+                sql.AppendLine("  AND timestamp >= $fromUtc");
+            if (query.ToUtc is not null)
+                sql.AppendLine("  AND timestamp <= $toUtc");
+            sql.AppendLine();
+            sql.AppendLine("ORDER BY rank ASC");
+            sql.AppendLine("LIMIT $limit;");
+            cmd.CommandText = sql.ToString();
+            cmd.Parameters.AddWithValue("$q", query.Text);
+            if (!string.IsNullOrWhiteSpace(query.ChannelId))
+                cmd.Parameters.AddWithValue("$channelId", query.ChannelId);
+            if (!string.IsNullOrWhiteSpace(query.SenderId))
+                cmd.Parameters.AddWithValue("$senderId", query.SenderId);
+            if (query.FromUtc is not null)
+                cmd.Parameters.AddWithValue("$fromUtc", query.FromUtc.Value.ToUnixTimeSeconds());
+            if (query.ToUtc is not null)
+                cmd.Parameters.AddWithValue("$toUtc", query.ToUtc.Value.ToUnixTimeSeconds());
+            cmd.Parameters.AddWithValue("$limit", Math.Clamp(query.Limit, 1, 200));
+            var hits = new List<SessionSearchHit>();
+            try
+            {
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+                while (await reader.ReadAsync(ct))
+                {
+                    hits.Add(new SessionSearchHit
+                    {
+                        SessionId = reader.GetString(0),
+                        ChannelId = reader.GetString(1),
+                        SenderId = reader.GetString(2),
+                        Role = reader.GetString(3),
+                        Timestamp = DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(4)),
+                        Snippet = reader.GetString(5),
+                        Score = (float)(-reader.GetDouble(6))
+                    });
+                }
+            }
+            catch (SqliteException)
+            {
+                // Malformed FTS5 query syntax; treat as no matches.
+                return new SessionSearchResult { Query = query, Items = [] };
+            }
+
+            return new SessionSearchResult
+            {
+                Query = query,
+                Items = hits
+            };
+        }
+
+        var fallback = await ListSessionsAsync(1, 200, new SessionListQuery
+        {
+            ChannelId = query.ChannelId,
+            SenderId = query.SenderId,
+            FromUtc = query.FromUtc,
+            ToUtc = query.ToUtc
+        }, ct);
+
+        var itemsFallback = new List<SessionSearchHit>();
+        foreach (var summary in fallback.Items)
+        {
+            var session = await GetSessionAsync(summary.Id, ct);
+            if (session is null)
+                continue;
+
+            foreach (var turn in session.History)
+            {
+                if (string.IsNullOrWhiteSpace(turn.Content))
+                    continue;
+
+                var index = turn.Content.IndexOf(query.Text, StringComparison.OrdinalIgnoreCase);
+                if (index < 0)
+                    continue;
+
+                itemsFallback.Add(new SessionSearchHit
+                {
+                    SessionId = session.Id,
+                    ChannelId = session.ChannelId,
+                    SenderId = session.SenderId,
+                    Role = turn.Role,
+                    Timestamp = turn.Timestamp,
+                    Snippet = BuildSnippet(turn.Content, index, query.SnippetLength),
+                    Score = 1f + Math.Max(0, 100 - index) / 100f
+                });
+            }
+        }
+
+        return new SessionSearchResult
+        {
+            Query = query,
+            Items = itemsFallback
+                .OrderByDescending(static item => item.Score)
+                .Take(Math.Clamp(query.Limit, 1, 200))
+                .ToArray()
+        };
+    }
+
+    private static string BuildSnippet(string content, int index, int snippetLength)
+    {
+        snippetLength = Math.Clamp(snippetLength, 40, 400);
+        var start = Math.Max(0, index - (snippetLength / 3));
+        var length = Math.Min(snippetLength, content.Length - start);
+        var snippet = content.Substring(start, length).Replace('\r', ' ').Replace('\n', ' ').Trim();
+        if (start > 0)
+            snippet = $"...{snippet}";
+        if (start + length < content.Length)
+            snippet = $"{snippet}...";
+        return snippet;
+    }
+
+    private static void BackfillSessionSearchIndex(SqliteConnection conn)
+    {
+        using var select = conn.CreateCommand();
+        select.CommandText = "SELECT json FROM sessions;";
+        using var reader = select.ExecuteReader();
+        while (reader.Read())
+        {
+            var session = JsonSerializer.Deserialize(reader.GetString(0), CoreJsonContext.Default.Session);
+            if (session is not null)
+                SyncSessionSearchIndex(conn, session);
+        }
+    }
+
+    private async Task SyncSessionSearchIndexAsync(SqliteConnection conn, Session session, CancellationToken ct)
+    {
+        if (_ftsEnabled)
+            SyncSessionSearchIndex(conn, session);
+
+        await Task.CompletedTask;
+    }
+
+    private static void SyncSessionSearchIndex(SqliteConnection conn, Session session)
+    {
+        using var tx = conn.BeginTransaction();
+        using (var delete = conn.CreateCommand())
+        {
+            delete.Transaction = tx;
+            delete.CommandText = "DELETE FROM session_turns_fts WHERE session_id = $id;";
+            delete.Parameters.AddWithValue("$id", session.Id);
+            delete.ExecuteNonQuery();
+        }
+
+        foreach (var turn in session.History)
+        {
+            InsertSessionTurn(conn, tx, session, turn.Role, turn.Content, turn.Timestamp);
+            if (turn.ToolCalls is null)
+                continue;
+
+            foreach (var toolCall in turn.ToolCalls)
+            {
+                var toolText = !string.IsNullOrWhiteSpace(toolCall.Result)
+                    ? toolCall.Result
+                    : toolCall.Arguments;
+                if (!string.IsNullOrWhiteSpace(toolText))
+                    InsertSessionTurn(conn, tx, session, "tool", toolText, turn.Timestamp);
+            }
+        }
+
+        tx.Commit();
+    }
+
+    private static void InsertSessionTurn(SqliteConnection conn, SqliteTransaction tx, Session session, string role, string? content, DateTimeOffset timestamp)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+            return;
+
+        using var insert = conn.CreateCommand();
+        insert.Transaction = tx;
+        insert.CommandText = """
+            INSERT INTO session_turns_fts(session_id, channel_id, sender_id, role, content, timestamp)
+            VALUES($session_id, $channel_id, $sender_id, $role, $content, $timestamp);
+            """;
+        insert.Parameters.AddWithValue("$session_id", session.Id);
+        insert.Parameters.AddWithValue("$channel_id", session.ChannelId);
+        insert.Parameters.AddWithValue("$sender_id", session.SenderId);
+        insert.Parameters.AddWithValue("$role", role);
+        insert.Parameters.AddWithValue("$content", content);
+        insert.Parameters.AddWithValue("$timestamp", timestamp.ToUnixTimeSeconds());
+        insert.ExecuteNonQuery();
     }
 }

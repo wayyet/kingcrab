@@ -45,11 +45,14 @@ public sealed class ProviderPolicyListResponse
 
 public sealed class ProviderRouteHealthSnapshot
 {
+    public string? ProfileId { get; init; }
     public required string ProviderId { get; init; }
     public required string ModelId { get; init; }
     public bool IsDefaultRoute { get; init; }
     public bool IsDynamic { get; init; }
     public string? OwnerId { get; init; }
+    public string[] Tags { get; init; } = [];
+    public string[] ValidationIssues { get; init; } = [];
     public string CircuitState { get; init; } = "Closed";
     public long Requests { get; init; }
     public long Retries { get; init; }
@@ -67,12 +70,15 @@ public sealed class ProviderTurnUsageEntry
     public required string ModelId { get; init; }
     public long InputTokens { get; init; }
     public long OutputTokens { get; init; }
+    public long CacheReadTokens { get; init; }
+    public long CacheWriteTokens { get; init; }
     public required InputTokenComponentEstimate EstimatedInputTokensByComponent { get; init; }
 }
 
 public sealed class ProviderAdminResponse
 {
     public IReadOnlyList<ProviderRouteHealthSnapshot> Routes { get; init; } = [];
+    public ModelProfilesStatusResponse? ModelProfiles { get; init; }
     public IReadOnlyList<ProviderUsageSnapshot> Usage { get; init; } = [];
     public IReadOnlyList<ProviderPolicyRule> Policies { get; init; } = [];
     public IReadOnlyList<ProviderTurnUsageEntry> RecentTurns { get; init; } = [];
@@ -281,12 +287,26 @@ public sealed class SessionMetadataSnapshot
     public required string SessionId { get; init; }
     public bool Starred { get; init; }
     public string[] Tags { get; init; } = [];
+    public string? ActivePresetId { get; init; }
+    public IReadOnlyList<SessionTodoItem> TodoItems { get; init; } = [];
 }
 
 public sealed class SessionMetadataUpdateRequest
 {
     public bool? Starred { get; init; }
     public string[]? Tags { get; init; }
+    public string? ActivePresetId { get; init; }
+    public IReadOnlyList<SessionTodoItem>? TodoItems { get; init; }
+}
+
+public sealed class SessionTodoItem
+{
+    public required string Id { get; init; }
+    public string Text { get; init; } = "";
+    public bool Completed { get; init; }
+    public string? Notes { get; init; }
+    public DateTimeOffset CreatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
 }
 
 public sealed class SessionDiffResponse

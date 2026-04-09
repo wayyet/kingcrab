@@ -14,6 +14,7 @@ using OpenClaw.Core.Security;
 using OpenClaw.Gateway;
 using OpenClaw.Gateway.Bootstrap;
 using OpenClaw.Gateway.Composition;
+using OpenClaw.Gateway.Models;
 using QRCoder;
 
 namespace OpenClaw.Gateway.Endpoints;
@@ -31,8 +32,18 @@ internal static class AdminEndpoints
         var adminSettings = app.Services.GetRequiredService<AdminSettingsService>();
         var pluginAdminSettings = app.Services.GetRequiredService<PluginAdminSettingsService>();
         var heartbeat = app.Services.GetRequiredService<HeartbeatService>();
-        var sessionAdminStore = (ISessionAdminStore)app.Services.GetRequiredService<IMemoryStore>();
+        var fallbackFeatureStore = FeatureFallbackServices.CreateFallbackFeatureStore(startup);
+        var automationService = FeatureFallbackServices.ResolveAutomationService(startup, app.Services, heartbeat, fallbackFeatureStore);
+        var learningService = FeatureFallbackServices.ResolveLearningService(startup, app.Services, fallbackFeatureStore);
+        var facade = IntegrationApiFacade.Create(startup, runtime, app.Services);
+        var sessionAdminStore = app.Services.GetRequiredService<ISessionAdminStore>();
         var operations = runtime.Operations;
+        var modelEvaluationRunner = app.Services.GetService<ModelEvaluationRunner>()
+            ?? new ModelEvaluationRunner(
+                operations.ModelProfiles as ConfiguredModelProfileRegistry
+                    ?? new ConfiguredModelProfileRegistry(startup.Config, NullLogger<ConfiguredModelProfileRegistry>.Instance),
+                startup.Config,
+                NullLogger<ModelEvaluationRunner>.Instance);
 
         app.MapGet("/auth/session", (HttpContext ctx) =>
         {
@@ -257,9 +268,15 @@ internal static class AdminEndpoints
             };
 
             var metadataById = operations.SessionMetadata.GetAll();
-            var persisted = await sessionAdminStore.ListSessionsAsync(page, pageSize, query, ctx.RequestAborted);
+            var persisted = await SessionAdminPersistedListing.ListPersistedAsync(
+                sessionAdminStore,
+                page,
+                pageSize,
+                query,
+                metadataById,
+                ctx.RequestAborted);
             var active = (await runtime.SessionManager.ListActiveAsync(ctx.RequestAborted))
-                .Where(session => MatchesSessionQuery(session, query, metadataById))
+                .Where(session => SessionAdminQuery.MatchesSessionQuery(session, query, metadataById))
                 .OrderByDescending(static session => session.LastActiveAt)
                 .Select(static session => new SessionSummary
                 {
@@ -276,21 +293,11 @@ internal static class AdminEndpoints
                 })
                 .ToArray();
 
-            var persistedFiltered = new PagedSessionList
-            {
-                Page = persisted.Page,
-                PageSize = persisted.PageSize,
-                HasMore = persisted.HasMore,
-                Items = persisted.Items
-                    .Where(item => MatchesSummaryQuery(item, query, metadataById))
-                    .ToArray()
-            };
-
             return Results.Json(new AdminSessionsResponse
             {
                 Filters = query,
                 Active = active,
-                Persisted = persistedFiltered
+                Persisted = persisted
             }, CoreJsonContext.Default.AdminSessionsResponse);
         });
 
@@ -451,13 +458,13 @@ internal static class AdminEndpoints
             return Results.Json(response, CoreJsonContext.Default.AdminSettingsResponse);
         });
 
-        app.MapGet("/admin/heartbeat", (HttpContext ctx) =>
+        app.MapGet("/admin/heartbeat", async (HttpContext ctx) =>
         {
             var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: false, endpointScope: "admin.heartbeat");
             if (authResult.Failure is not null)
                 return authResult.Failure;
 
-            var preview = heartbeat.BuildPreview(heartbeat.LoadConfig(), runtime, ctx.RequestAborted);
+            var preview = await heartbeat.BuildPreviewAsync(heartbeat.LoadConfig(), runtime, ctx.RequestAborted);
             return Results.Json(preview, CoreJsonContext.Default.HeartbeatPreviewResponse);
         });
 
@@ -481,7 +488,7 @@ internal static class AdminEndpoints
                 });
             }
 
-            var preview = heartbeat.BuildPreview(request, runtime, ctx.RequestAborted);
+            var preview = await heartbeat.BuildPreviewAsync(request, runtime, ctx.RequestAborted);
             return Results.Json(preview, CoreJsonContext.Default.HeartbeatPreviewResponse);
         });
 
@@ -507,7 +514,7 @@ internal static class AdminEndpoints
             }
 
             var before = heartbeat.LoadConfig();
-            var preview = heartbeat.BuildPreview(request, runtime, ctx.RequestAborted);
+            var preview = await heartbeat.BuildPreviewAsync(request, runtime, ctx.RequestAborted);
             var hasErrors = preview.Issues.Any(static issue => string.Equals(issue.Severity, "error", StringComparison.OrdinalIgnoreCase));
             if (hasErrors)
             {
@@ -516,19 +523,231 @@ internal static class AdminEndpoints
             }
 
             var saved = heartbeat.SaveConfig(request);
-            var savedPreview = heartbeat.BuildPreview(saved, runtime, ctx.RequestAborted);
+            var savedPreview = await heartbeat.BuildPreviewAsync(saved, runtime, ctx.RequestAborted);
             RecordOperatorAudit(ctx, operations, auth, "heartbeat_save", "heartbeat.default", "Saved managed heartbeat configuration.", success: true, before, after: saved);
             return Results.Json(savedPreview, CoreJsonContext.Default.HeartbeatPreviewResponse);
         });
 
-        app.MapGet("/admin/heartbeat/status", (HttpContext ctx) =>
+        app.MapGet("/admin/heartbeat/status", async (HttpContext ctx) =>
         {
             var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: false, endpointScope: "admin.heartbeat.status");
             if (authResult.Failure is not null)
                 return authResult.Failure;
 
-            var status = heartbeat.BuildStatus(runtime, ctx.RequestAborted);
+            var status = await heartbeat.BuildStatusAsync(runtime, ctx.RequestAborted);
             return Results.Json(status, CoreJsonContext.Default.HeartbeatStatusResponse);
+        });
+
+        app.MapGet("/admin/automations", async (HttpContext ctx) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: false, endpointScope: "admin.automations");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+
+            return Results.Json(
+                new IntegrationAutomationsResponse
+                {
+                    Items = await automationService.ListAsync(ctx.RequestAborted)
+                },
+                CoreJsonContext.Default.IntegrationAutomationsResponse);
+        });
+
+        app.MapPost("/admin/automations/migrate", async (HttpContext ctx, bool apply = false) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: true, endpointScope: "admin.automations.migrate");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+
+            var migrated = await automationService.MigrateLegacyAsync(apply, ctx.RequestAborted);
+            return Results.Json(
+                new IntegrationAutomationsResponse { Items = migrated },
+                CoreJsonContext.Default.IntegrationAutomationsResponse);
+        });
+
+        app.MapPost("/admin/automations/preview", async (HttpContext ctx) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: true, endpointScope: "admin.automations.preview");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+
+            var requestPayload = await ReadJsonBodyAsync(ctx, CoreJsonContext.Default.AutomationDefinition);
+            if (requestPayload.Failure is not null)
+                return requestPayload.Failure;
+
+            var automation = requestPayload.Value;
+            if (automation is null)
+                return Results.BadRequest(new MutationResponse { Success = false, Error = "Automation payload is required." });
+
+            return Results.Json(
+                automationService.BuildPreview(automation),
+                CoreJsonContext.Default.AutomationPreview);
+        });
+
+        app.MapGet("/admin/automations/{id}", async (HttpContext ctx, string id) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: false, endpointScope: "admin.automations.detail");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+
+            var automation = await automationService.GetAsync(id, ctx.RequestAborted);
+            if (automation is null)
+                return Results.NotFound(new MutationResponse { Success = false, Error = "Automation not found." });
+
+            return Results.Json(
+                new IntegrationAutomationDetailResponse
+                {
+                    Automation = automation,
+                    RunState = await automationService.GetRunStateAsync(id, ctx.RequestAborted)
+                },
+                CoreJsonContext.Default.IntegrationAutomationDetailResponse);
+        });
+
+        app.MapPut("/admin/automations/{id}", async (HttpContext ctx, string id) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: true, endpointScope: "admin.automations.mutate");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+
+            var requestPayload = await ReadJsonBodyAsync(ctx, CoreJsonContext.Default.AutomationDefinition);
+            if (requestPayload.Failure is not null)
+                return requestPayload.Failure;
+
+            var automation = requestPayload.Value;
+            if (automation is null)
+                return Results.BadRequest(new MutationResponse { Success = false, Error = "Automation payload is required." });
+
+            var saved = await automationService.SaveAsync(new AutomationDefinition
+            {
+                Id = id,
+                Name = automation.Name,
+                Enabled = automation.Enabled,
+                Schedule = automation.Schedule,
+                Timezone = automation.Timezone,
+                Prompt = automation.Prompt,
+                ModelId = automation.ModelId,
+                RunOnStartup = automation.RunOnStartup,
+                SessionId = automation.SessionId,
+                DeliveryChannelId = automation.DeliveryChannelId,
+                DeliveryRecipientId = automation.DeliveryRecipientId,
+                DeliverySubject = automation.DeliverySubject,
+                Tags = automation.Tags,
+                IsDraft = automation.IsDraft,
+                Source = automation.Source,
+                TemplateKey = automation.TemplateKey,
+                CreatedAtUtc = automation.CreatedAtUtc,
+                UpdatedAtUtc = automation.UpdatedAtUtc
+            }, ctx.RequestAborted);
+
+            operations.RuntimeEvents.Append(new RuntimeEventEntry
+            {
+                Id = $"evt_{Guid.NewGuid():N}"[..20],
+                TimestampUtc = DateTimeOffset.UtcNow,
+                SessionId = saved.SessionId,
+                ChannelId = saved.DeliveryChannelId,
+                SenderId = saved.DeliveryRecipientId,
+                Component = "automations",
+                Action = "saved",
+                Severity = "info",
+                Summary = $"Automation '{saved.Id}' saved."
+            });
+
+            return Results.Json(
+                new IntegrationAutomationDetailResponse
+                {
+                    Automation = saved,
+                    RunState = await automationService.GetRunStateAsync(saved.Id, ctx.RequestAborted)
+                },
+                CoreJsonContext.Default.IntegrationAutomationDetailResponse);
+        });
+
+        app.MapPost("/admin/automations/{id}/run", async (HttpContext ctx, string id) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: true, endpointScope: "admin.automations.run");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+
+            AutomationRunRequest? request = null;
+            if (ctx.Request.ContentLength is > 0)
+            {
+                var requestPayload = await ReadJsonBodyAsync(ctx, CoreJsonContext.Default.AutomationRunRequest);
+                if (requestPayload.Failure is not null)
+                    return requestPayload.Failure;
+                request = requestPayload.Value;
+            }
+
+            var result = await facade.RunAutomationAsync(id, request?.DryRun ?? false, ctx.RequestAborted);
+            return Results.Json(
+                result,
+                CoreJsonContext.Default.MutationResponse,
+                statusCode: result.Success ? StatusCodes.Status202Accepted : StatusCodes.Status400BadRequest);
+        });
+
+        app.MapGet("/admin/learning/proposals", async (HttpContext ctx) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: false, endpointScope: "admin.learning");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+
+            var status = ctx.Request.Query.TryGetValue("status", out var statusValues) ? statusValues.ToString() : null;
+            var kind = ctx.Request.Query.TryGetValue("kind", out var kindValues) ? kindValues.ToString() : null;
+            var items = await learningService.ListAsync(status, kind, ctx.RequestAborted);
+            return Results.Json(
+                new LearningProposalListResponse { Items = items },
+                CoreJsonContext.Default.LearningProposalListResponse);
+        });
+
+        app.MapPost("/admin/learning/proposals/{id}/approve", async (HttpContext ctx, string id) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: true, endpointScope: "admin.learning.mutate");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+
+            var approved = await learningService.ApproveAsync(id, runtime.AgentRuntime, ctx.RequestAborted);
+            if (approved is null)
+                return Results.NotFound(new MutationResponse { Success = false, Error = "Proposal not found." });
+
+            operations.RuntimeEvents.Append(new RuntimeEventEntry
+            {
+                Id = $"evt_{Guid.NewGuid():N}"[..20],
+                TimestampUtc = DateTimeOffset.UtcNow,
+                ChannelId = approved.ProfileUpdate?.ChannelId ?? approved.AutomationDraft?.DeliveryChannelId,
+                SenderId = approved.ProfileUpdate?.SenderId ?? approved.AutomationDraft?.DeliveryRecipientId,
+                Component = "learning",
+                Action = "approved",
+                Severity = "info",
+                Summary = $"Learning proposal '{approved.Id}' approved."
+            });
+
+            return Results.Json(approved, CoreJsonContext.Default.LearningProposal);
+        });
+
+        app.MapPost("/admin/learning/proposals/{id}/reject", async (HttpContext ctx, string id) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: true, endpointScope: "admin.learning.mutate");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+
+            var requestPayload = await ReadJsonBodyAsync(ctx, CoreJsonContext.Default.LearningProposalReviewRequest);
+            if (requestPayload.Failure is not null)
+                return requestPayload.Failure;
+
+            var rejected = await learningService.RejectAsync(id, requestPayload.Value?.Reason, ctx.RequestAborted);
+            if (rejected is null)
+                return Results.NotFound(new MutationResponse { Success = false, Error = "Proposal not found." });
+
+            operations.RuntimeEvents.Append(new RuntimeEventEntry
+            {
+                Id = $"evt_{Guid.NewGuid():N}"[..20],
+                TimestampUtc = DateTimeOffset.UtcNow,
+                ChannelId = rejected.ProfileUpdate?.ChannelId ?? rejected.AutomationDraft?.DeliveryChannelId,
+                SenderId = rejected.ProfileUpdate?.SenderId ?? rejected.AutomationDraft?.DeliveryRecipientId,
+                Component = "learning",
+                Action = "rejected",
+                Severity = "info",
+                Summary = $"Learning proposal '{rejected.Id}' rejected."
+            });
+
+            return Results.Json(rejected, CoreJsonContext.Default.LearningProposal);
         });
 
         app.MapGet("/tools/approvals", (HttpContext ctx, string? channelId, string? senderId) =>
@@ -570,11 +789,55 @@ internal static class AdminEndpoints
 
             return Results.Json(new ProviderAdminResponse
             {
+                ModelProfiles = new ModelProfilesStatusResponse
+                {
+                    DefaultProfileId = operations.ModelProfiles.DefaultProfileId,
+                    Profiles = operations.ModelProfiles.ListStatuses()
+                },
                 Routes = operations.LlmExecution.SnapshotRoutes(),
                 Usage = runtime.ProviderUsage.Snapshot(),
                 Policies = operations.ProviderPolicies.List(),
                 RecentTurns = runtime.ProviderUsage.RecentTurns(limit: 50)
             }, CoreJsonContext.Default.ProviderAdminResponse);
+        });
+
+        app.MapGet("/admin/models", (HttpContext ctx) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: false, endpointScope: "admin.models");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+
+            return Results.Json(
+                new ModelProfilesStatusResponse
+                {
+                    DefaultProfileId = operations.ModelProfiles.DefaultProfileId,
+                    Profiles = operations.ModelProfiles.ListStatuses()
+                },
+                CoreJsonContext.Default.ModelProfilesStatusResponse);
+        });
+
+        app.MapGet("/admin/models/doctor", (HttpContext ctx) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: false, endpointScope: "admin.models.doctor");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+
+            return Results.Json(modelEvaluationRunner.BuildDoctor(), CoreJsonContext.Default.ModelSelectionDoctorResponse);
+        });
+
+        app.MapPost("/admin/models/evaluations", async (HttpContext ctx) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: true, endpointScope: "admin.models.evaluate");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+
+            var requestPayload = await ReadJsonBodyAsync(ctx, CoreJsonContext.Default.ModelEvaluationRequest);
+            if (requestPayload.Failure is not null)
+                return requestPayload.Failure;
+
+            var request = requestPayload.Value ?? new ModelEvaluationRequest();
+            var report = await modelEvaluationRunner.RunAsync(request, ctx.RequestAborted);
+            return Results.Json(report, CoreJsonContext.Default.ModelEvaluationReport);
         });
 
         app.MapGet("/admin/providers/policies", (HttpContext ctx) =>
@@ -753,9 +1016,13 @@ internal static class AdminEndpoints
             };
 
             var metadataById = operations.SessionMetadata.GetAll();
-            var persisted = await sessionAdminStore.ListSessionsAsync(1, 200, query, ctx.RequestAborted);
+            var summaries = await SessionAdminPersistedListing.ListAllMatchingSummariesAsync(
+                sessionAdminStore,
+                query,
+                metadataById,
+                ctx.RequestAborted);
             var items = new List<SessionExportItem>();
-            foreach (var summary in persisted.Items.Where(item => MatchesSummaryQuery(item, query, metadataById)))
+            foreach (var summary in summaries)
             {
                 var session = await runtime.SessionManager.LoadAsync(summary.Id, ctx.RequestAborted);
                 if (session is null)
@@ -1790,94 +2057,6 @@ internal static class AdminEndpoints
         return Enum.TryParse<SessionState>(value, ignoreCase: true, out var state)
             ? state
             : null;
-    }
-
-    private static bool MatchesSessionQuery(
-        Session session,
-        SessionListQuery query,
-        IReadOnlyDictionary<string, SessionMetadataSnapshot> metadataById)
-    {
-        if (!string.IsNullOrWhiteSpace(query.ChannelId) &&
-            !string.Equals(session.ChannelId, query.ChannelId, StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        if (!string.IsNullOrWhiteSpace(query.SenderId) &&
-            !string.Equals(session.SenderId, query.SenderId, StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        if (query.FromUtc is { } fromUtc && session.LastActiveAt < fromUtc)
-            return false;
-
-        if (query.ToUtc is { } toUtc && session.LastActiveAt > toUtc)
-            return false;
-
-        if (query.State is { } state && session.State != state)
-            return false;
-
-        var metadata = metadataById.TryGetValue(session.Id, out var storedMetadata)
-            ? storedMetadata
-            : new SessionMetadataSnapshot { SessionId = session.Id, Starred = false, Tags = [] };
-
-        if (query.Starred is { } starred && metadata.Starred != starred)
-            return false;
-
-        if (!string.IsNullOrWhiteSpace(query.Tag) &&
-            !metadata.Tags.Contains(query.Tag, StringComparer.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        if (string.IsNullOrWhiteSpace(query.Search))
-            return true;
-
-        return session.Id.Contains(query.Search, StringComparison.OrdinalIgnoreCase)
-            || session.ChannelId.Contains(query.Search, StringComparison.OrdinalIgnoreCase)
-            || session.SenderId.Contains(query.Search, StringComparison.OrdinalIgnoreCase)
-            || metadata.Tags.Any(tag => tag.Contains(query.Search, StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static bool MatchesSummaryQuery(
-        SessionSummary summary,
-        SessionListQuery query,
-        IReadOnlyDictionary<string, SessionMetadataSnapshot> metadataById)
-    {
-        if (!string.IsNullOrWhiteSpace(query.ChannelId) &&
-            !string.Equals(summary.ChannelId, query.ChannelId, StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        if (!string.IsNullOrWhiteSpace(query.SenderId) &&
-            !string.Equals(summary.SenderId, query.SenderId, StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        if (query.FromUtc is { } fromUtc && summary.LastActiveAt < fromUtc)
-            return false;
-
-        if (query.ToUtc is { } toUtc && summary.LastActiveAt > toUtc)
-            return false;
-
-        if (query.State is { } state && summary.State != state)
-            return false;
-
-        var metadata = metadataById.TryGetValue(summary.Id, out var storedMetadata)
-            ? storedMetadata
-            : new SessionMetadataSnapshot { SessionId = summary.Id, Starred = false, Tags = [] };
-
-        if (query.Starred is { } starred && metadata.Starred != starred)
-            return false;
-
-        if (!string.IsNullOrWhiteSpace(query.Tag) &&
-            !metadata.Tags.Contains(query.Tag, StringComparer.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        if (string.IsNullOrWhiteSpace(query.Search))
-            return true;
-
-        return summary.Id.Contains(query.Search, StringComparison.OrdinalIgnoreCase)
-            || summary.ChannelId.Contains(query.Search, StringComparison.OrdinalIgnoreCase)
-            || summary.SenderId.Contains(query.Search, StringComparison.OrdinalIgnoreCase)
-            || metadata.Tags.Any(tag => tag.Contains(query.Search, StringComparison.OrdinalIgnoreCase));
     }
 
     private static string BuildTranscript(Session session)
