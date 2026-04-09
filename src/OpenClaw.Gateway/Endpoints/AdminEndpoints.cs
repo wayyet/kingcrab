@@ -1,7 +1,3 @@
-using System.Buffers;
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization.Metadata;
 using Microsoft.Extensions.Logging.Abstractions;
 using OpenClaw.Agent;
 using OpenClaw.Agent.Plugins;
@@ -15,6 +11,11 @@ using OpenClaw.Gateway;
 using OpenClaw.Gateway.Bootstrap;
 using OpenClaw.Gateway.Composition;
 using QRCoder;
+using System.Buffers;
+using System.Net.Mime;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 
 namespace OpenClaw.Gateway.Endpoints;
 
@@ -1106,7 +1107,7 @@ internal static class AdminEndpoints
                 return;
             }
 
-            ctx.Response.ContentType = "text/event-stream";
+            ctx.Response.ContentType = MediaTypeNames.Text.EventStream; // "text/event-stream";
             ctx.Response.Headers.CacheControl = "no-cache";
             ctx.Response.Headers.Connection = "keep-alive";
 
@@ -1165,7 +1166,7 @@ internal static class AdminEndpoints
                 return;
             }
 
-            ctx.Response.ContentType = "text/event-stream";
+            ctx.Response.ContentType = MediaTypeNames.Text.EventStream; // "text/event-stream";
             ctx.Response.Headers.CacheControl = "no-cache";
             ctx.Response.Headers.Connection = "keep-alive";
 
