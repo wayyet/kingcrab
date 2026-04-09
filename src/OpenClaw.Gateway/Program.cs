@@ -1,15 +1,19 @@
+using OpenClaw.Agent;
 using OpenClaw.Gateway.Bootstrap;
 using OpenClaw.Gateway.Composition;
 using OpenClaw.Gateway.Endpoints;
 using OpenClaw.Gateway.Mcp;
 using OpenClaw.Gateway.Pipeline;
 using OpenClaw.Gateway.Profiles;
-using OpenClaw.Agent;
+using System.Text;
 #if OPENCLAW_ENABLE_OPENSANDBOX
 using OpenClawNet.Sandbox.OpenSandbox;
 #endif
 
 var builder = WebApplication.CreateSlimBuilder(args);
+
+// 设置控制台输出编码为UTF-8
+Console.OutputEncoding = Encoding.UTF8;
 
 var bootstrap = await builder.AddOpenClawBootstrapAsync(args);
 if (bootstrap.ShouldExit)

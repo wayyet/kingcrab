@@ -1,5 +1,6 @@
-using System.Globalization;
 using OpenClaw.Core.Models;
+using System.Globalization;
+using System.Text;
 
 namespace OpenClaw.Cli;
 
@@ -11,6 +12,11 @@ internal static class Program
 
     public static async Task<int> Main(string[] args)
     {
+        // 设置控制台输出编码为UTF-8
+        Console.OutputEncoding = Encoding.UTF8;
+        // 输入也支持UTF-8
+        Console.InputEncoding = Encoding.UTF8;
+
         if (args.Length == 0 || args[0] is "-h" or "--help" or "help")
         {
             PrintHelp();
