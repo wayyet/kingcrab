@@ -92,8 +92,7 @@ internal static class MafTestRuntimeFactory
             agentFactory,
             sessionStateStore,
             telemetry,
-            NullLogger.Instance,
-            persistSessionState: false);
+            NullLogger.Instance);
     }
 
     public static Task CompactHistoryAsync(MafAgentRuntime runtime, Session session, CancellationToken ct)
@@ -203,8 +202,7 @@ internal static class MafTestRuntimeFactory
                     agentFactory,
                     sessionStateStore,
                     telemetry,
-                    NullLogger.Instance,
-                    persistSessionState: false);
+                    NullLogger.Instance);
             }
             );
     }

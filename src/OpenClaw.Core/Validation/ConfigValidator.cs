@@ -10,6 +10,23 @@ namespace OpenClaw.Core.Validation;
 /// </summary>
 public static class ConfigValidator
 {
+    private static readonly HashSet<string> BuiltInLlmProviders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "openai",
+        "anthropic",
+        "claude",
+        "gemini",
+        "google",
+        "ollama",
+        "azure-openai",
+        "openai-compatible",
+        "anthropic-vertex",
+        "amazon-bedrock",
+        "groq",
+        "together",
+        "lmstudio"
+    };
+
     public static IReadOnlyList<string> Validate(Models.GatewayConfig config)
     {
         var errors = new List<string>();
@@ -21,6 +38,10 @@ public static class ConfigValidator
         // LLM
         if (string.IsNullOrWhiteSpace(config.Llm.Model))
             errors.Add("Llm.Model must be set.");
+        var pluginBackedProvidersPossible =
+            config.Plugins.Enabled || config.Plugins.DynamicNative.Enabled || config.Plugins.Mcp.Enabled;
+        if (!pluginBackedProvidersPossible && !BuiltInLlmProviders.Contains(config.Llm.Provider))
+            errors.Add($"Llm.Provider '{config.Llm.Provider}' is not a supported built-in provider.");
         if (config.Llm.MaxTokens < 1)
             errors.Add($"Llm.MaxTokens must be >= 1 (got {config.Llm.MaxTokens}).");
         if (config.Llm.Temperature is < 0 or > 2)
@@ -33,8 +54,15 @@ public static class ConfigValidator
             errors.Add($"Llm.CircuitBreakerThreshold must be >= 1 (got {config.Llm.CircuitBreakerThreshold}).");
         if (config.Llm.CircuitBreakerCooldownSeconds < 1)
             errors.Add($"Llm.CircuitBreakerCooldownSeconds must be >= 1 (got {config.Llm.CircuitBreakerCooldownSeconds}).");
+        ValidatePromptCaching("Llm.PromptCaching", config.Llm.Provider, config.Llm.PromptCaching, errors, isDynamicProvider: false);
+        ValidateModelProfiles(config, errors, pluginBackedProvidersPossible);
 
         // Memory
+        if (!string.Equals(config.Memory.Provider, "file", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(config.Memory.Provider, "sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            errors.Add($"Memory.Provider '{config.Memory.Provider}' must be 'file' or 'sqlite'.");
+        }
         if (string.IsNullOrWhiteSpace(config.Memory.StoragePath))
             errors.Add("Memory.StoragePath must be set.");
         if (config.Memory.MaxHistoryTurns < 1)
@@ -79,6 +107,22 @@ public static class ConfigValidator
         // Tooling
         if (config.Tooling.ToolTimeoutSeconds < 0)
             errors.Add($"Tooling.ToolTimeoutSeconds must be >= 0 (got {config.Tooling.ToolTimeoutSeconds}).");
+
+        if (config.Tooling.WorkspaceOnly)
+        {
+            var resolvedWorkspaceRoot = ResolveConfiguredPath(config.Tooling.WorkspaceRoot);
+            if (string.IsNullOrWhiteSpace(resolvedWorkspaceRoot))
+            {
+                errors.Add("Tooling.WorkspaceRoot must resolve to a non-empty absolute path when WorkspaceOnly=true.");
+            }
+            else if (!Path.IsPathRooted(resolvedWorkspaceRoot))
+            {
+                errors.Add("Tooling.WorkspaceRoot must resolve to an absolute path when WorkspaceOnly=true.");
+            }
+        }
+
+        ValidateRootSet("Tooling.AllowedReadRoots", config.Tooling.AllowedReadRoots, errors);
+        ValidateRootSet("Tooling.AllowedWriteRoots", config.Tooling.AllowedWriteRoots, errors);
 
         // Sandbox
         var sandboxProvider = SandboxProviderNames.Normalize(config.Sandbox.Provider);
@@ -166,6 +210,7 @@ public static class ConfigValidator
         var runtimeOrchestrator = RuntimeOrchestrator.Normalize(config.Runtime.Orchestrator);
         if (runtimeOrchestrator is not RuntimeOrchestrator.Maf)
             errors.Add("Runtime.Orchestrator must be 'maf'.");
+
         ValidateNotionConfig(config.Plugins.Native.Notion, errors);
         // MCP plugin servers
         if (config.Plugins.Mcp.Enabled)
@@ -287,6 +332,9 @@ public static class ConfigValidator
         ValidateDmPolicy("Channels.Telegram.DmPolicy", config.Channels.Telegram.DmPolicy, errors);
         ValidateDmPolicy("Channels.WhatsApp.DmPolicy", config.Channels.WhatsApp.DmPolicy, errors);
         ValidateDmPolicy("Channels.Teams.DmPolicy", config.Channels.Teams.DmPolicy, errors);
+        ValidateDmPolicy("Channels.Slack.DmPolicy", config.Channels.Slack.DmPolicy, errors);
+        ValidateDmPolicy("Channels.Discord.DmPolicy", config.Channels.Discord.DmPolicy, errors);
+        ValidateDmPolicy("Channels.Signal.DmPolicy", config.Channels.Signal.DmPolicy, errors);
 
         // Cron
         if (config.Cron.Enabled)
@@ -386,33 +434,31 @@ public static class ConfigValidator
 
     private static bool IsValidCronField(string field, int min, int max)
     {
+        if (string.IsNullOrWhiteSpace(field))
+            return false;
+
         if (field == "*")
             return true;
+
+        if (field == "L")
+            return min == 1;
 
         if (int.TryParse(field, out var exact))
             return exact >= min && exact <= max;
 
+        if (field.Contains(','))
+        {
+            var options = field.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            return options.Length > 0 && options.All(option => IsValidCronField(option, min, max));
+        }
+
         if (field.Contains('/'))
         {
             var stepParts = field.Split('/');
-            if (stepParts.Length != 2 || stepParts[0] != "*" || !int.TryParse(stepParts[1], out var step))
-                return false;
-            return step > 0;
-        }
-
-        if (field.Contains(','))
-        {
-            var options = field.Split(',');
-            if (options.Length == 0)
+            if (stepParts.Length != 2 || !int.TryParse(stepParts[1], out var step) || step <= 0)
                 return false;
 
-            foreach (var option in options)
-            {
-                if (!int.TryParse(option, out var parsed) || parsed < min || parsed > max)
-                    return false;
-            }
-
-            return true;
+            return stepParts[0] == "*" || IsValidCronField(stepParts[0], min, max);
         }
 
         if (field.Contains('-'))
@@ -425,7 +471,7 @@ public static class ConfigValidator
                 return false;
             }
 
-            return start >= min && end <= max && start <= end;
+            return start >= min && start <= max && end >= min && end <= max;
         }
 
         return false;
@@ -445,5 +491,164 @@ public static class ConfigValidator
         {
             errors.Add($"{field} must be 'open', 'pairing', or 'closed'.");
         }
+    }
+
+    private static void ValidateRootSet(string field, string[] roots, ICollection<string> errors)
+    {
+        if (roots.Length == 0)
+            return;
+
+        var wildcardCount = roots.Count(static root => string.Equals(root, "*", StringComparison.Ordinal));
+        if (wildcardCount > 0 && roots.Length > wildcardCount)
+            errors.Add($"{field} cannot mix '*' with explicit paths.");
+
+        foreach (var root in roots)
+        {
+            if (string.Equals(root, "*", StringComparison.Ordinal))
+                continue;
+
+            var resolved = ResolveConfiguredPath(root);
+            if (string.IsNullOrWhiteSpace(resolved))
+            {
+                errors.Add($"{field} entries must resolve to non-empty absolute paths.");
+                continue;
+            }
+
+            if (!Path.IsPathRooted(resolved))
+                errors.Add($"{field} entries must be absolute paths (got '{root}').");
+        }
+    }
+
+    private static void ValidateModelProfiles(GatewayConfig config, List<string> errors, bool pluginBackedProvidersPossible)
+    {
+        var hasExplicitProfiles = config.Models.Profiles.Count > 0;
+        var profileIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var profile in config.Models.Profiles)
+        {
+            if (string.IsNullOrWhiteSpace(profile.Id))
+            {
+                errors.Add("Models.Profiles[].Id must be set.");
+                continue;
+            }
+
+            if (!profileIds.Add(profile.Id))
+                errors.Add($"Models.Profiles contains duplicate id '{profile.Id}'.");
+
+            if (string.IsNullOrWhiteSpace(profile.Provider))
+                errors.Add($"Models.Profiles.{profile.Id}.Provider must be set.");
+            else if (!pluginBackedProvidersPossible && !BuiltInLlmProviders.Contains(profile.Provider))
+                errors.Add($"Models.Profiles.{profile.Id}.Provider '{profile.Provider}' is not a supported built-in provider.");
+
+            if (string.IsNullOrWhiteSpace(profile.Model))
+                errors.Add($"Models.Profiles.{profile.Id}.Model must be set.");
+            if (profile.Capabilities?.MaxContextTokens < 0)
+                errors.Add($"Models.Profiles.{profile.Id}.Capabilities.MaxContextTokens must be >= 0.");
+            if (profile.Capabilities?.MaxOutputTokens < 0)
+                errors.Add($"Models.Profiles.{profile.Id}.Capabilities.MaxOutputTokens must be >= 0.");
+            ValidatePromptCaching(
+                $"Models.Profiles.{profile.Id}.PromptCaching",
+                profile.Provider,
+                profile.PromptCaching,
+                errors,
+                isDynamicProvider: pluginBackedProvidersPossible && !BuiltInLlmProviders.Contains(profile.Provider));
+        }
+
+        if (!hasExplicitProfiles)
+            profileIds.Add("default");
+
+        if (!string.IsNullOrWhiteSpace(config.Models.DefaultProfile) &&
+            !profileIds.Contains(config.Models.DefaultProfile))
+        {
+            errors.Add($"Models.DefaultProfile '{config.Models.DefaultProfile}' does not exist in Models.Profiles.");
+        }
+
+        foreach (var profile in config.Models.Profiles)
+        {
+            foreach (var fallbackId in profile.FallbackProfileIds.Where(static item => !string.IsNullOrWhiteSpace(item)))
+            {
+                if (!profileIds.Contains(fallbackId))
+                    errors.Add($"Models.Profiles.{profile.Id}.FallbackProfileIds contains unknown profile '{fallbackId}'.");
+            }
+        }
+
+        foreach (var (routeId, route) in config.Routing.Routes)
+        {
+            if (!string.IsNullOrWhiteSpace(route.ModelProfileId) && !profileIds.Contains(route.ModelProfileId))
+                errors.Add($"Routing.Routes.{routeId}.ModelProfileId '{route.ModelProfileId}' does not exist in Models.Profiles.");
+
+            foreach (var fallbackId in route.FallbackModelProfileIds.Where(static item => !string.IsNullOrWhiteSpace(item)))
+            {
+                if (!profileIds.Contains(fallbackId))
+                    errors.Add($"Routing.Routes.{routeId}.FallbackModelProfileIds contains unknown profile '{fallbackId}'.");
+            }
+        }
+    }
+
+    private static string ResolveConfiguredPath(string? path)
+        => ConfigPathResolver.Resolve(path);
+
+    private static void ValidatePromptCaching(
+        string prefix,
+        string? providerId,
+        PromptCachingConfig? caching,
+        List<string> errors,
+        bool isDynamicProvider)
+    {
+        if (caching is null || caching.Enabled != true)
+            return;
+
+        var retention = (caching.Retention ?? "auto").Trim().ToLowerInvariant();
+        if (retention is not ("none" or "short" or "long" or "auto"))
+            errors.Add($"{prefix}.Retention must be one of: none, short, long, auto.");
+
+        var dialect = (caching.Dialect ?? "auto").Trim().ToLowerInvariant();
+        if (dialect is not ("auto" or "openai" or "anthropic" or "gemini" or "none"))
+            errors.Add($"{prefix}.Dialect must be one of: auto, openai, anthropic, gemini, none.");
+
+        var provider = (providerId ?? string.Empty).Trim();
+        var requireExplicitDialect =
+            provider.Equals("openai-compatible", StringComparison.OrdinalIgnoreCase)
+            || provider.Equals("groq", StringComparison.OrdinalIgnoreCase)
+            || provider.Equals("together", StringComparison.OrdinalIgnoreCase)
+            || provider.Equals("lmstudio", StringComparison.OrdinalIgnoreCase)
+            || isDynamicProvider;
+
+        if (requireExplicitDialect && dialect == "auto")
+            errors.Add($"{prefix}.Dialect must be explicit for provider '{provider}'.");
+
+        if (caching.KeepWarmEnabled == true)
+        {
+            if (caching.KeepWarmIntervalMinutes < 5)
+                errors.Add($"{prefix}.KeepWarmIntervalMinutes must be >= 5 when keep-warm is enabled.");
+
+            if (!SupportsExplicitCacheTtl(provider, dialect))
+            {
+                errors.Add($"{prefix}.KeepWarmEnabled is only valid for providers with explicit cache TTL semantics.");
+            }
+        }
+    }
+
+    private static bool SupportsExplicitCacheTtl(string? providerId, string? dialect)
+    {
+        var provider = (providerId ?? string.Empty).Trim();
+        var normalizedDialect = (dialect ?? "auto").Trim();
+        if (provider.Equals("anthropic", StringComparison.OrdinalIgnoreCase) ||
+            provider.Equals("claude", StringComparison.OrdinalIgnoreCase) ||
+            provider.Equals("anthropic-vertex", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (provider.Equals("amazon-bedrock", StringComparison.OrdinalIgnoreCase))
+            return string.Equals(normalizedDialect, "anthropic", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(normalizedDialect, "auto", StringComparison.OrdinalIgnoreCase);
+
+        if (provider.Equals("gemini", StringComparison.OrdinalIgnoreCase) ||
+            provider.Equals("google", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Equals(normalizedDialect, "gemini", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(normalizedDialect, "auto", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
     }
 }

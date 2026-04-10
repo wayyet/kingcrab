@@ -190,6 +190,21 @@ public sealed class ConfigValidatorTests
     }
 
     [Fact]
+    public void Validate_InvalidMemoryProvider_ReturnsError()
+    {
+        var config = new GatewayConfig
+        {
+            Memory = new MemoryConfig
+            {
+                Provider = "redis"
+            }
+        };
+
+        var errors = ConfigValidator.Validate(config);
+        Assert.Contains(errors, e => e.Contains("Memory.Provider", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Validate_InvalidRuntimeMode_ReturnsError()
     {
         var config = new GatewayConfig
@@ -217,6 +232,39 @@ public sealed class ConfigValidatorTests
 
         var errors = ConfigValidator.Validate(config);
         Assert.Contains(errors, e => e.Contains("Runtime.Orchestrator", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_WorkspaceOnlyWithoutAbsoluteWorkspaceRoot_ReturnsError()
+    {
+        var config = new GatewayConfig
+        {
+            Tooling = new ToolingConfig
+            {
+                WorkspaceOnly = true,
+                WorkspaceRoot = "relative/workspace"
+            }
+        };
+
+        var errors = ConfigValidator.Validate(config);
+        Assert.Contains(errors, e => e.Contains("Tooling.WorkspaceRoot", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_WildcardFilesystemRootsMixedWithExplicitRoots_ReturnsError()
+    {
+        var config = new GatewayConfig
+        {
+            Tooling = new ToolingConfig
+            {
+                AllowedReadRoots = ["*", "/tmp/read"],
+                AllowedWriteRoots = ["*", "/tmp/write"]
+            }
+        };
+
+        var errors = ConfigValidator.Validate(config);
+        Assert.Contains(errors, e => e.Contains("Tooling.AllowedReadRoots", StringComparison.Ordinal));
+        Assert.Contains(errors, e => e.Contains("Tooling.AllowedWriteRoots", StringComparison.Ordinal));
     }
 
     [Fact]
