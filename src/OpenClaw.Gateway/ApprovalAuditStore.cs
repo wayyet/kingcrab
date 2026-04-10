@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using OpenClaw.Core.Models;
 using OpenClaw.Core.Pipeline;
@@ -26,7 +25,7 @@ internal sealed class ApprovalAuditStore
 
     public string Path => _path;
 
-    public void RecordCreated(ToolApprovalRequest request)
+    public bool RecordCreated(ToolApprovalRequest request)
         => Append(new ApprovalHistoryEntry
         {
             EventType = "created",
@@ -36,16 +35,21 @@ internal sealed class ApprovalAuditStore
             SenderId = request.SenderId,
             ToolName = request.ToolName,
             ArgumentsPreview = Truncate(request.Arguments),
+            Action = request.Action,
+            IsMutation = request.IsMutation,
+            Summary = request.Summary,
             TimestampUtc = request.CreatedAt
         });
 
-    public void RecordDecision(
+    public bool RecordDecision(
         ToolApprovalRequest request,
         bool approved,
         string decisionSource,
         string? actorChannelId,
         string? actorSenderId)
-        => Append(new ApprovalHistoryEntry
+    {
+        var decidedAt = DateTimeOffset.UtcNow;
+        return Append(new ApprovalHistoryEntry
         {
             EventType = "decision",
             ApprovalId = request.ApprovalId,
@@ -54,13 +58,17 @@ internal sealed class ApprovalAuditStore
             SenderId = request.SenderId,
             ToolName = request.ToolName,
             ArgumentsPreview = Truncate(request.Arguments),
-            TimestampUtc = request.CreatedAt,
-            DecisionAtUtc = DateTimeOffset.UtcNow,
+            Action = request.Action,
+            IsMutation = request.IsMutation,
+            Summary = request.Summary,
+            TimestampUtc = decidedAt,
+            DecisionAtUtc = decidedAt,
             ActorChannelId = actorChannelId,
             ActorSenderId = actorSenderId,
             DecisionSource = decisionSource,
             Approved = approved
         });
+    }
 
     public IReadOnlyList<ApprovalHistoryEntry> Query(ApprovalHistoryQuery query)
     {
@@ -88,24 +96,16 @@ internal sealed class ApprovalAuditStore
             "Failed to parse approval audit line from {Path}");
     }
 
-    private void Append(ApprovalHistoryEntry entry)
+    private bool Append(ApprovalHistoryEntry entry)
     {
-        try
+        var line = System.Text.Json.JsonSerializer.Serialize(entry, CoreJsonContext.Default.ApprovalHistoryEntry);
+        if (!AtomicJsonFileStore.TryAppendLine(_path, line, _gate, out var error))
         {
-            var directory = System.IO.Path.GetDirectoryName(_path);
-            if (!string.IsNullOrWhiteSpace(directory))
-                Directory.CreateDirectory(directory);
+            _logger.LogWarning("Failed to append approval audit entry to {Path}: {Error}", _path, error);
+            return false;
+        }
 
-            var line = JsonSerializer.Serialize(entry, CoreJsonContext.Default.ApprovalHistoryEntry);
-            lock (_gate)
-            {
-                File.AppendAllText(_path, line + Environment.NewLine);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to append approval audit entry to {Path}", _path);
-        }
+        return true;
     }
 
     private static string Truncate(string? value)

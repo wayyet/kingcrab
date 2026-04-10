@@ -1,8 +1,10 @@
 using System.Net;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.Extensions.DependencyInjection;
 using OpenClaw.Channels;
 using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Middleware;
+using OpenClaw.Gateway;
 using OpenClaw.Gateway.Bootstrap;
 using OpenClaw.Gateway.Composition;
 using OpenClaw.Gateway.Extensions;
@@ -18,7 +20,9 @@ internal static class PipelineExtensions
     {
         ConfigureForwardedHeaders(app, startup);
         ConfigureCors(app, runtime);
+
         app.UseStaticFiles();
+
         app.UseWebSockets(new WebSocketOptions
         {
             KeepAliveInterval = TimeSpan.FromSeconds(30)
@@ -105,7 +109,11 @@ internal static class PipelineExtensions
             runtime.ApprovalAuditStore,
             runtime.PairingManager,
             runtime.CommandProcessor,
-            runtime.Operations);
+            runtime.Operations,
+            runtime.RuntimeMetrics,
+            app.Services.GetService<LearningService>(),
+            app.Services.GetService<GatewayAutomationService>(),
+            app.Services.GetService<ContractGovernanceService>());
     }
 
     private static void StartChannels(WebApplication app, GatewayAppRuntime runtime)
@@ -195,8 +203,10 @@ internal static class PipelineExtensions
                 app.Logger.LogInformation("Drain complete — shutting down");
             }
 
+            GatewayWorkers.DisposeSessionLocks(runtime.SessionLocks, app.Logger);
             DisposePluginHostWithTimeout(runtime.PluginHost, pluginDisposeTimeout, app.Logger);
             DisposePluginHostWithTimeout(runtime.NativeDynamicPluginHost, pluginDisposeTimeout, app.Logger);
+            DisposePluginHostWithTimeout(runtime.WhatsAppWorkerHost, pluginDisposeTimeout, app.Logger);
             foreach (var ownerId in runtime.DynamicProviderOwners)
             {
                 runtime.Operations.ProviderRegistry.UnregisterOwnedBy(ownerId);

@@ -42,10 +42,13 @@ internal static class GatewayWorkers
         PairingManager pairingManager,
         ChatCommandProcessor commandProcessor,
         RuntimeOperationsState operations,
-        RuntimeMetrics? runtimeMetrics = null)
+        RuntimeMetrics? runtimeMetrics = null,
+        LearningService? learningService = null,
+        GatewayAutomationService? automationService = null,
+        ContractGovernanceService? contractGovernance = null)
     {
         StartSessionCleanup(lifetime, logger, sessionManager, sessionLocks, lockLastUsed);
-        StartInboundWorkers(lifetime, logger, workerCount, isNonLoopbackBind, sessionManager, sessionLocks, lockLastUsed, pipeline, middlewarePipeline, wsChannel, agentRuntime, channelAdapters, config, cronScheduler, heartbeatService, toolApprovalService, approvalAuditStore, pairingManager, commandProcessor, operations, runtimeMetrics);
+        StartInboundWorkers(lifetime, logger, workerCount, isNonLoopbackBind, sessionManager, sessionLocks, lockLastUsed, pipeline, middlewarePipeline, wsChannel, agentRuntime, channelAdapters, config, cronScheduler, heartbeatService, toolApprovalService, approvalAuditStore, pairingManager, commandProcessor, operations, runtimeMetrics, learningService, automationService, contractGovernance);
         StartOutboundWorkers(lifetime, logger, workerCount, pipeline, channelAdapters, heartbeatService);
     }
 
@@ -67,13 +70,7 @@ internal static class GatewayWorkers
                     if (evicted > 0)
                         logger.LogDebug("Proactive active-session sweep evicted {Count} expired sessions", evicted);
 
-                    CleanupSessionLocksOnce(
-                        sessionManager,
-                        sessionLocks,
-                        lockLastUsed,
-                        DateTimeOffset.UtcNow,
-                        TimeSpan.FromHours(2),
-                        logger);
+                    sessionManager.CleanupSessionLocksOnce(DateTimeOffset.UtcNow, TimeSpan.FromHours(2));
                 }
                 catch (Exception ex)
                 {
@@ -178,29 +175,37 @@ internal static class GatewayWorkers
         PairingManager pairingManager,
         ChatCommandProcessor commandProcessor,
         RuntimeOperationsState operations,
-        RuntimeMetrics? runtimeMetrics)
+        RuntimeMetrics? runtimeMetrics,
+        LearningService? learningService,
+        GatewayAutomationService? automationService,
+        ContractGovernanceService? contractGovernance)
     {
+        var routeResolver = config.Routing.Enabled
+            ? new OpenClaw.Gateway.Integrations.AgentRouteResolver(config.Routing)
+            : null;
+
         for (var i = 0; i < workerCount; i++)
         {
             _ = Task.Run(async () =>
             {
                 while (await pipeline.InboundReader.WaitToReadAsync(lifetime.ApplicationStopping))
                 {
-                    while (pipeline.InboundReader.TryRead(out var msg))
-                    {
-                        Session? session = null;
-                        SemaphoreSlim? lockObj = null;
-                        IBridgedChannelControl? bridgedAdapter = null;
-                        var lockAcquired = false;
-                        var bridgedTypingStarted = false;
-                        long initialInputTokens = 0;
-                        long initialOutputTokens = 0;
-                        var conversationRecipientId = ResolveConversationRecipientId(msg);
-                        try
+                        while (pipeline.InboundReader.TryRead(out var msg))
                         {
-                            if (!msg.IsSystem)
+                            Session? session = null;
+                            IAsyncDisposable? sessionLock = null;
+                            IBridgedChannelControl? bridgedAdapter = null;
+                            var bridgedTypingStarted = false;
+                            long initialInputTokens = 0;
+                            long initialOutputTokens = 0;
+                            var conversationRecipientId = ResolveConversationRecipientId(msg);
+                            using var processingCts = CreateProcessingCts(msg.RequestCancellation, lifetime.ApplicationStopping);
+                            var processingCt = processingCts?.Token ?? lifetime.ApplicationStopping;
+                            try
                             {
-                                if (!operations.ActorRateLimits.TryConsume("channel_sender", $"{msg.ChannelId}:{msg.SenderId}", "inbound_chat", out _))
+                                if (!msg.IsSystem)
+                                {
+                                    if (!operations.ActorRateLimits.TryConsume("channel_sender", $"{msg.ChannelId}:{msg.SenderId}", "inbound_chat", out _))
                                 {
                                     await pipeline.OutboundWriter.WriteAsync(new OutboundMessage
                                     {
@@ -366,6 +371,9 @@ internal static class GatewayWorkers
                             if (msg.ChannelId == "telegram") policy = config.Channels.Telegram.DmPolicy;
                             if (msg.ChannelId == "whatsapp") policy = config.Channels.WhatsApp.DmPolicy;
                             if (msg.ChannelId == "teams") policy = config.Channels.Teams.DmPolicy;
+                            if (msg.ChannelId == "slack") policy = config.Channels.Slack.DmPolicy;
+                            if (msg.ChannelId == "discord") policy = config.Channels.Discord.DmPolicy;
+                            if (msg.ChannelId == "signal") policy = config.Channels.Signal.DmPolicy;
 
                             if (policy is "closed")
                                 continue; // Silently drop all inbound messages
@@ -386,21 +394,65 @@ internal static class GatewayWorkers
                                 continue; // Drop the inbound request after sending pairing code
                             }
 
+                            // ── Multi-Agent Route Resolution ─────────────────
+                            var resolvedRoute = routeResolver?.Resolve(msg.ChannelId, msg.SenderId);
+
                             session = msg.SessionId is not null
                                 ? await sessionManager.GetOrCreateByIdAsync(msg.SessionId, msg.ChannelId, conversationRecipientId, lifetime.ApplicationStopping)
                                 : await sessionManager.GetOrCreateAsync(msg.ChannelId, conversationRecipientId, lifetime.ApplicationStopping);
                             if (session is null)
                                 throw new InvalidOperationException("Session manager returned null session.");
 
+                            // Apply route overrides to session
+                            if (resolvedRoute is not null)
+                            {
+                                session.ModelOverride = string.IsNullOrWhiteSpace(resolvedRoute.ModelOverride)
+                                    ? session.ModelOverride
+                                    : resolvedRoute.ModelOverride.Trim();
+                                session.ModelProfileId = string.IsNullOrWhiteSpace(resolvedRoute.ModelProfileId)
+                                    ? null
+                                    : resolvedRoute.ModelProfileId.Trim();
+                                session.PreferredModelTags = resolvedRoute.PreferredModelTags
+                                    .Where(static item => !string.IsNullOrWhiteSpace(item))
+                                    .Select(static item => item.Trim())
+                                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                                    .ToArray();
+                                session.FallbackModelProfileIds = resolvedRoute.FallbackModelProfileIds
+                                    .Where(static item => !string.IsNullOrWhiteSpace(item))
+                                    .Select(static item => item.Trim())
+                                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                                    .ToArray();
+                                session.ModelRequirements = resolvedRoute.ModelRequirements ?? new ModelSelectionRequirements();
+                                session.SystemPromptOverride = string.IsNullOrWhiteSpace(resolvedRoute.SystemPrompt)
+                                    ? null
+                                    : resolvedRoute.SystemPrompt.Trim();
+                                session.RoutePresetId = string.IsNullOrWhiteSpace(resolvedRoute.PresetId)
+                                    ? null
+                                    : resolvedRoute.PresetId.Trim();
+                                session.RouteAllowedTools = resolvedRoute.AllowedTools
+                                    .Where(static item => !string.IsNullOrWhiteSpace(item))
+                                    .Select(static item => item.Trim())
+                                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                                    .ToArray();
+                            }
+                            else
+                            {
+                                session.ModelProfileId = null;
+                                session.PreferredModelTags = [];
+                                session.FallbackModelProfileIds = [];
+                                session.ModelRequirements = new ModelSelectionRequirements();
+                                session.SystemPromptOverride = null;
+                                session.RoutePresetId = null;
+                                session.RouteAllowedTools = [];
+                            }
+
                             initialInputTokens = session.TotalInputTokens;
                             initialOutputTokens = session.TotalOutputTokens;
 
-                            lockObj = sessionLocks.GetOrAdd(session.Id, _ => new SemaphoreSlim(1, 1));
-                            await lockObj.WaitAsync(lifetime.ApplicationStopping);
-                            lockAcquired = true;
+                            sessionLock = await sessionManager.AcquireSessionLockAsync(session.Id, processingCt);
 
                             // ── Chat Command Processing ──────────────────────
-                            var (handled, cmdResponse) = await commandProcessor.TryProcessCommandAsync(session, msg.Text, lifetime.ApplicationStopping);
+                            var (handled, cmdResponse) = await commandProcessor.TryProcessCommandAsync(session, msg.Text, processingCt);
                             if (handled)
                             {
                                 if (cmdResponse is not null)
@@ -412,7 +464,7 @@ internal static class GatewayWorkers
                                         Text = cmdResponse,
                                         Subject = msg.Subject,
                                         ReplyToMessageId = msg.MessageId
-                                    }, lifetime.ApplicationStopping);
+                                    }, processingCt);
                                 }
                                 continue; // Skip LLM completely
                             }
@@ -423,11 +475,12 @@ internal static class GatewayWorkers
                                 SenderId = msg.SenderId,
                                 Text = msg.Text,
                                 MessageId = msg.MessageId,
+                                SessionId = session.Id,
                                 SessionInputTokens = session.TotalInputTokens,
                                 SessionOutputTokens = session.TotalOutputTokens
                             };
 
-                            var shouldProceed = await middlewarePipeline.ExecuteAsync(mwContext, lifetime.ApplicationStopping);
+                            var shouldProceed = await middlewarePipeline.ExecuteAsync(mwContext, processingCt);
                             if (!shouldProceed)
                             {
                                 var shortCircuitText = mwContext.ShortCircuitResponse ?? "Request blocked.";
@@ -435,7 +488,7 @@ internal static class GatewayWorkers
                                 {
                                     await wsChannel.SendStreamEventAsync(
                                         msg.SenderId, "assistant_message", shortCircuitText, msg.MessageId,
-                                        lifetime.ApplicationStopping);
+                                        processingCt);
                                 }
                                 else
                                 {
@@ -446,17 +499,24 @@ internal static class GatewayWorkers
                                         Text = shortCircuitText,
                                         Subject = msg.Subject,
                                         ReplyToMessageId = msg.MessageId
-                                    }, lifetime.ApplicationStopping);
+                                    }, processingCt);
                                 }
                                 continue;
                             }
 
                             var messageText = mwContext.Text;
+                            if (!string.IsNullOrWhiteSpace(msg.MediaUrl) && !messageText.Contains("[IMAGE_URL:", StringComparison.Ordinal))
+                            {
+                                var marker = BuildMediaMarker(msg);
+                                if (!string.IsNullOrWhiteSpace(marker))
+                                    messageText = string.IsNullOrWhiteSpace(messageText) ? marker : $"{marker}\n{messageText}";
+                            }
                             var useStreaming = msg.ChannelId == "websocket" && wsChannel.IsClientUsingEnvelopes(msg.SenderId);
 
                             var approvalTimeout = TimeSpan.FromSeconds(Math.Clamp(config.Tooling.ToolApprovalTimeoutSeconds, 5, 3600));
                             async ValueTask<bool> ApprovalCallback(string toolName, string argsJson, CancellationToken ct)
                             {
+                                var actionDescriptor = ToolActionPolicyResolver.Resolve(toolName, argsJson);
                                 var grant = operations.ApprovalGrants.TryConsume(session.Id, msg.ChannelId, msg.SenderId, toolName);
                                 if (grant is not null)
                                 {
@@ -480,7 +540,16 @@ internal static class GatewayWorkers
                                     return true;
                                 }
 
-                                var req = toolApprovalService.Create(session.Id, msg.ChannelId, msg.SenderId, toolName, argsJson, approvalTimeout);
+                                var req = toolApprovalService.Create(
+                                    session.Id,
+                                    msg.ChannelId,
+                                    msg.SenderId,
+                                    toolName,
+                                    argsJson,
+                                    approvalTimeout,
+                                    action: actionDescriptor.Action,
+                                    isMutation: actionDescriptor.IsMutation,
+                                    summary: actionDescriptor.Summary);
                                 approvalAuditStore.RecordCreated(req);
                                 operations.RuntimeEvents.Append(new RuntimeEventEntry
                                 {
@@ -491,11 +560,15 @@ internal static class GatewayWorkers
                                     Component = "approval",
                                     Action = "requested",
                                     Severity = "info",
-                                    Summary = $"Tool approval requested for '{toolName}'.",
+                                    Summary = string.IsNullOrWhiteSpace(actionDescriptor.Summary)
+                                        ? $"Tool approval requested for '{toolName}'."
+                                        : actionDescriptor.Summary,
                                     Metadata = new Dictionary<string, string>
                                     {
                                         ["toolName"] = toolName,
-                                        ["approvalId"] = req.ApprovalId
+                                        ["approvalId"] = req.ApprovalId,
+                                        ["action"] = actionDescriptor.Action,
+                                        ["isMutation"] = actionDescriptor.IsMutation ? "true" : "false"
                                     }
                                 });
 
@@ -510,7 +583,7 @@ internal static class GatewayWorkers
                                         ToolName = toolName,
                                         ArgumentsPreview = preview,
                                         InReplyToMessageId = msg.MessageId,
-                                        Text = "Tool approval required."
+                                        Text = string.IsNullOrWhiteSpace(req.Summary) ? "Tool approval required." : req.Summary
                                     }, ct);
                                 }
                                 else
@@ -518,6 +591,8 @@ internal static class GatewayWorkers
                                     var prompt = $"Tool approval required.\n" +
                                                  $"- id: {req.ApprovalId}\n" +
                                                  $"- tool: {toolName}\n" +
+                                                 $"{(string.IsNullOrWhiteSpace(req.Action) ? "" : $"- action: {req.Action}\n")}" +
+                                                 $"{(string.IsNullOrWhiteSpace(req.Summary) ? "" : $"- summary: {req.Summary}\n")}" +
                                                  $"- args: {preview}\n\n" +
                                                  $"Reply with: /approve {req.ApprovalId} yes|no";
 
@@ -547,17 +622,55 @@ internal static class GatewayWorkers
 
                             if (useStreaming)
                             {
-                                await wsChannel.SendStreamEventAsync(msg.SenderId, "typing_start", "", msg.MessageId, lifetime.ApplicationStopping);
+                                await wsChannel.SendStreamEventAsync(msg.SenderId, "typing_start", "", msg.MessageId, processingCt);
 
+                                AgentStreamEvent? doneEvent = null;
                                 await foreach (var evt in agentRuntime.RunStreamingAsync(
-                                    session, messageText, lifetime.ApplicationStopping, approvalCallback: ApprovalCallback))
+                                    session, messageText, processingCt, approvalCallback: ApprovalCallback))
                                 {
+                                    if (string.Equals(evt.EnvelopeType, "assistant_done", StringComparison.Ordinal))
+                                    {
+                                        doneEvent = evt;
+                                        continue;
+                                    }
+
                                     await wsChannel.SendStreamEventAsync(
                                         msg.SenderId, evt.EnvelopeType, evt.Content, msg.MessageId,
-                                        lifetime.ApplicationStopping);
+                                        processingCt);
                                 }
-                                await sessionManager.PersistAsync(session, lifetime.ApplicationStopping);
-                                await wsChannel.SendStreamEventAsync(msg.SenderId, "typing_stop", "", msg.MessageId, lifetime.ApplicationStopping);
+                                await sessionManager.PersistAsync(session, processingCt, sessionLockHeld: true);
+                                if (learningService is not null)
+                                    await learningService.ObserveSessionAsync(session, processingCt);
+
+                                // Send verbose footer via stream for streaming sessions
+                                if (session.VerboseMode)
+                                {
+                                    var streamInputDelta = session.TotalInputTokens - initialInputTokens;
+                                    var streamOutputDelta = session.TotalOutputTokens - initialOutputTokens;
+                                    var streamToolCalls = 0;
+                                    for (var ti = session.History.Count - 1; ti >= 0; ti--)
+                                    {
+                                        var turn = session.History[ti];
+                                        if (turn.ToolCalls is { Count: > 0 })
+                                            streamToolCalls += turn.ToolCalls.Count;
+                                        if (string.Equals(turn.Role, "user", StringComparison.Ordinal))
+                                            break;
+                                    }
+                                    var verboseFooter = $"\n\n---\n{streamToolCalls} tool call(s) | {streamInputDelta} in / {streamOutputDelta} out tokens (this turn)";
+                                    await wsChannel.SendStreamEventAsync(msg.SenderId, "text_delta", verboseFooter, msg.MessageId, processingCt);
+                                }
+
+                                if (doneEvent is AgentStreamEvent completedEvent)
+                                {
+                                    await wsChannel.SendStreamEventAsync(
+                                        msg.SenderId,
+                                        completedEvent.EnvelopeType,
+                                        completedEvent.Content,
+                                        msg.MessageId,
+                                        processingCt);
+                                }
+
+                                await wsChannel.SendStreamEventAsync(msg.SenderId, "typing_stop", "", msg.MessageId, processingCt);
                             }
                             else
                             {
@@ -573,20 +686,45 @@ internal static class GatewayWorkers
                                     {
                                         var receiptJid = msg.IsGroup ? msg.GroupId : msg.SenderId;
                                         var receiptParticipant = msg.IsGroup ? msg.SenderId : null;
-                                        _ = bridgedAdapter.SendReadReceiptAsync(msg.MessageId, receiptJid, receiptParticipant, lifetime.ApplicationStopping);
+                                        ObserveBackgroundTask(
+                                            bridgedAdapter.SendReadReceiptAsync(msg.MessageId, receiptJid, receiptParticipant, processingCt).AsTask(),
+                                            logger,
+                                            "bridged read receipt");
                                     }
-                                    _ = bridgedAdapter.SendTypingAsync(conversationRecipientId, true, lifetime.ApplicationStopping);
+                                    ObserveBackgroundTask(
+                                        bridgedAdapter.SendTypingAsync(conversationRecipientId, true, processingCt).AsTask(),
+                                        logger,
+                                        "bridged typing start");
                                     bridgedTypingStarted = true;
                                 }
 
-                                var responseText = await agentRuntime.RunAsync(session, messageText, lifetime.ApplicationStopping, approvalCallback: ApprovalCallback);
-                                await sessionManager.PersistAsync(session, lifetime.ApplicationStopping);
+                                var responseText = await agentRuntime.RunAsync(session, messageText, processingCt, approvalCallback: ApprovalCallback);
+                                await sessionManager.PersistAsync(session, processingCt, sessionLockHeld: true);
+                                if (learningService is not null)
+                                    await learningService.ObserveSessionAsync(session, processingCt);
 
                                 var inputTokenDelta = session.TotalInputTokens - initialInputTokens;
                                 var outputTokenDelta = session.TotalOutputTokens - initialOutputTokens;
                                 var suppressHeartbeatDelivery = heartbeatService.ShouldSuppressResult(msg.CronJobName, responseText);
                                 if (heartbeatService.IsManagedHeartbeatJob(msg.CronJobName))
                                     heartbeatService.RecordResult(session, responseText, suppressHeartbeatDelivery, inputTokenDelta, outputTokenDelta);
+
+                                // Append verbose mode footer (tool calls and token delta)
+                                if (session.VerboseMode)
+                                {
+                                    // Tool calls may be spread across multiple turns added during this run
+                                    var turnToolCalls = 0;
+                                    for (var ti = session.History.Count - 1; ti >= 0; ti--)
+                                    {
+                                        var turn = session.History[ti];
+                                        if (turn.ToolCalls is { Count: > 0 })
+                                            turnToolCalls += turn.ToolCalls.Count;
+                                        // Stop once we reach a user turn (start of this interaction)
+                                        if (string.Equals(turn.Role, "user", StringComparison.Ordinal))
+                                            break;
+                                    }
+                                    responseText += $"\n\n---\n{turnToolCalls} tool call(s) | {inputTokenDelta} in / {outputTokenDelta} out tokens (this turn)";
+                                }
 
                                 // Append Usage Tracking string if configured
                                 if (config.UsageFooter is "tokens")
@@ -603,7 +741,7 @@ internal static class GatewayWorkers
                                         CronJobName = msg.CronJobName,
                                         Subject = msg.Subject,
                                         ReplyToMessageId = msg.MessageId
-                                    }, lifetime.ApplicationStopping);
+                                    }, processingCt);
                                 }
                             }
                         }
@@ -613,6 +751,9 @@ internal static class GatewayWorkers
                         }
                         catch (OperationCanceledException)
                         {
+                            if (session?.ContractPolicy is not null)
+                                contractGovernance?.AppendSnapshot(session, "cancelled");
+
                             if (session is not null)
                                 logger.LogWarning("Request canceled for session {SessionId}", session.Id);
                             else
@@ -637,14 +778,14 @@ internal static class GatewayWorkers
 
                             try
                             {
-                                var errorText = $"Internal error ({ex.GetType().Name}).";
+                                const string errorText = "Internal error.";
                                 if (msg.ChannelId == "websocket" && wsChannel.IsClientUsingEnvelopes(msg.SenderId))
                                 {
                                     await wsChannel.SendStreamEventAsync(
                                         msg.SenderId, "error", errorText, msg.MessageId,
-                                        lifetime.ApplicationStopping);
+                                        processingCt);
                                         
-                                    await wsChannel.SendStreamEventAsync(msg.SenderId, "typing_stop", "", msg.MessageId, lifetime.ApplicationStopping);
+                                    await wsChannel.SendStreamEventAsync(msg.SenderId, "typing_stop", "", msg.MessageId, processingCt);
                                 }
                                 else
                                 {
@@ -655,7 +796,7 @@ internal static class GatewayWorkers
                                         Text = errorText,
                                         Subject = msg.Subject,
                                         ReplyToMessageId = msg.MessageId
-                                    }, lifetime.ApplicationStopping);
+                                    }, processingCt);
                                 }
                             }
                             catch { /* Best effort */ }
@@ -663,17 +804,22 @@ internal static class GatewayWorkers
                         finally
                         {
                             if (bridgedAdapter is not null && bridgedTypingStarted)
-                                _ = bridgedAdapter.SendTypingAsync(conversationRecipientId, false, lifetime.ApplicationStopping);
-
-                            cronScheduler?.MarkJobCompleted(msg.CronJobName);
-
-                            if (lockAcquired && lockObj is not null)
                             {
-                                try { lockObj.Release(); } catch { /* ignore */ }
+                                try
+                                {
+                                    await bridgedAdapter.SendTypingAsync(conversationRecipientId, false, CancellationToken.None);
+                                }
+                                catch (Exception ex)
+                                {
+                                    logger.LogWarning(ex, "Background bridged typing stop failed");
+                                }
                             }
 
-                            if (session is not null)
-                                lockLastUsed[session.Id] = DateTimeOffset.UtcNow;
+                            cronScheduler?.MarkJobCompleted(msg.CronJobName);
+                            automationService?.MarkRunCompleted(msg.CronJobName);
+
+                            if (sessionLock is not null)
+                                await sessionLock.DisposeAsync();
                         }
                     }
                 }
@@ -734,6 +880,31 @@ internal static class GatewayWorkers
                 }
             }, lifetime.ApplicationStopping);
         }
+    }
+
+    private static CancellationTokenSource? CreateProcessingCts(CancellationToken requestCancellation, CancellationToken appStopping)
+    {
+        if (!requestCancellation.CanBeCanceled || requestCancellation == appStopping)
+            return null;
+
+        return CancellationTokenSource.CreateLinkedTokenSource(requestCancellation, appStopping);
+    }
+
+    private static void ObserveBackgroundTask(Task task, ILogger logger, string operation)
+    {
+        _ = task.ContinueWith(
+            static (completed, state) =>
+            {
+                if (completed.IsFaulted && completed.Exception is not null)
+                {
+                    var (log, op) = ((ILogger, string))state!;
+                    log.LogWarning(completed.Exception.GetBaseException(), "Background {Operation} failed", op);
+                }
+            },
+            state: (logger, operation),
+            cancellationToken: CancellationToken.None,
+            continuationOptions: TaskContinuationOptions.ExecuteSynchronously,
+            scheduler: TaskScheduler.Default);
     }
 
     private static string ResolveConversationRecipientId(InboundMessage msg)
@@ -832,4 +1003,14 @@ internal static class GatewayWorkers
             }
         });
     }
+
+    private static string? BuildMediaMarker(InboundMessage message)
+        => (message.MediaType ?? "").ToLowerInvariant() switch
+        {
+            "image" => $"[IMAGE_URL:{message.MediaUrl}]",
+            "audio" => $"[AUDIO_URL:{message.MediaUrl}]",
+            "video" => $"[VIDEO_URL:{message.MediaUrl}]",
+            "document" or "file" => $"[FILE_URL:{message.MediaUrl}]",
+            _ => null
+        };
 }

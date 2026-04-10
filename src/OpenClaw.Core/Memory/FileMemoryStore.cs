@@ -6,28 +6,49 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Models;
+using OpenClaw.Core.Observability;
 
 namespace OpenClaw.Core.Memory;
+
+public sealed class MemoryStoreCorruptionException : IOException
+{
+    public MemoryStoreCorruptionException(string message, string sessionId, string filePath, Exception innerException)
+        : base(message, innerException)
+    {
+        SessionId = sessionId;
+        FilePath = filePath;
+    }
+
+    public string SessionId { get; }
+    public string FilePath { get; }
+}
 
 /// <summary>
 /// File-based implementation of <see cref="IMemoryStore"/>.
 /// Sessions and notes are stored as JSON files with URL-safe base64 encoded filenames
 /// to prevent path traversal attacks. Includes in-memory LRU cache for sessions.
 /// </summary>
-public sealed class FileMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryRetentionStore, ISessionAdminStore
+public sealed class FileMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryRetentionStore, ISessionAdminStore, ISessionSearchStore, IAsyncDisposable, IDisposable
 {
+    private const int SessionLoadStripeCount = 64;
+
     private readonly string _basePath;
     private readonly string _sessionsPath;
     private readonly string _notesPath;
     private readonly string _branchesPath;
     private readonly IMemoryCache _sessionCache;
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> _sessionLoadGates = new(StringComparer.Ordinal);
+    private readonly SemaphoreSlim[] _sessionLoadStripes;
+    private readonly SemaphoreSlim _noteIndexGate = new(1, 1);
+    private readonly ConcurrentDictionary<string, NoteIndexEntry> _noteIndex = new(StringComparer.Ordinal);
     private readonly ILogger<FileMemoryStore>? _logger;
+    private readonly RuntimeMetrics? _metrics;
+    private int _noteIndexInitialized;
 
-    public FileMemoryStore(string basePath, int maxCachedSessions = 100, ILogger<FileMemoryStore>? logger = null)
+    public FileMemoryStore(string basePath, int maxCachedSessions = 100, ILogger<FileMemoryStore>? logger = null, RuntimeMetrics? metrics = null)
     {
         _basePath = basePath ?? throw new ArgumentNullException(nameof(basePath));
         _logger = logger;
+        _metrics = metrics;
         
         _sessionsPath = Path.Combine(_basePath, "sessions");
         _notesPath = Path.Combine(_basePath, "notes");
@@ -41,6 +62,9 @@ public sealed class FileMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryRe
         {
             SizeLimit = Math.Max(1, maxCachedSessions)
         });
+        _sessionLoadStripes = Enumerable.Range(0, SessionLoadStripeCount)
+            .Select(static _ => new SemaphoreSlim(1, 1))
+            .ToArray();
     }
 
     public async ValueTask<Session?> GetSessionAsync(string sessionId, CancellationToken ct)
@@ -50,9 +74,13 @@ public sealed class FileMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryRe
 
         // Check cache first
         if (_sessionCache.TryGetValue(sessionId, out Session? cached))
+        {
+            _metrics?.IncrementSessionCacheHits();
             return cached;
+        }
+        _metrics?.IncrementSessionCacheMisses();
 
-        var loadGate = _sessionLoadGates.GetOrAdd(sessionId, static _ => new SemaphoreSlim(1, 1));
+        var loadGate = ResolveSessionLoadStripe(sessionId);
         await loadGate.WaitAsync(ct);
         try
         {
@@ -84,9 +112,13 @@ public sealed class FileMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryRe
                         return session;
                     }
                 }
-                catch
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
-                    // Fall through to normal path
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    throw QuarantineCorruptSessionFile(legacyPath, sessionId, ex);
                 }
             }
 
@@ -114,15 +146,72 @@ public sealed class FileMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryRe
 
                 return loaded;
             }
-            catch
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
-                return null;
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw QuarantineCorruptSessionFile(filePath, sessionId, ex);
             }
         }
         finally
         {
             loadGate.Release();
         }
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        foreach (var stripe in _sessionLoadStripes)
+            stripe.Dispose();
+
+        _noteIndexGate.Dispose();
+        _sessionCache.Dispose();
+        return ValueTask.CompletedTask;
+    }
+
+    public void Dispose()
+        => DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+    private SemaphoreSlim ResolveSessionLoadStripe(string sessionId)
+    {
+        var index = (sessionId.GetHashCode(StringComparison.Ordinal) & int.MaxValue) % _sessionLoadStripes.Length;
+        return _sessionLoadStripes[index];
+    }
+
+    private MemoryStoreCorruptionException QuarantineCorruptSessionFile(string filePath, string sessionId, Exception ex)
+    {
+        string? quarantinePath = null;
+
+        try
+        {
+            if (File.Exists(filePath))
+            {
+                quarantinePath = filePath + $".corrupt-{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}";
+                File.Move(filePath, quarantinePath, overwrite: true);
+            }
+        }
+        catch (Exception quarantineEx)
+        {
+            _logger?.LogWarning(
+                quarantineEx,
+                "Failed to quarantine corrupt session file {FilePath} for session {SessionId}",
+                filePath,
+                sessionId);
+        }
+
+        var effectivePath = quarantinePath ?? filePath;
+        _logger?.LogError(
+            ex,
+            "Session file for {SessionId} is corrupt or unreadable and was quarantined to {FilePath}",
+            sessionId,
+            effectivePath);
+        return new MemoryStoreCorruptionException(
+            $"Session '{sessionId}' could not be loaded because its persisted state is corrupt.",
+            sessionId,
+            effectivePath,
+            ex);
     }
 
     public async ValueTask SaveSessionAsync(Session session, CancellationToken ct)
@@ -192,15 +281,21 @@ public sealed class FileMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryRe
         var encodedKey = EncodeKey(key);
         var filePath = Path.Combine(_notesPath, $"{encodedKey}.md");
         var tempPath = $"{filePath}.tmp";
+        var keyPath = Path.Combine(_notesPath, $"{encodedKey}.key");
+        var keyTempPath = $"{keyPath}.tmp";
+        var nowUtc = DateTimeOffset.UtcNow;
 
         try
         {
             await File.WriteAllTextAsync(tempPath, content, ct);
             File.Move(tempPath, filePath, overwrite: true);
+            await PersistOriginalNoteKeyAsync(key, keyPath, keyTempPath, ct);
+            UpsertNoteIndexEntry(key, content, nowUtc);
         }
         catch
         {
             try { File.Delete(tempPath); } catch { /* ignore */ }
+            try { File.Delete(keyTempPath); } catch { /* ignore */ }
             throw;
         }
     }
@@ -212,10 +307,13 @@ public sealed class FileMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryRe
 
         var encodedKey = EncodeKey(key);
         var filePath = Path.Combine(_notesPath, $"{encodedKey}.md");
+        var keyPath = Path.Combine(_notesPath, $"{encodedKey}.key");
 
         try
         {
             File.Delete(filePath);
+            File.Delete(keyPath);
+            _noteIndex.TryRemove(key, out _);
         }
         catch
         {
@@ -227,26 +325,7 @@ public sealed class FileMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryRe
 
     public ValueTask<IReadOnlyList<string>> ListNotesWithPrefixAsync(string prefix, CancellationToken ct)
     {
-        var results = new List<string>();
-
-        try
-        {
-            var files = Directory.EnumerateFiles(_notesPath, "*.md");
-            foreach (var file in files)
-            {
-                var encodedKey = Path.GetFileNameWithoutExtension(file);
-                var key = DecodeKey(encodedKey);
-                
-                if (key.StartsWith(prefix, StringComparison.Ordinal))
-                    results.Add(key);
-            }
-        }
-        catch
-        {
-            // Return empty list on error
-        }
-
-        return ValueTask.FromResult<IReadOnlyList<string>>(results);
+        return ListNotesWithPrefixCoreAsync(prefix ?? "", ct);
     }
 
     public async ValueTask<IReadOnlyList<MemoryNoteHit>> SearchNotesAsync(string query, string? prefix, int limit, CancellationToken ct)
@@ -256,56 +335,48 @@ public sealed class FileMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryRe
 
         limit = Math.Clamp(limit, 1, 50);
         prefix ??= "";
-
-        var hits = new List<MemoryNoteHit>(capacity: Math.Min(limit, 16));
         try
         {
-            foreach (var file in Directory.EnumerateFiles(_notesPath, "*.md"))
+            await EnsureNoteIndexLoadedAsync(ct);
+            var normalizedQuery = NormalizeSearchText(query);
+            if (normalizedQuery.Length == 0)
+                return [];
+
+            var terms = BuildQueryTerms(normalizedQuery);
+            var candidates = _noteIndex.Values
+                .Where(entry => string.IsNullOrEmpty(prefix) || entry.Key.StartsWith(prefix, StringComparison.Ordinal))
+                .Select(entry => new { Entry = entry, Score = ScoreNoteEntry(entry, normalizedQuery, terms) })
+                .Where(static item => item.Score > 0)
+                .OrderByDescending(static item => item.Score)
+                .ThenByDescending(static item => item.Entry.UpdatedAt)
+                .ThenBy(static item => item.Entry.Key, StringComparer.Ordinal)
+                .Take(Math.Min(limit * 4, 64))
+                .ToArray();
+
+            var hits = new List<MemoryNoteHit>(capacity: Math.Min(limit, candidates.Length));
+            foreach (var candidate in candidates)
             {
                 ct.ThrowIfCancellationRequested();
 
-                var encodedKey = Path.GetFileNameWithoutExtension(file);
-                var key = DecodeKey(encodedKey);
-
-                if (!string.IsNullOrEmpty(prefix) && !key.StartsWith(prefix, StringComparison.Ordinal))
-                    continue;
-
-                string content;
-                try
-                {
-                    content = await File.ReadAllTextAsync(file, ct);
-                }
-                catch
-                {
-                    continue;
-                }
-
-                if (content.IndexOf(query, StringComparison.OrdinalIgnoreCase) < 0 &&
-                    key.IndexOf(query, StringComparison.OrdinalIgnoreCase) < 0)
-                {
-                    continue;
-                }
-
-                var updatedAt = File.GetLastWriteTimeUtc(file);
-
+                var content = await LoadNoteAsync(candidate.Entry.Key, ct) ?? candidate.Entry.PreviewContent;
                 hits.Add(new MemoryNoteHit
                 {
-                    Key = key,
+                    Key = candidate.Entry.Key,
                     Content = content,
-                    UpdatedAt = new DateTimeOffset(updatedAt, TimeSpan.Zero),
-                    Score = 1.0f
+                    UpdatedAt = candidate.Entry.UpdatedAt,
+                    Score = candidate.Score
                 });
 
                 if (hits.Count >= limit)
                     break;
             }
+
+            return hits;
         }
         catch
         {
             return [];
         }
-
-        return hits;
     }
 
     public async ValueTask SaveBranchAsync(SessionBranch branch, CancellationToken ct)
@@ -710,6 +781,163 @@ public sealed class FileMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryRe
         return ValueTask.CompletedTask;
     }
 
+    private async ValueTask<IReadOnlyList<string>> ListNotesWithPrefixCoreAsync(string prefix, CancellationToken ct)
+    {
+        try
+        {
+            await EnsureNoteIndexLoadedAsync(ct);
+            return _noteIndex.Keys
+                .Where(key => key.StartsWith(prefix, StringComparison.Ordinal))
+                .OrderBy(static key => key, StringComparer.Ordinal)
+                .ToArray();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private async ValueTask EnsureNoteIndexLoadedAsync(CancellationToken ct)
+    {
+        if (Volatile.Read(ref _noteIndexInitialized) != 0)
+            return;
+
+        await _noteIndexGate.WaitAsync(ct);
+        try
+        {
+            if (_noteIndexInitialized != 0)
+                return;
+
+            _noteIndex.Clear();
+            foreach (var file in Directory.EnumerateFiles(_notesPath, "*.md"))
+            {
+                ct.ThrowIfCancellationRequested();
+
+                var encodedKey = Path.GetFileNameWithoutExtension(file);
+                var key = ResolveNoteKey(encodedKey);
+
+                string content;
+                try
+                {
+                    content = await File.ReadAllTextAsync(file, ct);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                var updatedAt = new DateTimeOffset(File.GetLastWriteTimeUtc(file), TimeSpan.Zero);
+                _noteIndex[key] = CreateNoteIndexEntry(key, content, updatedAt);
+            }
+
+            Volatile.Write(ref _noteIndexInitialized, 1);
+        }
+        finally
+        {
+            _noteIndexGate.Release();
+        }
+    }
+
+    private void UpsertNoteIndexEntry(string key, string content, DateTimeOffset updatedAt)
+    {
+        if (Volatile.Read(ref _noteIndexInitialized) == 0)
+            return;
+
+        _noteIndex[key] = CreateNoteIndexEntry(key, content, updatedAt);
+    }
+
+    private static NoteIndexEntry CreateNoteIndexEntry(string key, string content, DateTimeOffset updatedAt)
+    {
+        content ??= "";
+        return new NoteIndexEntry
+        {
+            Key = key,
+            PreviewContent = content.Length <= 4_096 ? content : content[..4_096] + "…",
+            SearchText = NormalizeSearchText($"{key}\n{content}"),
+            UpdatedAt = updatedAt
+        };
+    }
+
+    private static string NormalizeSearchText(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        var normalized = value.Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .ToLowerInvariant();
+
+        return normalized.Length <= 16_384 ? normalized : normalized[..16_384];
+    }
+
+    private static string[] BuildQueryTerms(string normalizedQuery)
+    {
+        return normalizedQuery
+            .Split([' ', '\n', '\t', ',', '.', ';', ':', '!', '?', '(', ')', '[', ']', '{', '}', '"', '\'', '/', '\\', '-', '_'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(static term => term.Length >= 3)
+            .Distinct(StringComparer.Ordinal)
+            .Take(8)
+            .ToArray();
+    }
+
+    private static float ScoreNoteEntry(NoteIndexEntry entry, string normalizedQuery, IReadOnlyList<string> terms)
+    {
+        var score = 0f;
+        if (entry.SearchText.Contains(normalizedQuery, StringComparison.Ordinal))
+            score += 6f;
+        if (entry.Key.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase))
+            score += 4f;
+
+        foreach (var term in terms)
+        {
+            if (entry.Key.Contains(term, StringComparison.OrdinalIgnoreCase))
+                score += 2f;
+            if (entry.SearchText.Contains(term, StringComparison.Ordinal))
+                score += 1f;
+        }
+
+        if (score <= 0f)
+            return 0f;
+
+        var ageDays = Math.Max(0d, (DateTimeOffset.UtcNow - entry.UpdatedAt).TotalDays);
+        var recencyBoost = (float)Math.Max(0.1d, 1.5d - Math.Min(1.4d, ageDays / 14d));
+        return score + recencyBoost;
+    }
+
+    private async ValueTask PersistOriginalNoteKeyAsync(string key, string keyPath, string keyTempPath, CancellationToken ct)
+    {
+        if (!RequiresKeySidecar(key))
+        {
+            try { File.Delete(keyPath); } catch { /* ignore */ }
+            return;
+        }
+
+        await File.WriteAllTextAsync(keyTempPath, key, ct);
+        File.Move(keyTempPath, keyPath, overwrite: true);
+    }
+
+    private string ResolveNoteKey(string encodedKey)
+    {
+        var keyPath = Path.Combine(_notesPath, $"{encodedKey}.key");
+        try
+        {
+            if (File.Exists(keyPath))
+            {
+                var originalKey = File.ReadAllText(keyPath);
+                if (!string.IsNullOrWhiteSpace(originalKey))
+                    return originalKey;
+            }
+        }
+        catch
+        {
+            // Fall back to the decodable key below.
+        }
+
+        return DecodeKey(encodedKey);
+    }
+
+    private static bool RequiresKeySidecar(string key) => key.Length > 200;
+
     /// <summary>
     /// Encodes a key to a URL-safe base64 string to prevent path traversal.
     /// Uses SHA256 hash for keys longer than 200 characters to avoid filesystem limits.
@@ -756,6 +984,14 @@ public sealed class FileMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryRe
             // If decode fails, return the encoded string (shouldn't happen in normal operation)
             return encoded;
         }
+    }
+
+    private sealed class NoteIndexEntry
+    {
+        public required string Key { get; init; }
+        public required string PreviewContent { get; init; }
+        public required string SearchText { get; init; }
+        public required DateTimeOffset UpdatedAt { get; init; }
     }
 
     // ── ISessionAdminStore ────────────────────────────────────────────────
@@ -834,5 +1070,110 @@ public sealed class FileMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryRe
             HasMore = summaries.Count > skip + pageSize,
             Items = items
         };
+    }
+
+    public async ValueTask<SessionSearchResult> SearchSessionsAsync(SessionSearchQuery query, CancellationToken ct)
+    {
+        var results = new List<SessionSearchHit>();
+        var searchText = (query.Text ?? "").Trim();
+        if (searchText.Length == 0)
+            return new SessionSearchResult { Query = query, Items = [] };
+
+        IEnumerable<string> files;
+        try { files = Directory.EnumerateFiles(_sessionsPath, "*.json"); }
+        catch { files = []; }
+
+        foreach (var file in files)
+        {
+            ct.ThrowIfCancellationRequested();
+            Session? session;
+            try
+            {
+                var json = await File.ReadAllTextAsync(file, ct);
+                session = JsonSerializer.Deserialize(json, CoreJsonContext.Default.Session);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (session is null)
+                continue;
+
+            if (!string.IsNullOrWhiteSpace(query.ChannelId) &&
+                !string.Equals(session.ChannelId, query.ChannelId, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (!string.IsNullOrWhiteSpace(query.SenderId) &&
+                !string.Equals(session.SenderId, query.SenderId, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            foreach (var turn in session.History)
+            {
+                if (query.FromUtc is { } fromUtc && turn.Timestamp < fromUtc)
+                    continue;
+
+                if (query.ToUtc is { } toUtc && turn.Timestamp > toUtc)
+                    continue;
+
+                AddHitIfMatch(results, session, turn.Role, turn.Timestamp, turn.Content, searchText, query.SnippetLength);
+                if (turn.ToolCalls is null)
+                    continue;
+
+                foreach (var toolCall in turn.ToolCalls)
+                    AddHitIfMatch(results, session, "tool", turn.Timestamp, toolCall.Result ?? toolCall.Arguments, searchText, query.SnippetLength);
+            }
+        }
+
+        return new SessionSearchResult
+        {
+            Query = query,
+            Items = results
+                .OrderByDescending(static item => item.Score)
+                .ThenByDescending(static item => item.Timestamp)
+                .Take(Math.Clamp(query.Limit, 1, 200))
+                .ToArray()
+        };
+    }
+
+    private static void AddHitIfMatch(
+        ICollection<SessionSearchHit> results,
+        Session session,
+        string role,
+        DateTimeOffset timestamp,
+        string? content,
+        string searchText,
+        int snippetLength)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+            return;
+
+        var index = content.IndexOf(searchText, StringComparison.OrdinalIgnoreCase);
+        if (index < 0)
+            return;
+
+        results.Add(new SessionSearchHit
+        {
+            SessionId = session.Id,
+            ChannelId = session.ChannelId,
+            SenderId = session.SenderId,
+            Role = role,
+            Timestamp = timestamp,
+            Snippet = BuildSnippet(content, index, snippetLength),
+            Score = 1f + Math.Max(0, 100 - index) / 100f
+        });
+    }
+
+    private static string BuildSnippet(string content, int index, int snippetLength)
+    {
+        snippetLength = Math.Clamp(snippetLength, 40, 400);
+        var start = Math.Max(0, index - (snippetLength / 3));
+        var length = Math.Min(snippetLength, content.Length - start);
+        var snippet = content.Substring(start, length).Replace('\r', ' ').Replace('\n', ' ').Trim();
+        if (start > 0)
+            snippet = $"...{snippet}";
+        if (start + length < content.Length)
+            snippet = $"{snippet}...";
+        return snippet;
     }
 }

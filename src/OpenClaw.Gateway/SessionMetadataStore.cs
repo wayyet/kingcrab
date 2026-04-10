@@ -32,7 +32,8 @@ internal sealed class SessionMetadataStore
                 {
                     SessionId = sessionId,
                     Starred = false,
-                    Tags = []
+                    Tags = [],
+                    TodoItems = []
                 };
         }
     }
@@ -55,7 +56,8 @@ internal sealed class SessionMetadataStore
                 {
                     SessionId = sessionId,
                     Starred = false,
-                    Tags = []
+                    Tags = [],
+                    TodoItems = []
                 };
 
             var updated = new SessionMetadataSnapshot
@@ -67,7 +69,11 @@ internal sealed class SessionMetadataStore
                     .Select(static tag => tag.Trim())
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .OrderBy(static tag => tag, StringComparer.OrdinalIgnoreCase)
-                    .ToArray()
+                    .ToArray(),
+                ActivePresetId = string.IsNullOrWhiteSpace(request.ActivePresetId)
+                    ? current.ActivePresetId
+                    : request.ActivePresetId.Trim(),
+                TodoItems = NormalizeTodoItems(request.TodoItems ?? current.TodoItems)
             };
 
             items.RemoveAll(item => string.Equals(item.SessionId, sessionId, StringComparison.Ordinal));
@@ -82,41 +88,47 @@ internal sealed class SessionMetadataStore
         if (_cached is not null)
             return _cached;
 
-        try
+        if (AtomicJsonFileStore.TryLoad(_path, CoreJsonContext.Default.ListSessionMetadataSnapshot, out List<SessionMetadataSnapshot>? items, out var error))
         {
-            if (!File.Exists(_path))
-            {
-                _cached = [];
-                return _cached;
-            }
+            _cached = items ?? [];
+            return _cached;
+        }
 
-            var json = File.ReadAllText(_path);
-            _cached = JsonSerializer.Deserialize(json, CoreJsonContext.Default.ListSessionMetadataSnapshot) ?? [];
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to load session metadata from {Path}", _path);
-            _cached = [];
-        }
+        _logger.LogWarning("Failed to load session metadata from {Path}: {Error}", _path, error);
+        _cached = [];
 
         return _cached;
     }
 
     private void SaveUnsafe(List<SessionMetadataSnapshot> items)
     {
-        try
+        if (!AtomicJsonFileStore.TryWriteAtomic(_path, items, CoreJsonContext.Default.ListSessionMetadataSnapshot, out var error))
         {
-            var directory = Path.GetDirectoryName(_path);
-            if (!string.IsNullOrWhiteSpace(directory))
-                Directory.CreateDirectory(directory);
+            _logger.LogWarning("Failed to save session metadata to {Path}: {Error}", _path, error);
+            throw new InvalidOperationException($"Failed to persist session metadata: {error}");
+        }
 
-            var json = JsonSerializer.Serialize(items, CoreJsonContext.Default.ListSessionMetadataSnapshot);
-            File.WriteAllText(_path, json);
-            _cached = items;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to save session metadata to {Path}", _path);
-        }
+        _cached = items;
+    }
+
+    private static IReadOnlyList<SessionTodoItem> NormalizeTodoItems(IReadOnlyList<SessionTodoItem>? items)
+    {
+        if (items is null || items.Count == 0)
+            return [];
+
+        return items
+            .Where(static item => !string.IsNullOrWhiteSpace(item.Text))
+            .Select(static item => new SessionTodoItem
+            {
+                Id = string.IsNullOrWhiteSpace(item.Id) ? $"todo_{Guid.NewGuid():N}"[..17] : item.Id.Trim(),
+                Text = item.Text.Trim(),
+                Completed = item.Completed,
+                Notes = string.IsNullOrWhiteSpace(item.Notes) ? null : item.Notes.Trim(),
+                CreatedAtUtc = item.CreatedAtUtc == default ? DateTimeOffset.UtcNow : item.CreatedAtUtc,
+                UpdatedAtUtc = item.UpdatedAtUtc == default ? DateTimeOffset.UtcNow : item.UpdatedAtUtc
+            })
+            .OrderBy(static item => item.Completed)
+            .ThenBy(static item => item.CreatedAtUtc)
+            .ToArray();
     }
 }
