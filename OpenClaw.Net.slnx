@@ -5,19 +5,27 @@
     <Platform Name="x86" />
   </Configurations>
   <Folder Name="/src/">
-    <Project Path="src/OpenClaw.Client/OpenClaw.Client.csproj" />
     <Project Path="src/OpenClaw.Agent/OpenClaw.Agent.csproj" />
     <Project Path="src/OpenClaw.Channels/OpenClaw.Channels.csproj" />
     <Project Path="src/OpenClaw.Cli/OpenClaw.Cli.csproj" />
+    <Project Path="src/OpenClaw.Client/OpenClaw.Client.csproj" />
     <Project Path="src/OpenClaw.Companion/OpenClaw.Companion.csproj" />
     <Project Path="src/OpenClaw.Core/OpenClaw.Core.csproj" />
     <Project Path="src/OpenClaw.Gateway/OpenClaw.Gateway.csproj" />
     <Project Path="src/OpenClaw.PluginKit/OpenClaw.PluginKit.csproj" />
+    <Project Path="src/OpenClaw.SandboxDemo/OpenClaw.SandboxDemo.csproj">
+      <Build Solution="Debug|*" Project="false" />
+    </Project>
     <Project Path="src/OpenClawNet.Sandbox.OpenSandbox/OpenClawNet.Sandbox.OpenSandbox.csproj" />
-    <Project Path="src/OpenClaw.SandboxDemo/OpenClaw.SandboxDemo.csproj" />
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="src/OpenClaw.TestPluginFixtures/OpenClaw.TestPluginFixtures.csproj" />
-    <Project Path="src/OpenClaw.Tests/OpenClaw.Tests.csproj" />
+    <Project Path="src/OpenClaw.TestPluginFixtures/OpenClaw.TestPluginFixtures.csproj">
+      <Build Solution="Debug|*" Project="false" />
+    </Project>
+    <Project Path="src/OpenClaw.Tests/OpenClaw.Tests.csproj">
+      <Build Solution="Debug|*" Project="false" />
+    </Project>
   </Folder>
+  <Project Path="Kingcrab.AppHost/Kingcrab.AppHost.csproj" Id="b56e871a-720a-43a2-963d-f178f6a190c8" />
+  <Project Path="Kingcrab.ServiceDefaults/Kingcrab.ServiceDefaults.csproj" Id="50d6c213-285c-4f32-ad22-acd88da8ba96" />
 </Solution>

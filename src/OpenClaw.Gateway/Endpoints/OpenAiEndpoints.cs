@@ -1,11 +1,12 @@
-using System.Text;
-using System.Text.Json;
 using OpenClaw.Agent;
 using OpenClaw.Core.Middleware;
 using OpenClaw.Core.Models;
 using OpenClaw.Core.Sessions;
 using OpenClaw.Gateway.Bootstrap;
 using OpenClaw.Gateway.Composition;
+using System.Net.Mime;
+using System.Text;
+using System.Text.Json;
 
 namespace OpenClaw.Gateway.Endpoints;
 
@@ -149,7 +150,7 @@ internal static class OpenAiEndpoints
 
                 if (req.Stream)
                 {
-                    ctx.Response.ContentType = "text/event-stream";
+                    ctx.Response.ContentType = MediaTypeNames.Text.EventStream; // "text/event-stream";
                     ctx.Response.Headers.CacheControl = "no-cache";
                     ctx.Response.Headers.Connection = "keep-alive";
                     var activeToolCalls = new Dictionary<string, Queue<(int Index, string CallId)>>(StringComparer.Ordinal);
@@ -310,7 +311,7 @@ internal static class OpenAiEndpoints
                         }
                     };
 
-                    ctx.Response.ContentType = "application/json";
+                    ctx.Response.ContentType = MediaTypeNames.Application.Json; // "application/json";
                     await ctx.Response.WriteAsync(
                         JsonSerializer.Serialize(response, CoreJsonContext.Default.OpenAiChatCompletionResponse),
                         ctx.RequestAborted);
@@ -420,7 +421,7 @@ internal static class OpenAiEndpoints
 
                 if (req.Stream)
                 {
-                    ctx.Response.ContentType = "text/event-stream";
+                    ctx.Response.ContentType = MediaTypeNames.Text.EventStream; // "text/event-stream";
                     ctx.Response.Headers.CacheControl = "no-cache";
                     ctx.Response.Headers.Connection = "keep-alive";
 
@@ -862,7 +863,7 @@ internal static class OpenAiEndpoints
                         }
                     };
 
-                    ctx.Response.ContentType = "application/json";
+                    ctx.Response.ContentType = MediaTypeNames.Application.Json; // "application/json";
                     await ctx.Response.WriteAsync(
                         JsonSerializer.Serialize(response, CoreJsonContext.Default.OpenAiResponseResponse),
                         ctx.RequestAborted);
