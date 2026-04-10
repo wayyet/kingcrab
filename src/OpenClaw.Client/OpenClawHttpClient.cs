@@ -118,7 +118,7 @@ public sealed class OpenClawHttpClient : IDisposable
         {
             Content = BuildJsonContent(request, CoreJsonContext.Default.OpenAiChatCompletionRequest)
         };
-        req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(MediaTypeNames.Text.EventStream));
         ApplyPresetHeader(req, presetId);
 
         using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
@@ -513,7 +513,7 @@ public sealed class OpenClawHttpClient : IDisposable
         CancellationToken cancellationToken)
     {
         using var req = new HttpRequestMessage(HttpMethod.Get, BuildChannelAuthStreamUri(channelId, accountId));
-        req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(MediaTypeNames.Text.EventStream));
 
         using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         if (!resp.IsSuccessStatusCode)
@@ -824,7 +824,7 @@ public sealed class OpenClawHttpClient : IDisposable
     private static HttpContent BuildJsonContent<T>(T request, JsonTypeInfo<T> jsonTypeInfo)
     {
         var json = JsonSerializer.Serialize(request, jsonTypeInfo);
-        return new StringContent(json, Encoding.UTF8, "application/json");
+        return new StringContent(json, Encoding.UTF8, MediaTypeNames.Application.Json);
     }
 
     private static void ApplyPresetHeader(HttpRequestMessage request, string? presetId)
