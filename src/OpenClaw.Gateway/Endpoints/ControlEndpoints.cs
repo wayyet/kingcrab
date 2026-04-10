@@ -235,6 +235,14 @@ internal static class ControlEndpoints
             if (!Regex.IsMatch(name, @"^[a-zA-Z0-9][a-zA-Z0-9_\-]{0,63}$"))
                 return Results.Json(new SkillMutationResponse { Success = false, Error = "Invalid skill name." }, CoreJsonContext.Default.SkillMutationResponse, statusCode: StatusCodes.Status400BadRequest);
 
+            // Only allow deleting user-installed (Workspace source) skills
+            var delLoggerFactory = ctx.RequestServices.GetRequiredService<ILoggerFactory>();
+            var delLogger = delLoggerFactory.CreateLogger("SkillLoader");
+            var currentSkills = SkillLoader.LoadAll(startup.Config.Skills, startup.WorkspacePath, delLogger);
+            var targetSkill = currentSkills.FirstOrDefault(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (targetSkill is not null && targetSkill.Source != SkillSource.Workspace)
+                return Results.Json(new SkillMutationResponse { Success = false, Error = $"Skill '{name}' is a built-in skill and cannot be deleted." }, CoreJsonContext.Default.SkillMutationResponse, statusCode: StatusCodes.Status403Forbidden);
+
             if (string.IsNullOrWhiteSpace(startup.WorkspacePath))
             {
                 var resolvedWs = OpenClaw.Core.Security.SecretResolver.Resolve(startup.Config.Tooling.WorkspaceRoot);
