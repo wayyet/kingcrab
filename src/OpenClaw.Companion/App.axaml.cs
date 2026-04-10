@@ -1,8 +1,6 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
-using Avalonia.Data.Core;
 using Avalonia.Data.Core.Plugins;
-using System.Linq;
 using Avalonia.Markup.Xaml;
 using OpenClaw.Companion.ViewModels;
 using OpenClaw.Companion.Views;
