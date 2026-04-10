@@ -1,12 +1,14 @@
+using OpenClaw.Client;
+
 namespace OpenClaw.Companion.Services;
 
 public sealed class GatewayWebSocketClient : IAsyncDisposable
 {
-    private readonly OpenClaw.Client.OpenClawWebSocketClient _inner;
+    private readonly OpenClawWebSocketClient _inner;
 
     public GatewayWebSocketClient(int maxMessageBytes = 256 * 1024)
     {
-        _inner = new OpenClaw.Client.OpenClawWebSocketClient(maxMessageBytes);
+        _inner = new OpenClawWebSocketClient(maxMessageBytes);
         _inner.OnTextMessage += text => OnTextMessage?.Invoke(text);
         _inner.OnError += error => OnError?.Invoke(error);
     }
