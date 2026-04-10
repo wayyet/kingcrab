@@ -35,6 +35,9 @@ public sealed class ApprovalHistoryEntry
     public required string SenderId { get; init; }
     public required string ToolName { get; init; }
     public required string ArgumentsPreview { get; init; }
+    public string? Action { get; init; }
+    public bool IsMutation { get; init; }
+    public string Summary { get; init; } = "";
     public DateTimeOffset TimestampUtc { get; init; }
     public DateTimeOffset? DecisionAtUtc { get; init; }
     public string? ActorChannelId { get; init; }
@@ -203,7 +206,6 @@ public sealed class AdminSummaryUsage
     public IReadOnlyList<OpenClaw.Core.Observability.ProviderUsageSnapshot> Providers { get; init; } = [];
     public IReadOnlyList<ProviderRouteHealthSnapshot> Routes { get; init; } = [];
     public IReadOnlyList<ProviderTurnUsageEntry> RecentTurns { get; init; } = [];
-
     public IReadOnlyList<OpenClaw.Core.Observability.ToolUsageSnapshot> Tools { get; init; } = [];
 }
 
@@ -232,4 +234,34 @@ public sealed class BranchRestoreResponse
     public required string SessionId { get; init; }
     public required string BranchId { get; init; }
     public int TurnCount { get; init; }
+}
+
+public sealed class SkillInstallRequest
+{
+    public required string Name { get; init; }
+    /// <summary>Full SKILL.md content including YAML frontmatter.</summary>
+    public required string Content { get; init; }
+}
+
+public sealed class SkillInfoDto
+{
+    public required string Name { get; init; }
+    public string? Description { get; init; }
+    public string? Emoji { get; init; }
+    /// <summary>bundled | managed | workspace | extra | plugin</summary>
+    public required string Source { get; init; }
+    public bool IsUserInstalled { get; init; }
+}
+
+public sealed class SkillsDetailResponse
+{
+    public IReadOnlyList<SkillInfoDto> Skills { get; init; } = [];
+}
+
+public sealed class SkillMutationResponse
+{
+    public bool Success { get; init; }
+    public string? Error { get; init; }
+    public int TotalLoaded { get; init; }
+    public IReadOnlyList<string> LoadedNames { get; init; } = [];
 }

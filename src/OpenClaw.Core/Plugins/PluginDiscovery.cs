@@ -52,13 +52,10 @@ public static class PluginDiscovery
         }
 
         // 3. Global extensions
-        if (pluginsConfig.Load.IncludeGlobalExtensions)
-        {
-            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            var globalExtDir = Path.Combine(home, ".openclaw", "extensions");
-            if (Directory.Exists(globalExtDir))
-                ScanExtensionsDirectory(globalExtDir, seen, result);
-        }
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var globalExtDir = Path.Combine(home, ".openclaw", "extensions");
+        if (Directory.Exists(globalExtDir))
+            ScanExtensionsDirectory(globalExtDir, seen, result);
 
         return result;
     }
@@ -235,7 +232,7 @@ public static class PluginDiscovery
         }
 
         // Find entry file
-        var entryPath = FindEntryFile(pluginRoot);
+        var entryPath = FindEntryFile(pluginRoot, out var entryDiagnostic);
         if (entryPath is null)
         {
             result.Reports.Add(new PluginLoadReport
@@ -248,9 +245,9 @@ public static class PluginDiscovery
                 [
                     new PluginCompatibilityDiagnostic
                     {
-                        Code = "entry_not_found",
-                        Message = $"No plugin entry file was found for '{manifest.Id}'. Expected index.ts, index.js, index.mjs, src/index.*, or a package.json openclaw.extensions entry.",
-                        Path = Path.GetFullPath(pluginRoot)
+                        Code = entryDiagnostic?.Code ?? "entry_not_found",
+                        Message = entryDiagnostic?.Message ?? $"No plugin entry file was found for '{manifest.Id}'. Expected index.ts, index.js, index.mjs, src/index.*, or a package.json openclaw.extensions entry.",
+                        Path = entryDiagnostic?.Path ?? Path.GetFullPath(pluginRoot)
                     }
                 ]
             });
@@ -295,7 +292,27 @@ public static class PluginDiscovery
                     ? $"{packName}/{fileBase}"
                     : packName;
 
-                var entryPath = Path.GetFullPath(Path.Combine(dir, relPath));
+                if (!TryResolveContainedPath(dir, relPath, out var entryPath))
+                {
+                    result.Reports.Add(new PluginLoadReport
+                    {
+                        PluginId = pluginId,
+                        SourcePath = Path.GetFullPath(dir),
+                        EntryPath = Path.GetFullPath(Path.Combine(dir, relPath)),
+                        Loaded = false,
+                        Diagnostics =
+                        [
+                            new PluginCompatibilityDiagnostic
+                            {
+                                Code = "entry_outside_root",
+                                Message = $"Package entry '{relPath}' for plugin '{pluginId}' resolves outside the plugin root.",
+                                Path = Path.GetFullPath(dir)
+                            }
+                        ]
+                    });
+                    continue;
+                }
+
                 if (!File.Exists(entryPath))
                 {
                     result.Reports.Add(new PluginLoadReport
@@ -390,8 +407,9 @@ public static class PluginDiscovery
         }
     }
 
-    private static string? FindEntryFile(string pluginRoot)
+    private static string? FindEntryFile(string pluginRoot, out PluginCompatibilityDiagnostic? diagnostic)
     {
+        diagnostic = null;
         // Check common entry points
         string[] candidates =
         [
@@ -426,7 +444,17 @@ public static class PluginDiscovery
                         if (string.IsNullOrEmpty(relPath))
                             continue;
 
-                        var entryPath = Path.Combine(pluginRoot, relPath);
+                        if (!TryResolveContainedPath(pluginRoot, relPath, out var entryPath))
+                        {
+                            diagnostic = new PluginCompatibilityDiagnostic
+                            {
+                                Code = "entry_outside_root",
+                                Message = $"Package entry '{relPath}' resolves outside the plugin root.",
+                                Path = Path.GetFullPath(pluginRoot)
+                            };
+                            return null;
+                        }
+
                         if (File.Exists(entryPath))
                             return entryPath;
                     }
@@ -447,5 +475,52 @@ public static class PluginDiscovery
         }
 
         return null;
+    }
+
+    public static bool TryResolveContainedPath(string rootPath, string relativePath, out string resolvedPath)
+    {
+        resolvedPath = Path.GetFullPath(Path.Combine(rootPath, relativePath));
+        var fullRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
+
+        // Resolve symlinks for both paths to prevent symlink-based escape from the root.
+        resolvedPath = ResolveRealPath(resolvedPath);
+        fullRoot = ResolveRealPath(fullRoot);
+
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        if (string.Equals(resolvedPath, fullRoot, comparison))
+            return true;
+
+        return resolvedPath.StartsWith(fullRoot + Path.DirectorySeparatorChar, comparison);
+    }
+
+    /// <summary>
+    /// Resolves the real filesystem path, following symlinks.
+    /// Falls back to the normalized path when the target does not exist.
+    /// </summary>
+    private static string ResolveRealPath(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                var resolved = File.ResolveLinkTarget(path, returnFinalTarget: true);
+                return resolved?.FullName ?? path;
+            }
+
+            if (Directory.Exists(path))
+            {
+                var resolved = Directory.ResolveLinkTarget(path, returnFinalTarget: true);
+                return resolved?.FullName ?? path;
+            }
+        }
+        catch
+        {
+            // Symlink resolution failed — fall through to the unresolved path.
+        }
+
+        return path;
     }
 }

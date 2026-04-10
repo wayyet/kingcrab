@@ -1,0 +1,108 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+
+ARG CONFIGURATION=Release
+ARG OPENCLAW_ENABLE_OPENSANDBOX=true
+
+WORKDIR /src
+
+# Keep restore cache stable by copying project descriptors first.
+COPY Directory.Build.props ./
+COPY OpenClaw.Net.slnx ./
+COPY src/OpenClaw.Core/OpenClaw.Core.csproj src/OpenClaw.Core/
+COPY src/OpenClaw.Agent/OpenClaw.Agent.csproj src/OpenClaw.Agent/
+COPY src/OpenClaw.Channels/OpenClaw.Channels.csproj src/OpenClaw.Channels/
+COPY src/OpenClaw.PluginKit/OpenClaw.PluginKit.csproj src/OpenClaw.PluginKit/
+COPY src/OpenClawNet.Sandbox.OpenSandbox/OpenClawNet.Sandbox.OpenSandbox.csproj src/OpenClawNet.Sandbox.OpenSandbox/
+COPY src/OpenClaw.Gateway/OpenClaw.Gateway.csproj src/OpenClaw.Gateway/
+
+RUN dotnet restore src/OpenClaw.Gateway/OpenClaw.Gateway.csproj
+
+COPY src/ src/
+
+RUN dotnet publish src/OpenClaw.Gateway/OpenClaw.Gateway.csproj \
+    -c ${CONFIGURATION} \
+    -o /out/publish \
+    -p:OpenClawEnableOpenSandbox=${OPENCLAW_ENABLE_OPENSANDBOX} \
+    --no-restore
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble AS runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# OpenSandbox images should keep enough tooling for a full app experience and for in-sandbox diagnosis.
+# - python3        : CodeExecTool Python execution
+# - poppler-utils  : PdfReadTool uses pdftotext for high-quality PDF extraction
+# - libnss3 et al. : Playwright/Chromium shared-library dependencies (BrowserTool)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        bash \
+        ca-certificates \
+        curl \
+        git \
+        jq \
+        procps \
+        python3 \
+        poppler-utils \
+        libnss3 \
+        libatk1.0-0 \
+        libatk-bridge2.0-0 \
+        libcups2 \
+        libdrm2 \
+        libxkbcommon0 \
+        libxcomposite1 \
+        libxdamage1 \
+        libxfixes3 \
+        libxrandr2 \
+        libgbm1 \
+        libasound2t64 \
+        libx11-xcb1 \
+        libpangocairo-1.0-0 \
+        fonts-liberation \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && npm install -g playwright \
+    && npm cache clean --force \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+RUN groupadd --gid 10001 openclaw \
+    && useradd --uid 10001 --gid 10001 --create-home --home-dir /home/openclaw --shell /bin/bash openclaw \
+    && mkdir -p /app/memory /workspace /home/openclaw/.cache/ms-playwright \
+    && chown -R openclaw:openclaw /app /workspace /home/openclaw
+
+COPY --from=build --chown=10001:10001 /out/publish/ /app/
+
+# Point both npm playwright and .NET Microsoft.Playwright to the same browser directory.
+# NODE_PATH lets Node.js require() resolve globally installed packages (e.g. playwright).
+ENV PLAYWRIGHT_BROWSERS_PATH=/home/openclaw/.cache/ms-playwright \
+    NODE_PATH=/usr/lib/node_modules
+
+# Pre-install Playwright Chromium as the openclaw user.
+# Node.js and npm playwright are already installed above; this downloads the browser binary.
+USER 10001:10001
+RUN npx playwright install chromium
+
+ENV ASPNETCORE_URLS=http://0.0.0.0:18789 \
+    DOTNET_EnableDiagnostics=1 \
+    HOME=/home/openclaw \
+    OpenClaw__BindAddress=0.0.0.0 \
+    OpenClaw__Port=18789 \
+    OpenClaw__Runtime__Mode=jit \
+    OpenClaw__Memory__StoragePath=/app/memory \
+    OpenClaw__Memory__Sqlite__DbPath=/app/memory/openclaw.db \
+    OpenClaw__Tooling__WorkspaceRoot=/workspace \
+    OpenClaw__Tooling__AllowShell=true \
+    OpenClaw__Tooling__AllowedReadRoots__0=/workspace \
+    OpenClaw__Tooling__AllowedWriteRoots__0=/workspace \
+    OpenClaw__Plugins__Enabled=true \
+    OpenClaw__Security__TrustForwardedHeaders=true
+
+EXPOSE 18789
+
+USER 10001:10001
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=5 \
+    CMD ["/app/OpenClaw.Gateway", "--health-check"]
+
+ENTRYPOINT ["/app/OpenClaw.Gateway"]

@@ -39,7 +39,11 @@ public sealed class MafAgentRuntime : IAgentRuntime
     private readonly long _sessionTokenBudget;
     private readonly MemoryRecallConfig? _recall;
     private readonly bool _requireToolApproval;
-    private readonly bool _persistSessionState;
+    private readonly Action<Session, string, string, long, long>? _recordContractTurnUsage;
+    private readonly Func<Session, bool>? _isContractTokenBudgetExceeded;
+    private readonly Func<Session, bool>? _isContractRuntimeBudgetExceeded;
+    private readonly Action<Session, string>? _appendContractSnapshot;
+    private readonly string? _memoryRecallPrefix;
     private readonly object _skillGate = new();
     private readonly IList<AITool> _mafTools;
     private string _systemPrompt = string.Empty;
@@ -53,8 +57,7 @@ public sealed class MafAgentRuntime : IAgentRuntime
         MafAgentFactory agentFactory,
         MafSessionStateStore sessionStateStore,
         MafTelemetryAdapter telemetry,
-        ILogger? logger = null,
-        bool persistSessionState = true)
+        ILogger? logger = null)
     {
         _runtimeState = context.RuntimeState;
         _toolExecutor = new OpenClawToolExecutor(
@@ -64,7 +67,7 @@ public sealed class MafAgentRuntime : IAgentRuntime
             context.ApprovalRequiredTools,
             context.Hooks,
             context.RuntimeMetrics,
-               logger,
+            logger,
             config: context.Config,
             toolSandbox: context.ToolSandbox);
         _options = options;
@@ -87,7 +90,13 @@ public sealed class MafAgentRuntime : IAgentRuntime
         _sessionTokenBudget = context.Config.SessionTokenBudget;
         _recall = context.Config.Memory.Recall;
         _requireToolApproval = context.RequireToolApproval;
-        _persistSessionState = persistSessionState;
+        _recordContractTurnUsage = context.RecordContractTurnUsage;
+        _isContractTokenBudgetExceeded = context.IsContractTokenBudgetExceeded;
+        _isContractRuntimeBudgetExceeded = context.IsContractRuntimeBudgetExceeded;
+        _appendContractSnapshot = context.AppendContractSnapshot;
+        var projectId = context.Config.Memory.ProjectId
+            ?? Environment.GetEnvironmentVariable("OPENCLAW_PROJECT");
+        _memoryRecallPrefix = string.IsNullOrWhiteSpace(projectId) ? null : $"project:{projectId.Trim()}:";
         _chatClient = new MafExecutionServiceChatClient(
             context.LlmExecutionService,
             context.RuntimeMetrics,
@@ -113,6 +122,8 @@ public sealed class MafAgentRuntime : IAgentRuntime
             }
         }
     }
+
+    public IReadOnlyList<AITool> LoadedTools => _mafTools is IReadOnlyList<AITool> r ? r : [.. _mafTools];
 
     public Task<IReadOnlyList<string>> ReloadSkillsAsync(CancellationToken ct = default)
     {
@@ -154,14 +165,21 @@ public sealed class MafAgentRuntime : IAgentRuntime
             session.Id,
             session.ChannelId);
 
-        if (_sessionTokenBudget > 0 && (session.TotalInputTokens + session.TotalOutputTokens) >= _sessionTokenBudget)
+        if (TryRejectContractBudget(session, out var contractBudgetMessage))
+        {
+            AppendContractSnapshot(session, "budget_exceeded");
+            LogTurnComplete(turnCtx);
+            return contractBudgetMessage;
+        }
+
+        if (_sessionTokenBudget > 0 && session.GetTotalTokens() >= _sessionTokenBudget)
         {
             LogTurnComplete(turnCtx);
             return "You've reached the token limit for this session. Please start a new conversation.";
         }
 
-        ChatClientAgent agent = CreateAgent();
-        AgentSession mafSession = await CreateOrLoadSessionAsync(agent, session, ct);
+        ChatClientAgent agent = CreateAgent(session);
+        AgentSession mafSession = await _sessionStateStore.LoadAsync(agent, session, ct);
         var toolInvocations = new List<ToolInvocation>();
 
         session.History.Add(new ChatTurn { Role = "user", Content = userMessage });
@@ -180,10 +198,11 @@ public sealed class MafAgentRuntime : IAgentRuntime
             {
                 Session = session,
                 TurnContext = turnCtx,
-                SystemPromptLength = _systemPromptLength,
+                SystemPromptLength = GetSystemPromptLength(session),
                 SkillPromptLength = _skillPromptLength,
                 SessionTokenBudget = _sessionTokenBudget,
                 ToolInvocations = toolInvocations,
+                RecordContractTurnUsage = _recordContractTurnUsage,
                 ApprovalCallback = approvalCallback
             });
 
@@ -210,14 +229,28 @@ public sealed class MafAgentRuntime : IAgentRuntime
                 Content = text
             });
 
-            await SaveSessionIfNeededAsync(agent, session, mafSession, ct);
+            await _sessionStateStore.SaveAsync(agent, session, mafSession, ct);
 
+            if (TryRejectContractBudget(session, out contractBudgetMessage))
+            {
+                AppendContractSnapshot(session, "budget_exceeded");
+                LogTurnComplete(turnCtx);
+                return contractBudgetMessage;
+            }
+
+            AppendContractSnapshot(session, "active");
             LogTurnComplete(turnCtx);
             return text;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
+        }
+        catch (ModelSelectionException ex)
+        {
+            _logger?.LogWarning("[{CorrelationId}] MAF model selection failed: {Message}", turnCtx.CorrelationId, ex.Message);
+            LogTurnComplete(turnCtx);
+            return ex.Message;
         }
         catch (Exception ex)
         {
@@ -251,7 +284,16 @@ public sealed class MafAgentRuntime : IAgentRuntime
             session.Id,
             session.ChannelId);
 
-        if (_sessionTokenBudget > 0 && (session.TotalInputTokens + session.TotalOutputTokens) >= _sessionTokenBudget)
+        if (TryRejectContractBudget(session, out var contractBudgetMessage))
+        {
+            yield return AgentStreamEvent.ErrorOccurred(contractBudgetMessage, "contract_budget_exceeded");
+            yield return AgentStreamEvent.Complete();
+            AppendContractSnapshot(session, "budget_exceeded");
+            LogTurnComplete(turnCtx);
+            yield break;
+        }
+
+        if (_sessionTokenBudget > 0 && session.GetTotalTokens() >= _sessionTokenBudget)
         {
             yield return AgentStreamEvent.ErrorOccurred(
                 "You've reached the token limit for this session. Please start a new conversation.",
@@ -261,8 +303,8 @@ public sealed class MafAgentRuntime : IAgentRuntime
             yield break;
         }
 
-        ChatClientAgent agent = CreateAgent();
-        AgentSession mafSession = await CreateOrLoadSessionAsync(agent, session, ct);
+        ChatClientAgent agent = CreateAgent(session);
+        AgentSession mafSession = await _sessionStateStore.LoadAsync(agent, session, ct);
         var eventChannel = Channel.CreateBounded<AgentStreamEvent>(new BoundedChannelOptions(256)
         {
             SingleReader = true,
@@ -296,15 +338,9 @@ public sealed class MafAgentRuntime : IAgentRuntime
         await producer;
     }
 
-    private ChatClientAgent CreateAgent()
+    private ChatClientAgent CreateAgent(Session session)
     {
-        string systemPrompt;
-        lock (_skillGate)
-        {
-            systemPrompt = _systemPrompt;
-        }
-
-        return _agentFactory.Create(_chatClient, systemPrompt, _mafTools);
+        return _agentFactory.Create(_chatClient, GetSystemPrompt(session), _mafTools);
     }
 
     private async Task ProduceStreamingRunAsync(
@@ -329,10 +365,11 @@ public sealed class MafAgentRuntime : IAgentRuntime
             {
                 Session = session,
                 TurnContext = turnCtx,
-                SystemPromptLength = _systemPromptLength,
+                SystemPromptLength = GetSystemPromptLength(session),
                 SkillPromptLength = _skillPromptLength,
                 SessionTokenBudget = _sessionTokenBudget,
                 ToolInvocations = toolInvocations,
+                RecordContractTurnUsage = _recordContractTurnUsage,
                 ApprovalCallback = approvalCallback,
                 StreamEventWriter = WriteStreamEventAsync
             });
@@ -366,8 +403,17 @@ public sealed class MafAgentRuntime : IAgentRuntime
                 Content = fullText.ToString()
             });
 
-            await SaveSessionIfNeededAsync(agent, session, mafSession, ct);
+            await _sessionStateStore.SaveAsync(agent, session, mafSession, ct);
 
+            if (TryRejectContractBudget(session, out var contractBudgetMessage))
+            {
+                await writer.WriteAsync(AgentStreamEvent.ErrorOccurred(contractBudgetMessage, "contract_budget_exceeded"), ct);
+                await writer.WriteAsync(AgentStreamEvent.Complete(), ct);
+                AppendContractSnapshot(session, "budget_exceeded");
+                return;
+            }
+
+            AppendContractSnapshot(session, "active");
             await writer.WriteAsync(AgentStreamEvent.Complete(), ct);
             LogTurnComplete(turnCtx);
         }
@@ -375,6 +421,19 @@ public sealed class MafAgentRuntime : IAgentRuntime
         {
             writer.TryComplete();
             throw;
+        }
+        catch (ModelSelectionException ex)
+        {
+            _logger?.LogWarning("[{CorrelationId}] MAF streaming model selection failed: {Message}", turnCtx.CorrelationId, ex.Message);
+            try
+            {
+                await writer.WriteAsync(AgentStreamEvent.ErrorOccurred(ex.Message, "model_selection_failed"), ct);
+                await writer.WriteAsync(AgentStreamEvent.Complete(), ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
         }
         catch (Exception ex)
         {
@@ -403,7 +462,8 @@ public sealed class MafAgentRuntime : IAgentRuntime
     }
 
     private ChatOptions CreateChatOptions(Session session, System.Text.Json.JsonElement? responseSchema)
-        => new()
+    {
+        var options = new ChatOptions
         {
             ModelId = session.ModelOverride ?? _config.Model,
             MaxOutputTokens = _config.MaxTokens,
@@ -413,15 +473,31 @@ public sealed class MafAgentRuntime : IAgentRuntime
                 : null
         };
 
-    private ValueTask<AgentSession> CreateOrLoadSessionAsync(ChatClientAgent agent, Session session, CancellationToken ct)
-        => _persistSessionState
-            ? _sessionStateStore.LoadAsync(agent, session, ct)
-            : agent.CreateSessionAsync(ct);
+        if (!string.IsNullOrWhiteSpace(session.ReasoningEffort))
+        {
+            options.AdditionalProperties ??= new AdditionalPropertiesDictionary();
+            options.AdditionalProperties["reasoning_effort"] = session.ReasoningEffort;
+        }
 
-    private Task SaveSessionIfNeededAsync(ChatClientAgent agent, Session session, AgentSession mafSession, CancellationToken ct)
-        => _persistSessionState
-            ? _sessionStateStore.SaveAsync(agent, session, mafSession, ct)
-            : Task.CompletedTask;
+        return options;
+    }
+
+    private string GetSystemPrompt(Session session)
+    {
+        string systemPrompt;
+        lock (_skillGate)
+        {
+            systemPrompt = _systemPrompt;
+        }
+
+        if (string.IsNullOrWhiteSpace(session.SystemPromptOverride))
+            return systemPrompt;
+
+        return systemPrompt + "\n\n[Route Instructions]\n" + session.SystemPromptOverride.Trim();
+    }
+
+    private int GetSystemPromptLength(Session session)
+        => GetSystemPrompt(session).Length;
 
     private async ValueTask TryInjectRecallAsync(List<ChatMessage> messages, string userMessage, CancellationToken ct)
     {
@@ -437,9 +513,16 @@ public sealed class MafAgentRuntime : IAgentRuntime
         try
         {
             var limit = Math.Clamp(_recall.MaxNotes, 1, 32);
-            var hits = await search.SearchNotesAsync(userMessage, prefix: null, limit, ct);
+            _metrics?.IncrementMemoryRecallSearches();
+            var hits = await search.SearchNotesAsync(userMessage, _memoryRecallPrefix, limit, ct);
+            if (hits.Count == 0 && !string.IsNullOrWhiteSpace(_memoryRecallPrefix))
+            {
+                _metrics?.IncrementMemoryRecallSearches();
+                hits = await search.SearchNotesAsync(userMessage, prefix: null, limit, ct);
+            }
             if (hits.Count == 0)
                 return;
+            _metrics?.AddMemoryRecallHits(hits.Count);
             var maxChars = Math.Clamp(_recall.MaxChars, 256, 100_000);
             var sb = new StringBuilder();
             sb.AppendLine("[Relevant memory]");
@@ -542,6 +625,7 @@ public sealed class MafAgentRuntime : IAgentRuntime
                 return;
             }
 
+            _metrics?.IncrementMemoryCompactions();
             session.History.RemoveRange(0, toSummarizeCount);
             session.History.Insert(0, new ChatTurn
             {
@@ -569,9 +653,24 @@ public sealed class MafAgentRuntime : IAgentRuntime
             }
             else if (turn.Role is "user" or "assistant" && turn.Content != "[tool_use]")
             {
-                messages.Add(new ChatMessage(
-                    turn.Role == "user" ? ChatRole.User : ChatRole.Assistant,
-                    turn.Content));
+                // Layer 1: when vision is enabled and this is a user turn, extract image markers
+                // and inline them as native ImageContent parts understood by the vision model.
+                if (turn.Role == "user" && _config.SupportsVision)
+                {
+                    messages.Add(BuildUserMessageWithImages(turn.Content));
+                }
+                else
+                {
+                    // Layer 2: for non-vision models, decode any inline data-URI image
+                    // markers to temporary files so the LLM sees a short [IMAGE_PATH:...]
+                    // it can pass to image_analyze, rather than a multi-thousand-token blob.
+                    var content = turn.Role == "user"
+                        ? DemoteDataUrisToTempFiles(turn.Content)
+                        : turn.Content;
+                    messages.Add(new ChatMessage(
+                        turn.Role == "user" ? ChatRole.User : ChatRole.Assistant,
+                        content));
+                }
             }
             else if (turn.Content == "[tool_use]" && turn.ToolCalls is { Count: > 0 })
             {
@@ -585,6 +684,191 @@ public sealed class MafAgentRuntime : IAgentRuntime
 
         return messages;
     }
+
+    /// <summary>
+    /// Parses <c>[IMAGE_URL:...]</c> and <c>[IMAGE_PATH:...]</c> markers out of a user turn
+    /// and builds a multi-part <see cref="ChatMessage"/> with native <see cref="ImageContent"/>
+    /// entries that vision-capable models can process directly.
+    /// Falls back to a plain text message when no image markers are present.
+    /// </summary>
+    private static ChatMessage BuildUserMessageWithImages(string turnContent)
+    {
+        var (markers, remainingText) = MediaMarkerProtocol.Extract(turnContent);
+
+        var imageMarkers = markers.Where(m =>
+            m.Kind is MediaMarkerKind.ImageUrl or MediaMarkerKind.ImagePath).ToList();
+
+        if (imageMarkers.Count == 0)
+            return new ChatMessage(ChatRole.User, turnContent);
+
+        var parts = new List<AIContent>();
+
+        if (!string.IsNullOrWhiteSpace(remainingText))
+            parts.Add(new TextContent(remainingText));
+
+        foreach (var marker in imageMarkers)
+        {
+            if (marker.Kind == MediaMarkerKind.ImageUrl)
+            {
+                if (marker.Value.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Inline data URI from browser FileReader — decode bytes for DataContent.
+                    try
+                    {
+                        var (mime, bytes) = ParseDataUri(marker.Value);
+                        parts.Add(new DataContent(bytes, mime));
+                    }
+                    catch
+                    {
+                        // Skip malformed data URIs rather than failing the whole turn.
+                    }
+                }
+                else
+                {
+                    // Remote HTTP/HTTPS URL — the model fetches the image itself.
+                    parts.Add(new UriContent(marker.Value, "image/*"));
+                }
+            }
+            else // ImagePath
+            {
+                if (!File.Exists(marker.Value))
+                    continue;
+
+                try
+                {
+                    var bytes = File.ReadAllBytes(marker.Value);
+                    var mime = Path.GetExtension(marker.Value).ToLowerInvariant() switch
+                    {
+                        ".jpg" or ".jpeg" => "image/jpeg",
+                        ".gif" => "image/gif",
+                        ".webp" => "image/webp",
+                        _ => "image/png"
+                    };
+                    // DataContent sends the raw bytes as a data URI inline.
+                    parts.Add(new DataContent(bytes, mime));
+                }
+                catch
+                {
+                    // Skip unreadable local images rather than failing the whole turn.
+                }
+            }
+        }
+
+        // Ensure there is always at least some text so models that require a text part don't error.
+        if (!parts.OfType<TextContent>().Any())
+            parts.Insert(0, new TextContent("Please analyze the attached image(s)."));
+
+        return new ChatMessage(ChatRole.User, parts);
+    }
+
+    /// <summary>
+    /// Parses a browser-generated data URI of the form
+    /// <c>data:[&lt;mediatype&gt;][;base64],&lt;data&gt;</c> into its MIME type and raw bytes.
+    /// Falls back to <c>application/octet-stream</c> when the type segment is absent.
+    /// </summary>
+    private static (string MimeType, byte[] Bytes) ParseDataUri(string dataUri)
+    {
+        // "data:".Length == 5
+        var commaIdx = dataUri.IndexOf(',', 5);
+        if (commaIdx < 0)
+            throw new FormatException("Invalid data URI: missing comma separator.");
+
+        var header = dataUri[5..commaIdx]; // e.g. "image/jpeg;base64"
+        var encodedData = dataUri[(commaIdx + 1)..];
+
+        bool isBase64 = header.EndsWith(";base64", StringComparison.OrdinalIgnoreCase);
+        var mimeType = isBase64 ? header[..^7] : header;
+
+        if (string.IsNullOrWhiteSpace(mimeType))
+            mimeType = "application/octet-stream";
+
+        var bytes = isBase64
+            ? Convert.FromBase64String(encodedData)
+            : System.Text.Encoding.UTF8.GetBytes(Uri.UnescapeDataString(encodedData));
+
+        return (mimeType, bytes);
+    }
+
+    /// <summary>
+    /// Rewrites a user-turn string so that any <c>[IMAGE_URL:data:...]</c> inline base64
+    /// data-URI markers are decoded to temporary files and replaced with
+    /// <c>[IMAGE_PATH:...]</c> markers. This keeps the context window small for non-vision
+    /// models (e.g. DeepSeek) while giving the <c>image_analyze</c> tool a local path it
+    /// can read and forward to the vision provider.
+    /// Temp files are written to <c>%TEMP%/openclaw_images/</c> (cross-platform via
+    /// <see cref="Path.GetTempPath"/>).
+    /// </summary>
+    private static string DemoteDataUrisToTempFiles(string turnContent)
+    {
+        if (!turnContent.Contains("[IMAGE_URL:data:", StringComparison.OrdinalIgnoreCase))
+            return turnContent;
+
+        var (markers, remainingText) = MediaMarkerProtocol.Extract(turnContent);
+
+        if (!markers.Any(m =>
+                m.Kind == MediaMarkerKind.ImageUrl &&
+                m.Value.StartsWith("data:", StringComparison.OrdinalIgnoreCase)))
+            return turnContent;
+
+        var tempDir = Path.Combine(Path.GetTempPath(), "openclaw_images");
+        Directory.CreateDirectory(tempDir);
+
+        var sb = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(remainingText))
+            sb.AppendLine(remainingText);
+
+        foreach (var marker in markers)
+        {
+            if (marker.Kind == MediaMarkerKind.ImageUrl &&
+                marker.Value.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    var (mime, bytes) = ParseDataUri(marker.Value);
+                    var ext = MimeToExtension(mime);
+                    var filePath = Path.Combine(tempDir, $"openclaw_{Guid.NewGuid():N}{ext}");
+                    File.WriteAllBytes(filePath, bytes);
+                    sb.AppendLine($"[IMAGE_PATH:{filePath}]");
+                }
+                catch
+                {
+                    // Skip malformed data URIs rather than failing the whole turn.
+                }
+            }
+            else
+            {
+                // Re-emit all other markers verbatim.
+                sb.AppendLine(ReconstructMarker(marker));
+            }
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static string ReconstructMarker(MediaMarker marker) =>
+        marker.Kind switch
+        {
+            MediaMarkerKind.ImageUrl            => $"[IMAGE_URL:{marker.Value}]",
+            MediaMarkerKind.ImagePath           => $"[IMAGE_PATH:{marker.Value}]",
+            MediaMarkerKind.FileUrl             => $"[FILE_URL:{marker.Value}]",
+            MediaMarkerKind.FilePath            => $"[FILE_PATH:{marker.Value}]",
+            MediaMarkerKind.VideoUrl            => $"[VIDEO_URL:{marker.Value}]",
+            MediaMarkerKind.AudioUrl            => $"[AUDIO_URL:{marker.Value}]",
+            MediaMarkerKind.DocumentUrl         => $"[DOCUMENT_URL:{marker.Value}]",
+            MediaMarkerKind.StickerUrl          => $"[STICKER_URL:{marker.Value}]",
+            MediaMarkerKind.TelegramImageFileId => $"[IMAGE:telegram:file_id={marker.Value}]",
+            _                                   => $"[{marker.Kind}:{marker.Value}]"
+        };
+
+    private static string MimeToExtension(string mime) =>
+        mime.ToLowerInvariant() switch
+        {
+            "image/jpeg" => ".jpg",
+            "image/gif"  => ".gif",
+            "image/webp" => ".webp",
+            "image/png"  => ".png",
+            _            => ".bin"
+        };
 
     private void ApplySkills(IReadOnlyList<SkillDefinition> skills)
     {
@@ -673,5 +957,34 @@ public sealed class MafAgentRuntime : IAgentRuntime
             "[{CorrelationId}] MAF turn complete: {Summary}",
             turnCtx.CorrelationId,
             turnCtx.ToString());
+    }
+
+    private bool TryRejectContractBudget(Session session, out string message)
+    {
+        message = string.Empty;
+        if (session.ContractPolicy is null)
+            return false;
+
+        if (_isContractRuntimeBudgetExceeded?.Invoke(session) == true)
+        {
+            message = "This contract has expired and can no longer execute new work.";
+            return true;
+        }
+
+        if (_isContractTokenBudgetExceeded?.Invoke(session) == true)
+        {
+            message = "This contract has reached its token budget and cannot continue.";
+            return true;
+        }
+
+        return false;
+    }
+
+    private void AppendContractSnapshot(Session session, string status)
+    {
+        if (session.ContractPolicy is null)
+            return;
+
+        _appendContractSnapshot?.Invoke(session, status);
     }
 }

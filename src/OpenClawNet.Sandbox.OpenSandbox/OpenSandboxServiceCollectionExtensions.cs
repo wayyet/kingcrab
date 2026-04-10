@@ -27,18 +27,15 @@ public static class OpenSandboxServiceCollectionExtensions
             ApiKey = ResolveSecretRefOrValue(sandboxSection["ApiKey"]),
             DefaultTTL = int.TryParse(sandboxSection["DefaultTTL"], out var defaultTtl)
                 ? defaultTtl
-                : 300
+                : 300,
+            ReadyTimeoutSeconds = int.TryParse(sandboxSection["ReadyTimeoutSeconds"], out var readyTimeout) && readyTimeout > 0
+                ? readyTimeout
+                : 60
         };
 
         services.AddSingleton(options);
-        services.AddHttpClient(nameof(OpenSandboxToolSandbox), client =>
-        {
-            client.BaseAddress = options.GetApiBaseUri();
-            client.Timeout = Timeout.InfiniteTimeSpan;
-        });
         services.AddSingleton<IToolSandbox>(sp =>
             new OpenSandboxToolSandbox(
-                sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(OpenSandboxToolSandbox)),
                 sp.GetRequiredService<OpenSandboxOptions>(),
                 sp.GetService<Microsoft.Extensions.Logging.ILogger<OpenSandboxToolSandbox>>()));
 

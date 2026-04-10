@@ -122,7 +122,14 @@ internal static class GatewayBootstrapExtensions
         var config = openClawSection.Get<GatewayConfig>() ?? new GatewayConfig();
         ApplyConfiguredToolingOverrides(openClawSection, config);
         HydratePluginEntryConfigJson(config, configuration);
+        var pluginAdminSettingsPath = PluginAdminSettingsService.GetSettingsPath(config);
+        if (PluginAdminSettingsService.TryLoadPersistedEntries(pluginAdminSettingsPath, out var pluginEntries, out _)
+            && pluginEntries is not null)
+        {
+            PluginAdminSettingsService.ApplyEntries(config, pluginEntries);
+        }
         ApplyEnvironmentOverrides(config);
+        ApplyExecutionCompatibility(config);
         return config;
     }
 
@@ -170,6 +177,41 @@ internal static class GatewayBootstrapExtensions
         config.Llm.Model = Environment.GetEnvironmentVariable("MODEL_PROVIDER_MODEL") ?? config.Llm.Model;
         config.Llm.Endpoint = ResolveSecretRefOrNull(config.Llm.Endpoint) ?? Environment.GetEnvironmentVariable("MODEL_PROVIDER_ENDPOINT");
         config.AuthToken ??= Environment.GetEnvironmentVariable("OPENCLAW_AUTH_TOKEN");
+    }
+
+    private static void ApplyExecutionCompatibility(GatewayConfig config)
+    {
+        if (!ToolSandboxPolicy.IsOpenSandboxProviderConfigured(config))
+            return;
+
+        if (!config.Execution.Profiles.ContainsKey("opensandbox"))
+        {
+            config.Execution.Profiles["opensandbox"] = new ExecutionBackendProfileConfig
+            {
+                Type = ExecutionBackendType.OpenSandbox,
+                Enabled = true,
+                Endpoint = config.Sandbox.Endpoint,
+                ApiKey = config.Sandbox.ApiKey,
+                TimeoutSeconds = Math.Max(5, config.Tooling.ToolTimeoutSeconds)
+            };
+        }
+
+        foreach (var (toolName, defaultMode) in ToolSandboxPolicy.EnumerateBuiltInCandidates(config))
+        {
+            if (config.Execution.Tools.ContainsKey(toolName))
+                continue;
+
+            var mode = ToolSandboxPolicy.ResolveMode(config, toolName, defaultMode);
+            if (mode == ToolSandboxMode.None)
+                continue;
+
+            config.Execution.Tools[toolName] = new ExecutionToolRouteConfig
+            {
+                Backend = "opensandbox",
+                FallbackBackend = mode == ToolSandboxMode.Prefer ? "local" : null,
+                RequireWorkspace = false
+            };
+        }
     }
 
     private static void HydratePluginEntryConfigJson(GatewayConfig config, IConfiguration configuration)

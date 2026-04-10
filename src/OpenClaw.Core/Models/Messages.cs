@@ -19,6 +19,38 @@ public sealed record InboundMessage
     public string? ApprovalId { get; init; }
     public bool? Approved { get; init; }
     public DateTimeOffset ReceivedAt { get; init; } = DateTimeOffset.UtcNow;
+    [System.Text.Json.Serialization.JsonIgnore]
+    public CancellationToken RequestCancellation { get; init; } = CancellationToken.None;
+
+    // Group chat fields
+    public bool IsGroup { get; init; }
+    public string? GroupId { get; init; }
+    public string? GroupName { get; init; }
+    public string[]? MentionedIds { get; init; }
+
+    // Media fields
+    public string? MediaType { get; init; }
+    public string? MediaUrl { get; init; }
+    public string? MediaMimeType { get; init; }
+    public string? MediaFileName { get; init; }
+
+    /// <summary>
+    /// Multiple media attachments (e.g. several images in one message).
+    /// When present, each attachment generates its own marker line in the pipeline text.
+    /// </summary>
+    public IReadOnlyList<MediaAttachment>? Attachments { get; init; }
+}
+
+/// <summary>
+/// A single media file attached to an <see cref="InboundMessage"/>.
+/// </summary>
+public sealed record MediaAttachment
+{
+    /// <summary>"image", "video", "audio", "document"</summary>
+    public required string MediaType { get; init; }
+    public string? Url { get; init; }
+    public string? MimeType { get; init; }
+    public string? FileName { get; init; }
 }
 
 /// <summary>

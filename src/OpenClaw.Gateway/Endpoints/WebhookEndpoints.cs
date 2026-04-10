@@ -1,11 +1,13 @@
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.WebUtilities;
+using OpenClaw.Channels;
 using OpenClaw.Core.Models;
 using OpenClaw.Core.Security;
 using OpenClaw.Gateway;
 using OpenClaw.Gateway.Bootstrap;
 using OpenClaw.Gateway.Composition;
+using OpenClaw.Gateway.Integrations;
 
 namespace OpenClaw.Gateway.Endpoints;
 
@@ -244,27 +246,34 @@ internal static class WebhookEndpoints
             });
         }
 
-        if (startup.Config.Channels.WhatsApp.Enabled)
+        if (startup.Config.Channels.WhatsApp.Enabled &&
+            !string.Equals(startup.Config.Channels.WhatsApp.Type, "first_party_worker", StringComparison.OrdinalIgnoreCase))
         {
             var whatsappWebhookHandler = app.Services.GetRequiredService<WhatsAppWebhookHandler>();
             app.MapMethods(startup.Config.Channels.WhatsApp.WebhookPath, ["GET", "POST"], async (HttpContext ctx) =>
             {
-                ctx.Request.EnableBuffering();
-                var (bodyOk, bodyText) = await EndpointHelpers.TryReadBodyTextAsync(ctx, Math.Max(4 * 1024, startup.Config.Channels.WhatsApp.MaxRequestBytes), ctx.RequestAborted);
-                if (!bodyOk)
+                var isPost = HttpMethods.IsPost(ctx.Request.Method);
+                string bodyText = "";
+                if (isPost)
                 {
-                    ctx.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
-                    await ctx.Response.WriteAsync("Request too large.", ctx.RequestAborted);
-                    return;
-                }
+                    ctx.Request.EnableBuffering();
+                    var (bodyOk, requestBodyText) = await EndpointHelpers.TryReadBodyTextAsync(ctx, Math.Max(4 * 1024, startup.Config.Channels.WhatsApp.MaxRequestBytes), ctx.RequestAborted);
+                    if (!bodyOk)
+                    {
+                        ctx.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+                        await ctx.Response.WriteAsync("Request too large.", ctx.RequestAborted);
+                        return;
+                    }
 
-                ctx.Request.Body.Position = 0;
-                var deliveryKey = TryResolveWhatsAppDeliveryKey(bodyText);
-                if (!deliveries.TryBegin("whatsapp", deliveryKey, TimeSpan.FromHours(6)))
-                {
-                    ctx.Response.StatusCode = StatusCodes.Status200OK;
-                    await ctx.Response.WriteAsync("Duplicate ignored.", ctx.RequestAborted);
-                    return;
+                    bodyText = requestBodyText;
+                    ctx.Request.Body.Position = 0;
+                    var deliveryKey = TryResolveWhatsAppDeliveryKey(bodyText);
+                    if (!deliveries.TryBegin("whatsapp", deliveryKey, TimeSpan.FromHours(6)))
+                    {
+                        ctx.Response.StatusCode = StatusCodes.Status200OK;
+                        await ctx.Response.WriteAsync("Duplicate ignored.", ctx.RequestAborted);
+                        return;
+                    }
                 }
 
                 InboundMessage? replayMessage = null;
@@ -294,8 +303,283 @@ internal static class WebhookEndpoints
                         {
                             Id = $"whdl_{Guid.NewGuid():N}"[..20],
                             Source = "whatsapp",
-                            DeliveryKey = deliveryKey,
+                            DeliveryKey = isPost ? TryResolveWhatsAppDeliveryKey(bodyText) : "",
                             ChannelId = "whatsapp",
+                            SenderId = replayMessage?.SenderId,
+                            SessionId = replayMessage?.SessionId,
+                            Error = ex.Message,
+                            PayloadPreview = bodyText.Length <= 500 ? bodyText : bodyText[..500] + "…"
+                        },
+                        ReplayMessage = replayMessage
+                    });
+                    ctx.Response.StatusCode = StatusCodes.Status500InternalServerError;
+                    await ctx.Response.WriteAsync("Webhook processing failed.", ctx.RequestAborted);
+                }
+            });
+        }
+
+        if (startup.Config.Channels.Teams.Enabled)
+        {
+            var teamsHandler = app.Services.GetRequiredService<TeamsWebhookHandler>();
+            var teamsChannel = app.Services.GetRequiredService<TeamsChannel>();
+            app.MapPost(startup.Config.Channels.Teams.WebhookPath, async (HttpContext ctx) =>
+            {
+                InboundMessage? replayMessage = null;
+                var deliveryKey = "";
+                try
+                {
+                    var result = await teamsHandler.HandleAsync(
+                        ctx,
+                        teamsChannel,
+                        async (msg, ct2) =>
+                        {
+                            replayMessage = msg;
+                            deliveryKey = msg.MessageId ?? "";
+                            if (!string.IsNullOrWhiteSpace(deliveryKey) &&
+                                !deliveries.TryBegin("teams", deliveryKey, TimeSpan.FromHours(6)))
+                                return;
+                            await runtime.Pipeline.InboundWriter.WriteAsync(msg, ct2);
+                        },
+                        ctx.RequestAborted);
+
+                    ctx.Response.StatusCode = result.StatusCode;
+                    if (result.ContentType is not null)
+                        ctx.Response.ContentType = result.ContentType;
+                    if (result.Body is not null)
+                        await ctx.Response.WriteAsync(result.Body, ctx.RequestAborted);
+                }
+                catch (Exception ex)
+                {
+                    deliveries.RecordDeadLetter(new WebhookDeadLetterRecord
+                    {
+                        Entry = new WebhookDeadLetterEntry
+                        {
+                            Id = $"whdl_{Guid.NewGuid():N}"[..20],
+                            Source = "teams",
+                            DeliveryKey = deliveryKey,
+                            ChannelId = "teams",
+                            SenderId = replayMessage?.SenderId,
+                            SessionId = replayMessage?.SessionId,
+                            Error = ex.Message
+                        },
+                        ReplayMessage = replayMessage
+                    });
+                    ctx.Response.StatusCode = StatusCodes.Status500InternalServerError;
+                    await ctx.Response.WriteAsync("Webhook processing failed.", ctx.RequestAborted);
+                }
+            });
+        }
+
+        if (startup.Config.Channels.Discord.Enabled)
+        {
+            var discordHandler = app.Services.GetRequiredService<DiscordWebhookHandler>();
+
+            app.MapPost(startup.Config.Channels.Discord.WebhookPath, async (HttpContext ctx) =>
+            {
+                var maxRequestSize = Math.Max(4 * 1024, startup.Config.Channels.Discord.MaxRequestBytes);
+                var (bodyOk, bodyText) = await EndpointHelpers.TryReadBodyTextAsync(ctx, maxRequestSize, ctx.RequestAborted);
+                if (!bodyOk)
+                {
+                    ctx.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+                    await ctx.Response.WriteAsync("Request too large.", ctx.RequestAborted);
+                    return;
+                }
+
+                var signature = ctx.Request.Headers["X-Signature-Ed25519"].ToString();
+                var timestamp = ctx.Request.Headers["X-Signature-Timestamp"].ToString();
+
+                InboundMessage? replayMessage = null;
+                try
+                {
+                    var result = await discordHandler.HandleAsync(
+                        bodyText,
+                        signature,
+                        timestamp,
+                        (msg, ct) =>
+                        {
+                            replayMessage = msg;
+                            return runtime.Pipeline.InboundWriter.WriteAsync(msg, ct);
+                        },
+                        ctx.RequestAborted);
+
+                    ctx.Response.StatusCode = result.StatusCode;
+                    ctx.Response.ContentType = result.ContentType;
+                    if (result.Body is not null)
+                        await ctx.Response.WriteAsync(result.Body, ctx.RequestAborted);
+                }
+                catch (Exception ex)
+                {
+                    deliveries.RecordDeadLetter(new WebhookDeadLetterRecord
+                    {
+                        Entry = new WebhookDeadLetterEntry
+                        {
+                            Id = $"whdl_{Guid.NewGuid():N}"[..20],
+                            Source = "discord",
+                            DeliveryKey = "",
+                            ChannelId = "discord",
+                            SenderId = replayMessage?.SenderId,
+                            SessionId = replayMessage?.SessionId,
+                            Error = ex.Message,
+                            PayloadPreview = bodyText.Length <= 500 ? bodyText : bodyText[..500] + "…"
+                        },
+                        ReplayMessage = replayMessage
+                    });
+                    ctx.Response.StatusCode = StatusCodes.Status500InternalServerError;
+                    await ctx.Response.WriteAsync("Webhook processing failed.", ctx.RequestAborted);
+                }
+            });
+        }
+
+        if (startup.Config.Channels.Slack.Enabled)
+        {
+            var slackHandler = app.Services.GetRequiredService<SlackWebhookHandler>();
+
+            app.MapPost(startup.Config.Channels.Slack.WebhookPath, async (HttpContext ctx) =>
+            {
+                var maxRequestSize = Math.Max(4 * 1024, startup.Config.Channels.Slack.MaxRequestBytes);
+                var (bodyOk, bodyText) = await EndpointHelpers.TryReadBodyTextAsync(ctx, maxRequestSize, ctx.RequestAborted);
+                if (!bodyOk)
+                {
+                    ctx.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+                    await ctx.Response.WriteAsync("Request too large.", ctx.RequestAborted);
+                    return;
+                }
+
+                var timestamp = ctx.Request.Headers["X-Slack-Request-Timestamp"].ToString();
+                var signature = ctx.Request.Headers["X-Slack-Signature"].ToString();
+
+                // Check for url_verification before dedup (challenge must always respond)
+                if (bodyText.Contains("\"url_verification\"", StringComparison.Ordinal))
+                {
+                    var result = await slackHandler.HandleEventAsync(bodyText, timestamp, signature, (_, _) => ValueTask.CompletedTask, ctx.RequestAborted);
+                    ctx.Response.StatusCode = result.StatusCode;
+                    ctx.Response.ContentType = result.ContentType;
+                    if (result.Body is not null)
+                        await ctx.Response.WriteAsync(result.Body, ctx.RequestAborted);
+                    return;
+                }
+
+                // Use event_id from payload for stable dedup (falls back to timestamp+prefix)
+                string deliveryKey;
+                try
+                {
+                    using var dedupDoc = System.Text.Json.JsonDocument.Parse(bodyText);
+                    var dedupRoot = dedupDoc.RootElement;
+                    if (dedupRoot.TryGetProperty("event_id", out var eventIdProp) &&
+                        eventIdProp.ValueKind == System.Text.Json.JsonValueKind.String)
+                        deliveryKey = eventIdProp.GetString()!;
+                    else
+                        deliveryKey = timestamp + ":" + (bodyText.Length > 64 ? bodyText[..64] : bodyText);
+                }
+                catch
+                {
+                    deliveryKey = timestamp + ":" + (bodyText.Length > 64 ? bodyText[..64] : bodyText);
+                }
+                var hashedKey = WebhookDeliveryStore.HashDeliveryKey(deliveryKey);
+                if (!deliveries.TryBegin("slack", hashedKey, TimeSpan.FromHours(6)))
+                {
+                    ctx.Response.StatusCode = StatusCodes.Status200OK;
+                    await ctx.Response.WriteAsync("Duplicate ignored.", ctx.RequestAborted);
+                    return;
+                }
+
+                InboundMessage? replayMessage = null;
+                try
+                {
+                    var result = await slackHandler.HandleEventAsync(
+                        bodyText,
+                        timestamp,
+                        signature,
+                        (msg, ct) =>
+                        {
+                            replayMessage = msg;
+                            return runtime.Pipeline.InboundWriter.WriteAsync(msg, ct);
+                        },
+                        ctx.RequestAborted);
+
+                    ctx.Response.StatusCode = result.StatusCode;
+                    ctx.Response.ContentType = result.ContentType;
+                    if (result.Body is not null)
+                        await ctx.Response.WriteAsync(result.Body, ctx.RequestAborted);
+                }
+                catch (Exception ex)
+                {
+                    deliveries.RecordDeadLetter(new WebhookDeadLetterRecord
+                    {
+                        Entry = new WebhookDeadLetterEntry
+                        {
+                            Id = $"whdl_{Guid.NewGuid():N}"[..20],
+                            Source = "slack",
+                            DeliveryKey = hashedKey,
+                            ChannelId = "slack",
+                            SenderId = replayMessage?.SenderId,
+                            SessionId = replayMessage?.SessionId,
+                            Error = ex.Message,
+                            PayloadPreview = bodyText.Length <= 500 ? bodyText : bodyText[..500] + "…"
+                        },
+                        ReplayMessage = replayMessage
+                    });
+                    ctx.Response.StatusCode = StatusCodes.Status500InternalServerError;
+                    await ctx.Response.WriteAsync("Webhook processing failed.", ctx.RequestAborted);
+                }
+            });
+
+            app.MapPost(startup.Config.Channels.Slack.SlashCommandPath, async (HttpContext ctx) =>
+            {
+                if (!ctx.Request.HasFormContentType)
+                {
+                    ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
+                    await ctx.Response.WriteAsync("Expected form content.", ctx.RequestAborted);
+                    return;
+                }
+
+                var maxRequestSize = Math.Max(4 * 1024, startup.Config.Channels.Slack.MaxRequestBytes);
+                var (bodyOk, bodyText) = await EndpointHelpers.TryReadBodyTextAsync(ctx, maxRequestSize, ctx.RequestAborted);
+                if (!bodyOk)
+                {
+                    ctx.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+                    await ctx.Response.WriteAsync("Request too large.", ctx.RequestAborted);
+                    return;
+                }
+
+                var timestamp = ctx.Request.Headers["X-Slack-Request-Timestamp"].ToString();
+                var signature = ctx.Request.Headers["X-Slack-Signature"].ToString();
+
+                var parsed = QueryHelpers.ParseQuery(bodyText);
+                var dict = new Dictionary<string, string>(StringComparer.Ordinal);
+                foreach (var kvp in parsed)
+                    dict[kvp.Key] = kvp.Value.ToString();
+
+                InboundMessage? replayMessage = null;
+                try
+                {
+                    var result = await slackHandler.HandleSlashCommandAsync(
+                        dict,
+                        timestamp,
+                        signature,
+                        bodyText,
+                        (msg, ct) =>
+                        {
+                            replayMessage = msg;
+                            return runtime.Pipeline.InboundWriter.WriteAsync(msg, ct);
+                        },
+                        ctx.RequestAborted);
+
+                    ctx.Response.StatusCode = result.StatusCode;
+                    ctx.Response.ContentType = result.ContentType;
+                    if (result.Body is not null)
+                        await ctx.Response.WriteAsync(result.Body, ctx.RequestAborted);
+                }
+                catch (Exception ex)
+                {
+                    deliveries.RecordDeadLetter(new WebhookDeadLetterRecord
+                    {
+                        Entry = new WebhookDeadLetterEntry
+                        {
+                            Id = $"whdl_{Guid.NewGuid():N}"[..20],
+                            Source = "slack_command",
+                            DeliveryKey = "",
+                            ChannelId = "slack",
                             SenderId = replayMessage?.SenderId,
                             SessionId = replayMessage?.SessionId,
                             Error = ex.Message,
@@ -328,8 +612,9 @@ internal static class WebhookEndpoints
                     return;
                 }
 
-                if (body.Length > hookCfg.MaxBodyLength)
-                    body = body[..hookCfg.MaxBodyLength];
+                var bodyForPrompt = body.Length > hookCfg.MaxBodyLength
+                    ? body[..hookCfg.MaxBodyLength]
+                    : body;
 
                 var headerKey = ctx.Request.Headers["Idempotency-Key"].ToString();
                 if (string.IsNullOrWhiteSpace(headerKey))
@@ -361,7 +646,7 @@ internal static class WebhookEndpoints
                     }
                 }
 
-                var prompt = hookCfg.PromptTemplate.Replace("{body}", body);
+                var prompt = hookCfg.PromptTemplate.Replace("{body}", bodyForPrompt);
                 var msg = new InboundMessage
                 {
                     ChannelId = "webhook",
@@ -389,13 +674,53 @@ internal static class WebhookEndpoints
                             ChannelId = "webhook",
                             SessionId = msg.SessionId,
                             Error = ex.Message,
-                            PayloadPreview = body.Length <= 500 ? body : body[..500] + "…"
+                            PayloadPreview = bodyForPrompt.Length <= 500 ? bodyForPrompt : bodyForPrompt[..500] + "…"
                         },
                         ReplayMessage = msg
                     });
                     ctx.Response.StatusCode = StatusCodes.Status500InternalServerError;
                     await ctx.Response.WriteAsync("Webhook processing failed.", ctx.RequestAborted);
                 }
+            });
+        }
+
+        if (startup.Config.GmailPubSub.Enabled)
+        {
+            var gmailBridge = new GmailPubSubBridge(
+                startup.Config.GmailPubSub,
+                runtime.Pipeline,
+                app.Services.GetRequiredService<Microsoft.Extensions.Logging.ILogger<GmailPubSubBridge>>());
+
+            var gmailSecret = SecretResolver.Resolve(startup.Config.GmailPubSub.WebhookSecretRef)
+                ?? startup.Config.GmailPubSub.WebhookSecret;
+
+            app.MapPost(startup.Config.GmailPubSub.WebhookPath, async (HttpContext ctx) =>
+            {
+                // Verify shared secret if configured
+                if (!string.IsNullOrWhiteSpace(gmailSecret))
+                {
+                    var providedToken = ctx.Request.Query["token"].ToString();
+                    if (string.IsNullOrWhiteSpace(providedToken))
+                        providedToken = ctx.Request.Headers["X-OpenClaw-Secret"].ToString();
+
+                    if (!string.Equals(providedToken, gmailSecret, StringComparison.Ordinal))
+                    {
+                        ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                        return;
+                    }
+                }
+
+                var (bodyOk, bodyText) = await EndpointHelpers.TryReadBodyTextAsync(ctx, 64 * 1024, ctx.RequestAborted);
+                if (!bodyOk)
+                {
+                    ctx.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+                    await ctx.Response.WriteAsync("Request too large.", ctx.RequestAborted);
+                    return;
+                }
+
+                var (status, body) = await gmailBridge.HandlePushAsync(bodyText, ctx.RequestAborted);
+                ctx.Response.StatusCode = status;
+                await ctx.Response.WriteAsync(body, ctx.RequestAborted);
             });
         }
     }
@@ -406,6 +731,8 @@ internal static class WebhookEndpoints
         {
             using var document = JsonDocument.Parse(bodyText);
             var root = document.RootElement;
+            if (root.TryGetProperty("message_id", out var bridgeMessageId) && bridgeMessageId.ValueKind == JsonValueKind.String)
+                return bridgeMessageId.GetString() ?? WebhookDeliveryStore.HashDeliveryKey(bodyText);
             if (root.TryGetProperty("entry", out var entries) && entries.ValueKind == JsonValueKind.Array)
             {
                 foreach (var entry in entries.EnumerateArray())

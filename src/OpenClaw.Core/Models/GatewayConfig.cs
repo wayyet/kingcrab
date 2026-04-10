@@ -13,17 +13,28 @@ public sealed class GatewayConfig
     public string? AuthToken { get; set; }
     public RuntimeConfig Runtime { get; set; } = new();
     public LlmProviderConfig Llm { get; set; } = new();
+    public ModelsConfig Models { get; set; } = new();
     public MemoryConfig Memory { get; set; } = new();
     public SecurityConfig Security { get; set; } = new();
     public WebSocketConfig WebSocket { get; set; } = new();
     public ToolingConfig Tooling { get; set; } = new();
     public SandboxConfig Sandbox { get; set; } = new();
+    public ExecutionConfig Execution { get; set; } = new();
+    public MultimodalConfig Multimodal { get; set; } = new();
     public ChannelsConfig Channels { get; set; } = new();
     public PluginsConfig Plugins { get; set; } = new();
     public SkillsConfig Skills { get; set; } = new();
     public DelegationConfig Delegation { get; set; } = new();
     public CronConfig Cron { get; set; } = new();
+    public AutomationsConfig Automations { get; set; } = new();
+    public ProfilesConfig Profiles { get; set; } = new();
+    public LearningConfig Learning { get; set; } = new();
     public WebhooksConfig Webhooks { get; set; } = new();
+    public RoutingConfig Routing { get; set; } = new();
+    public TailscaleConfig Tailscale { get; set; } = new();
+    public GmailPubSubConfig GmailPubSub { get; set; } = new();
+    public MdnsConfig Mdns { get; set; } = new();
+    public DiagnosticsConfig Diagnostics { get; set; } = new();
     public string UsageFooter { get; set; } = "off"; // "off", "tokens", "full"
 
     public int MaxConcurrentSessions { get; set; } = 64;
@@ -31,6 +42,12 @@ public sealed class GatewayConfig
 
     /// <summary>Max total tokens (input + output) per session. 0 = unlimited.</summary>
     public long SessionTokenBudget { get; set; } = 0;
+
+    /// <summary>
+    /// When true, reject turns early if the estimated prompt tokens alone would exhaust the remaining session budget.
+    /// Disabled by default for backward compatibility with historical token-budget semantics.
+    /// </summary>
+    public bool EnableEstimatedTokenAdmissionControl { get; set; } = false;
 
     /// <summary>Max messages per minute per session at the agent level. 0 = unlimited.</summary>
     public int SessionRateLimitPerMinute { get; set; } = 0;
@@ -43,6 +60,18 @@ public sealed class GatewayConfig
     /// Used for contract-governed USD cost budgets. Example: { "openai:gpt-4o": 0.005 }
     /// </summary>
     public Dictionary<string, decimal> TokenCostRates { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Detailed token cost rates by "provider:model" or "provider" key, in USD per 1K tokens.
+    /// Used when providers have asymmetric input/output pricing.
+    /// </summary>
+    public Dictionary<string, TokenCostRateConfig> TokenCostRateDetails { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+public sealed class TokenCostRateConfig
+{
+    public decimal InputUsdPer1K { get; set; }
+    public decimal OutputUsdPer1K { get; set; }
 }
 
 public sealed class LlmProviderConfig
@@ -55,6 +84,13 @@ public sealed class LlmProviderConfig
     public int MaxTokens { get; set; } = 4096;
     public float Temperature { get; set; } = 0.7f;
 
+    /// <summary>
+    /// When true, image markers in user messages are converted to native image content
+    /// parts and sent directly to the model (requires a vision-capable model such as gpt-4o).
+    /// When false, image analysis is delegated to the <c>image_analyze</c> tool (Layer 2).
+    /// </summary>
+    public bool SupportsVision { get; set; } = false;
+
     /// <summary>Per-call timeout in seconds for LLM requests. 0 = no timeout.</summary>
     public int TimeoutSeconds { get; set; } = 120;
 
@@ -66,6 +102,33 @@ public sealed class LlmProviderConfig
 
     /// <summary>Seconds the circuit breaker stays open before probing.</summary>
     public int CircuitBreakerCooldownSeconds { get; set; } = 30;
+
+    public PromptCachingConfig PromptCaching { get; set; } = new();
+}
+
+public sealed class PromptCachingConfig
+{
+    public bool? Enabled { get; set; }
+    public string? Retention { get; set; } // none | short | long | auto
+    public string? Dialect { get; set; } // auto | openai | anthropic | gemini | none
+    public bool? KeepWarmEnabled { get; set; }
+    public int KeepWarmIntervalMinutes { get; set; } = 55;
+    public bool? TraceEnabled { get; set; }
+    public string? TraceFilePath { get; set; }
+}
+
+public sealed class DiagnosticsConfig
+{
+    public PromptCacheTraceConfig CacheTrace { get; set; } = new();
+}
+
+public sealed class PromptCacheTraceConfig
+{
+    public bool Enabled { get; set; }
+    public string? FilePath { get; set; }
+    public bool IncludeMessages { get; set; } = true;
+    public bool IncludePrompt { get; set; } = true;
+    public bool IncludeSystem { get; set; } = true;
 }
 
 public sealed class MemoryConfig
@@ -85,7 +148,7 @@ public sealed class MemoryConfig
     public bool EnableCompaction { get; set; } = false;
 
     /// <summary>Number of history turns that triggers compaction (must exceed MaxHistoryTurns).</summary>
-    public int CompactionThreshold { get; set; } = 40;
+    public int CompactionThreshold { get; set; } = 80;
 
     /// <summary>Number of recent turns to keep verbatim during compaction.</summary>
     public int CompactionKeepRecent { get; set; } = 10;
@@ -138,6 +201,46 @@ public static class DefaultTokenCostRates
             ["anthropic:claude-haiku-3-5"] = 0.002m,
             ["ollama"] = 0.0m,
         };
+
+    public static IReadOnlyDictionary<string, TokenCostRateConfig> DetailedRates { get; } =
+        new Dictionary<string, TokenCostRateConfig>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["openai:gpt-4o"] = new() { InputUsdPer1K = 0.0025m, OutputUsdPer1K = 0.010m },
+            ["openai:gpt-4o-mini"] = new() { InputUsdPer1K = 0.00015m, OutputUsdPer1K = 0.0006m },
+            ["openai:gpt-4.1"] = new() { InputUsdPer1K = 0.002m, OutputUsdPer1K = 0.008m },
+            ["openai:gpt-4.1-mini"] = new() { InputUsdPer1K = 0.0004m, OutputUsdPer1K = 0.0016m },
+            ["openai:gpt-4.1-nano"] = new() { InputUsdPer1K = 0.0001m, OutputUsdPer1K = 0.0004m },
+            ["anthropic:claude-sonnet-4-5"] = new() { InputUsdPer1K = 0.003m, OutputUsdPer1K = 0.015m },
+            ["anthropic:claude-haiku-3-5"] = new() { InputUsdPer1K = 0.0008m, OutputUsdPer1K = 0.004m },
+            ["ollama"] = new() { InputUsdPer1K = 0.0m, OutputUsdPer1K = 0.0m }
+        };
+}
+
+public static class TokenCostRateResolver
+{
+    public static TokenCostRateConfig Resolve(GatewayConfig config, string providerId, string modelId)
+    {
+        var key = $"{providerId}:{modelId}";
+
+        if (config.TokenCostRateDetails.TryGetValue(key, out var modelDetailedRate))
+            return modelDetailedRate;
+        if (config.TokenCostRateDetails.TryGetValue(providerId, out var providerDetailedRate))
+            return providerDetailedRate;
+        if (config.TokenCostRates.TryGetValue(key, out var modelRate))
+            return new TokenCostRateConfig { InputUsdPer1K = modelRate, OutputUsdPer1K = modelRate };
+        if (config.TokenCostRates.TryGetValue(providerId, out var providerRate))
+            return new TokenCostRateConfig { InputUsdPer1K = providerRate, OutputUsdPer1K = providerRate };
+        if (DefaultTokenCostRates.DetailedRates.TryGetValue(key, out var defaultModelDetailedRate))
+            return defaultModelDetailedRate;
+        if (DefaultTokenCostRates.DetailedRates.TryGetValue(providerId, out var defaultProviderDetailedRate))
+            return defaultProviderDetailedRate;
+        if (DefaultTokenCostRates.Rates.TryGetValue(key, out var defaultModelRate))
+            return new TokenCostRateConfig { InputUsdPer1K = defaultModelRate, OutputUsdPer1K = defaultModelRate };
+        if (DefaultTokenCostRates.Rates.TryGetValue(providerId, out var defaultProviderRate))
+            return new TokenCostRateConfig { InputUsdPer1K = defaultProviderRate, OutputUsdPer1K = defaultProviderRate };
+
+        return new TokenCostRateConfig();
+    }
 }
 
 public sealed class MemoryRecallConfig
@@ -179,6 +282,7 @@ public sealed class SecurityConfig
 
     /// <summary>Lifetime (days) for persistent browser admin sessions created with "Remember me". Default 30 days.</summary>
     public int BrowserRememberDays { get; set; } = 30;
+
 
     /// <summary>
     /// OIDC Authority URL for standard JWT Bearer authentication.
@@ -251,6 +355,9 @@ public sealed class ToolingConfig
     public bool AllowBrowserEvaluate { get; set; } = true;
     public bool BrowserHeadless { get; set; } = true;
     public int BrowserTimeoutSeconds { get; set; } = 30;
+    public Dictionary<string, ToolsetConfig> Toolsets { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, ToolPresetConfig> Presets { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> SurfaceBindings { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 public sealed class ChannelsConfig
@@ -260,12 +367,16 @@ public sealed class ChannelsConfig
     public SmsChannelConfig Sms { get; set; } = new();
     public TelegramChannelConfig Telegram { get; set; } = new();
     public WhatsAppChannelConfig WhatsApp { get; set; } = new();
+    public TeamsChannelConfig Teams { get; set; } = new();
+    public SlackChannelConfig Slack { get; set; } = new();
+    public DiscordChannelConfig Discord { get; set; } = new();
+    public SignalChannelConfig Signal { get; set; } = new();
 }
 
 public sealed class WhatsAppChannelConfig
 {
     public bool Enabled { get; set; } = false;
-    public string Type { get; set; } = "official"; // "official" or "bridge"
+    public string Type { get; set; } = "official"; // "official", "bridge", or "first_party_worker"
     public string DmPolicy { get; set; } = "pairing"; // open, pairing, closed
     public string WebhookPath { get; set; } = "/whatsapp/inbound";
     public string? WebhookPublicBaseUrl { get; set; }
@@ -296,6 +407,9 @@ public sealed class WhatsAppChannelConfig
     public string BridgeTokenRef { get; set; } = "env:WHATSAPP_BRIDGE_TOKEN";
     public bool BridgeSuppressSendExceptions { get; set; } = false;
 
+    // First-party worker settings
+    public WhatsAppFirstPartyWorkerConfig FirstPartyWorker { get; set; } = new();
+
     public int MaxInboundChars { get; set; } = 4096;
 
     /// <summary>Max inbound webhook request size in bytes.</summary>
@@ -303,6 +417,98 @@ public sealed class WhatsAppChannelConfig
 
     /// <summary>Optional allowlist for inbound senders (wa_id / from). Interpreted using Channels.AllowlistSemantics.</summary>
     public string[] AllowedFromIds { get; set; } = [];
+}
+
+public sealed class WhatsAppFirstPartyWorkerConfig
+{
+    /// <summary>
+    /// Worker transport engine. "baileys_csharp" is the intended production engine;
+    /// "simulated" is available for tests and dry-run validation.
+    /// </summary>
+    public string Driver { get; set; } = "baileys_csharp";
+
+    /// <summary>
+    /// Optional explicit path to the worker executable or DLL. When empty, the gateway tries
+    /// colocated deployment paths before failing.
+    /// </summary>
+    public string? ExecutablePath { get; set; }
+
+    /// <summary>Optional explicit working directory for the worker child process.</summary>
+    public string? WorkingDirectory { get; set; }
+
+    /// <summary>Root path used by the worker for session, media, and cache files.</summary>
+    public string StoragePath { get; set; } = "./memory/whatsapp-worker";
+
+    public string? MediaCachePath { get; set; }
+    public bool HistorySync { get; set; } = true;
+    public string? Proxy { get; set; }
+    public List<WhatsAppWorkerAccountConfig> Accounts { get; set; } = [];
+}
+
+public sealed class WhatsAppWorkerAccountConfig
+{
+    public string AccountId { get; set; } = "default";
+    public string SessionPath { get; set; } = "./session/default";
+    public string DeviceName { get; set; } = "OpenClaw";
+    public string PairingMode { get; set; } = "qr"; // "qr" or "pairing_code"
+    public string? PhoneNumber { get; set; }
+    public bool SendReadReceipts { get; set; } = true;
+    public bool AckReaction { get; set; } = false;
+    public string? MediaCachePath { get; set; }
+    public bool HistorySync { get; set; } = true;
+    public string? Proxy { get; set; }
+}
+
+public sealed class TeamsChannelConfig
+{
+    public bool Enabled { get; set; } = false;
+    public string DmPolicy { get; set; } = "pairing"; // open, pairing, closed
+    public string GroupPolicy { get; set; } = "allowlist"; // open, allowlist, disabled
+
+    /// <summary>Azure Bot App ID.</summary>
+    public string? AppId { get; set; }
+    public string AppIdRef { get; set; } = "env:TEAMS_APP_ID";
+
+    /// <summary>Azure Bot Client Secret.</summary>
+    public string? AppPassword { get; set; }
+    public string AppPasswordRef { get; set; } = "env:TEAMS_APP_PASSWORD";
+
+    /// <summary>Azure AD Tenant ID (single-tenant).</summary>
+    public string? TenantId { get; set; }
+    public string TenantIdRef { get; set; } = "env:TEAMS_TENANT_ID";
+
+    /// <summary>Webhook path for inbound Bot Framework activities.</summary>
+    public string WebhookPath { get; set; } = "/api/messages";
+
+    /// <summary>Validate the Azure Bot Framework JWT token on inbound requests.</summary>
+    public bool ValidateToken { get; set; } = true;
+
+    /// <summary>Require @mention of the bot in team channels and group chats.</summary>
+    public bool RequireMention { get; set; } = true;
+
+    /// <summary>Reply style: "thread" posts as reply, "top-level" posts new message.</summary>
+    public string ReplyStyle { get; set; } = "thread";
+
+    /// <summary>Maximum text length per outbound message before chunking.</summary>
+    public int TextChunkLimit { get; set; } = 4000;
+
+    /// <summary>Chunking mode: "length" splits at character limit, "newline" splits at newline boundaries.</summary>
+    public string ChunkMode { get; set; } = "length";
+
+    public int MaxInboundChars { get; set; } = 4096;
+    public int MaxRequestBytes { get; set; } = 256 * 1024;
+
+    /// <summary>Allowed Azure AD tenant IDs (empty = all tenants).</summary>
+    public string[] AllowedTenantIds { get; set; } = [];
+
+    /// <summary>Allowed sender IDs (AAD object IDs or UPNs).</summary>
+    public string[] AllowedFromIds { get; set; } = [];
+
+    /// <summary>Allowed team IDs for group policy.</summary>
+    public string[] AllowedTeamIds { get; set; } = [];
+
+    /// <summary>Allowed conversation IDs for group policy.</summary>
+    public string[] AllowedConversationIds { get; set; } = [];
 }
 
 public sealed class SmsChannelConfig
@@ -352,6 +558,60 @@ public sealed class TelegramChannelConfig
     public string WebhookSecretTokenRef { get; set; } = "env:TELEGRAM_WEBHOOK_SECRET";
 }
 
+public sealed class SlackChannelConfig
+{
+    public bool Enabled { get; set; } = false;
+    public string DmPolicy { get; set; } = "pairing"; // open, pairing, closed
+    public string? BotToken { get; set; }
+    public string BotTokenRef { get; set; } = "env:SLACK_BOT_TOKEN";
+    public string? SigningSecret { get; set; }
+    public string SigningSecretRef { get; set; } = "env:SLACK_SIGNING_SECRET";
+    public string WebhookPath { get; set; } = "/slack/events";
+    public string SlashCommandPath { get; set; } = "/slack/commands";
+    public string[] AllowedWorkspaceIds { get; set; } = [];
+    public string[] AllowedFromUserIds { get; set; } = [];
+    public string[] AllowedChannelIds { get; set; } = [];
+    public int MaxInboundChars { get; set; } = 4096;
+    public int MaxRequestBytes { get; set; } = 64 * 1024;
+    public bool ValidateSignature { get; set; } = true;
+}
+
+public sealed class DiscordChannelConfig
+{
+    public bool Enabled { get; set; } = false;
+    public string DmPolicy { get; set; } = "pairing"; // open, pairing, closed
+    public string? BotToken { get; set; }
+    public string BotTokenRef { get; set; } = "env:DISCORD_BOT_TOKEN";
+    public string? ApplicationId { get; set; }
+    public string ApplicationIdRef { get; set; } = "env:DISCORD_APPLICATION_ID";
+    public string? PublicKey { get; set; }
+    public string PublicKeyRef { get; set; } = "env:DISCORD_PUBLIC_KEY";
+    public string WebhookPath { get; set; } = "/discord/interactions";
+    public string[] AllowedGuildIds { get; set; } = [];
+    public string[] AllowedFromUserIds { get; set; } = [];
+    public string[] AllowedChannelIds { get; set; } = [];
+    public int MaxInboundChars { get; set; } = 4096;
+    public int MaxRequestBytes { get; set; } = 64 * 1024;
+    public bool ValidateSignature { get; set; } = true;
+    public bool RegisterSlashCommands { get; set; } = true;
+    public string SlashCommandPrefix { get; set; } = "claw";
+}
+
+public sealed class SignalChannelConfig
+{
+    public bool Enabled { get; set; } = false;
+    public string DmPolicy { get; set; } = "pairing"; // open, pairing, closed
+    public string Driver { get; set; } = "signald"; // "signald" or "signal_cli"
+    public string SocketPath { get; set; } = "/var/run/signald/signald.sock";
+    public string? SignalCliPath { get; set; }
+    public string? AccountPhoneNumber { get; set; }
+    public string AccountPhoneNumberRef { get; set; } = "env:SIGNAL_PHONE_NUMBER";
+    public string[] AllowedFromNumbers { get; set; } = [];
+    public int MaxInboundChars { get; set; } = 4096;
+    public bool NoContentLogging { get; set; } = false;
+    public bool TrustAllKeys { get; set; } = true;
+}
+
 public sealed class CronConfig
 {
     public bool Enabled { get; set; } = false;
@@ -390,4 +650,64 @@ public sealed class WebhookEndpointConfig
 
     /// <summary>Maximum webhook body length in characters before truncation. Limits prompt injection surface.</summary>
     public int MaxBodyLength { get; set; } = 10_240;
+}
+
+// ── Multi-Agent Routing ─────────────────────────────────────────
+
+public sealed class RoutingConfig
+{
+    public bool Enabled { get; set; } = false;
+    public Dictionary<string, AgentRouteConfig> Routes { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+public sealed class AgentRouteConfig
+{
+    public string? ChannelId { get; set; }
+    public string? SenderId { get; set; }
+    public string? SystemPrompt { get; set; }
+    public string? ModelOverride { get; set; }
+    public string? ModelProfileId { get; set; }
+    public string[] PreferredModelTags { get; set; } = [];
+    public string[] FallbackModelProfileIds { get; set; } = [];
+    public ModelSelectionRequirements ModelRequirements { get; set; } = new();
+    public string? PresetId { get; set; }
+    public string[] AllowedTools { get; set; } = [];
+}
+
+// ── Tailscale ───────────────────────────────────────────────────
+
+public sealed class TailscaleConfig
+{
+    public bool Enabled { get; set; } = false;
+    public string Mode { get; set; } = "off"; // "off", "serve", "funnel"
+    public int Port { get; set; } = 443;
+    public string? Hostname { get; set; }
+}
+
+// ── Gmail Pub/Sub ───────────────────────────────────────────────
+
+public sealed class GmailPubSubConfig
+{
+    public bool Enabled { get; set; } = false;
+    public string? CredentialsPath { get; set; }
+    public string CredentialsPathRef { get; set; } = "env:GOOGLE_APPLICATION_CREDENTIALS";
+    public string? TopicName { get; set; }
+    public string? SubscriptionName { get; set; }
+    public string WebhookPath { get; set; } = "/gmail/push";
+    public string? SessionId { get; set; }
+    public string Prompt { get; set; } = "A new email notification was received. Check inbox and triage.";
+
+    /// <summary>Shared secret token for authenticating push requests. Set as a query param or header.</summary>
+    public string? WebhookSecret { get; set; }
+    public string WebhookSecretRef { get; set; } = "env:GMAIL_PUBSUB_SECRET";
+}
+
+// ── mDNS/Bonjour Discovery ─────────────────────────────────────
+
+public sealed class MdnsConfig
+{
+    public bool Enabled { get; set; } = false;
+    public string ServiceType { get; set; } = "_openclaw._tcp";
+    public string? InstanceName { get; set; }
+    public int Port { get; set; } = 0; // 0 = use gateway port
 }

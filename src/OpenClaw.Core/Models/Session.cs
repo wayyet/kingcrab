@@ -1,10 +1,10 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading;
 using OpenClaw.Core.Contacts;
 using OpenClaw.Core.Observability;
 using OpenClaw.Core.Plugins;
 using OpenClaw.Core.Skills;
-using static OpenClaw.Core.Models.DefaultTokenCostRates;
 
 namespace OpenClaw.Core.Models;
 
@@ -14,6 +14,11 @@ namespace OpenClaw.Core.Models;
 /// </summary>
 public sealed class Session
 {
+    private long _totalInputTokens;
+    private long _totalOutputTokens;
+    private long _totalCacheReadTokens;
+    private long _totalCacheWriteTokens;
+
     public required string Id { get; init; }
     public required string ChannelId { get; init; }
     public required string SenderId { get; init; }
@@ -25,14 +30,95 @@ public sealed class Session
     /// <summary>Optional model override for this specific session (set via /model command).</summary>
     public string? ModelOverride { get; set; }
 
+    /// <summary>Optional named model profile selected for this session or route.</summary>
+    public string? ModelProfileId { get; set; }
+
+    /// <summary>Optional route/session profile preferences used by profile-aware model selection.</summary>
+    public string[] PreferredModelTags { get; set; } = [];
+
+    /// <summary>Optional route/session fallback profile order used when the selected profile lacks required capabilities.</summary>
+    public string[] FallbackModelProfileIds { get; set; } = [];
+
+    /// <summary>Optional route/session capability requirements used during profile-aware model selection.</summary>
+    public ModelSelectionRequirements ModelRequirements { get; set; } = new();
+
+    /// <summary>Optional route-scoped system prompt appended by gateway routing before runtime execution.</summary>
+    public string? SystemPromptOverride { get; set; }
+
+    /// <summary>Optional route-scoped tool preset that overrides the default preset resolution.</summary>
+    public string? RoutePresetId { get; set; }
+
+    /// <summary>Optional route-scoped tool allowlist applied in addition to preset filtering.</summary>
+    public string[] RouteAllowedTools { get; set; } = [];
+
+    /// <summary>Reasoning effort level for extended thinking (null/off, low, medium, high). Set via /think command.</summary>
+    public string? ReasoningEffort { get; set; }
+
+    /// <summary>When true, shows tool calls and token counts in responses. Set via /verbose command.</summary>
+    public bool VerboseMode { get; set; }
+
     /// <summary>Total input tokens consumed across all turns in this session.</summary>
-    public long TotalInputTokens { get; set; }
+    public long TotalInputTokens
+    {
+        get => Interlocked.Read(ref _totalInputTokens);
+        set => Interlocked.Exchange(ref _totalInputTokens, value);
+    }
 
     /// <summary>Total output tokens consumed across all turns in this session.</summary>
-    public long TotalOutputTokens { get; set; }
+    public long TotalOutputTokens
+    {
+        get => Interlocked.Read(ref _totalOutputTokens);
+        set => Interlocked.Exchange(ref _totalOutputTokens, value);
+    }
+
+    /// <summary>Total input tokens served from upstream prompt cache across all turns.</summary>
+    public long TotalCacheReadTokens
+    {
+        get => Interlocked.Read(ref _totalCacheReadTokens);
+        set => Interlocked.Exchange(ref _totalCacheReadTokens, value);
+    }
+
+    /// <summary>Total input tokens written into upstream prompt cache across all turns.</summary>
+    public long TotalCacheWriteTokens
+    {
+        get => Interlocked.Read(ref _totalCacheWriteTokens);
+        set => Interlocked.Exchange(ref _totalCacheWriteTokens, value);
+    }
 
     /// <summary>Optional contract policy governing this session's execution limits.</summary>
     public ContractPolicy? ContractPolicy { get; set; }
+
+    /// <summary>Timestamp when the current contract was attached to this session.</summary>
+    public DateTimeOffset? ContractAttachedAtUtc { get; set; }
+
+    /// <summary>Session token counters at the time the current contract was attached.</summary>
+    public long ContractBaselineInputTokens { get; set; }
+    public long ContractBaselineOutputTokens { get; set; }
+
+    /// <summary>Session tool-call count at the time the current contract was attached.</summary>
+    public int ContractBaselineToolCalls { get; set; }
+
+    /// <summary>Accumulated USD cost incurred since the current contract was attached.</summary>
+    public decimal ContractAccumulatedCostUsd { get; set; }
+
+    public void AddTokenUsage(long inputTokens, long outputTokens)
+    {
+        if (inputTokens != 0)
+            Interlocked.Add(ref _totalInputTokens, inputTokens);
+        if (outputTokens != 0)
+            Interlocked.Add(ref _totalOutputTokens, outputTokens);
+    }
+
+    public void AddCacheUsage(long cacheReadTokens, long cacheWriteTokens)
+    {
+        if (cacheReadTokens != 0)
+            Interlocked.Add(ref _totalCacheReadTokens, cacheReadTokens);
+        if (cacheWriteTokens != 0)
+            Interlocked.Add(ref _totalCacheWriteTokens, cacheWriteTokens);
+    }
+
+    public long GetTotalTokens()
+        => TotalInputTokens + TotalOutputTokens;
 }
 
 public enum SessionState : byte
@@ -73,6 +159,29 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(RuntimeConfig))]
 [JsonSerializable(typeof(GatewayRuntimeState))]
 [JsonSerializable(typeof(LlmProviderConfig))]
+[JsonSerializable(typeof(PromptCachingConfig))]
+[JsonSerializable(typeof(DiagnosticsConfig))]
+[JsonSerializable(typeof(PromptCacheTraceConfig))]
+[JsonSerializable(typeof(ModelsConfig))]
+[JsonSerializable(typeof(ModelProfileConfig))]
+[JsonSerializable(typeof(List<ModelProfileConfig>))]
+[JsonSerializable(typeof(ModelCapabilities))]
+[JsonSerializable(typeof(ModelSelectionRequirements))]
+[JsonSerializable(typeof(ModelProfile))]
+[JsonSerializable(typeof(List<ModelProfile>))]
+[JsonSerializable(typeof(ModelProfileStatus))]
+[JsonSerializable(typeof(List<ModelProfileStatus>))]
+[JsonSerializable(typeof(ModelProfilesStatusResponse))]
+[JsonSerializable(typeof(ModelSelectionDoctorResponse))]
+[JsonSerializable(typeof(ModelSelectionDescriptor))]
+[JsonSerializable(typeof(ModelEvaluationRequest))]
+[JsonSerializable(typeof(ModelEvaluationScenarioResult))]
+[JsonSerializable(typeof(List<ModelEvaluationScenarioResult>))]
+[JsonSerializable(typeof(ModelEvaluationProfileReport))]
+[JsonSerializable(typeof(List<ModelEvaluationProfileReport>))]
+[JsonSerializable(typeof(ModelEvaluationReport))]
+[JsonSerializable(typeof(TokenCostRateConfig))]
+[JsonSerializable(typeof(Dictionary<string, TokenCostRateConfig>))]
 [JsonSerializable(typeof(MemoryConfig))]
 [JsonSerializable(typeof(MemorySqliteConfig))]
 [JsonSerializable(typeof(MemoryRecallConfig))]
@@ -80,6 +189,42 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(SecurityConfig))]
 [JsonSerializable(typeof(WebSocketConfig))]
 [JsonSerializable(typeof(ToolingConfig))]
+[JsonSerializable(typeof(ToolsetConfig))]
+[JsonSerializable(typeof(Dictionary<string, ToolsetConfig>))]
+[JsonSerializable(typeof(ToolPresetConfig))]
+[JsonSerializable(typeof(Dictionary<string, ToolPresetConfig>))]
+[JsonSerializable(typeof(ResolvedToolPreset))]
+[JsonSerializable(typeof(List<ResolvedToolPreset>))]
+[JsonSerializable(typeof(ToolActionDescriptor))]
+[JsonSerializable(typeof(SandboxConfig))]
+[JsonSerializable(typeof(SandboxToolConfig))]
+[JsonSerializable(typeof(SandboxExecutionRequest))]
+[JsonSerializable(typeof(SandboxResult))]
+[JsonSerializable(typeof(ExecutionConfig))]
+[JsonSerializable(typeof(ExecutionBackendProfileConfig))]
+[JsonSerializable(typeof(Dictionary<string, ExecutionBackendProfileConfig>))]
+[JsonSerializable(typeof(ExecutionToolRouteConfig))]
+[JsonSerializable(typeof(Dictionary<string, ExecutionToolRouteConfig>))]
+[JsonSerializable(typeof(ExecutionRequest))]
+[JsonSerializable(typeof(ExecutionResult))]
+[JsonSerializable(typeof(ExecutionBackendCapabilities))]
+[JsonSerializable(typeof(ExecutionProcessStartRequest))]
+[JsonSerializable(typeof(ExecutionProcessHandle))]
+[JsonSerializable(typeof(List<ExecutionProcessHandle>))]
+[JsonSerializable(typeof(ExecutionProcessStatus))]
+[JsonSerializable(typeof(List<ExecutionProcessStatus>))]
+[JsonSerializable(typeof(ExecutionProcessLogRequest))]
+[JsonSerializable(typeof(ExecutionProcessLogResult))]
+[JsonSerializable(typeof(ExecutionProcessInputRequest))]
+[JsonSerializable(typeof(MultimodalConfig))]
+[JsonSerializable(typeof(TextToSpeechConfig))]
+[JsonSerializable(typeof(GeminiLiveConfig))]
+[JsonSerializable(typeof(ElevenLabsConfig))]
+[JsonSerializable(typeof(StoredMediaAsset))]
+[JsonSerializable(typeof(LiveSessionOpenRequest))]
+[JsonSerializable(typeof(LiveSessionOpened))]
+[JsonSerializable(typeof(LiveClientEnvelope))]
+[JsonSerializable(typeof(LiveServerEnvelope))]
 [JsonSerializable(typeof(ChannelsConfig))]
 [JsonSerializable(typeof(SmsChannelConfig))]
 [JsonSerializable(typeof(TwilioSmsConfig))]
@@ -155,6 +300,27 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(TelegramChannelConfig))]
 [JsonSerializable(typeof(CronConfig))]
 [JsonSerializable(typeof(CronJobConfig))]
+[JsonSerializable(typeof(AutomationsConfig))]
+[JsonSerializable(typeof(AutomationDefinition))]
+[JsonSerializable(typeof(List<AutomationDefinition>))]
+[JsonSerializable(typeof(AutomationRunState))]
+[JsonSerializable(typeof(AutomationTemplate))]
+[JsonSerializable(typeof(List<AutomationTemplate>))]
+[JsonSerializable(typeof(AutomationValidationIssue))]
+[JsonSerializable(typeof(List<AutomationValidationIssue>))]
+[JsonSerializable(typeof(AutomationPreview))]
+[JsonSerializable(typeof(ProfilesConfig))]
+[JsonSerializable(typeof(UserProfile))]
+[JsonSerializable(typeof(List<UserProfile>))]
+[JsonSerializable(typeof(UserProfileFact))]
+[JsonSerializable(typeof(List<UserProfileFact>))]
+[JsonSerializable(typeof(SessionSearchQuery))]
+[JsonSerializable(typeof(SessionSearchHit))]
+[JsonSerializable(typeof(List<SessionSearchHit>))]
+[JsonSerializable(typeof(SessionSearchResult))]
+[JsonSerializable(typeof(LearningConfig))]
+[JsonSerializable(typeof(LearningProposal))]
+[JsonSerializable(typeof(List<LearningProposal>))]
 [JsonSerializable(typeof(WebhooksConfig))]
 [JsonSerializable(typeof(WebhookEndpointConfig))]
 [JsonSerializable(typeof(List<string>))]
@@ -211,6 +377,7 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(OpenClaw.Core.Plugins.MqttEventsConfig))]
 [JsonSerializable(typeof(OpenClaw.Core.Plugins.MqttSubscriptionConfig))]
 [JsonSerializable(typeof(List<OpenClaw.Core.Plugins.MqttSubscriptionConfig>))]
+[JsonSerializable(typeof(OpenClaw.Core.Plugins.NotionConfig))]
 [JsonSerializable(typeof(OpenClaw.Core.Pipeline.ToolApprovalRequest))]
 [JsonSerializable(typeof(OpenClaw.Core.Pipeline.ToolApprovalDecisionOutcome))]
 [JsonSerializable(typeof(OpenClaw.Core.Abstractions.MemoryNoteHit))]
@@ -221,6 +388,9 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(OpenClaw.Core.Security.ChannelAllowlistFile))]
 [JsonSerializable(typeof(AdminSettingsSnapshot))]
 [JsonSerializable(typeof(AdminSettingsPersistenceInfo))]
+[JsonSerializable(typeof(WhatsAppFirstPartyWorkerConfig))]
+[JsonSerializable(typeof(WhatsAppWorkerAccountConfig))]
+[JsonSerializable(typeof(List<WhatsAppWorkerAccountConfig>))]
 [JsonSerializable(typeof(AuthSessionRequest))]
 [JsonSerializable(typeof(PairingApproveResponse))]
 [JsonSerializable(typeof(PairingRevokeResponse))]
@@ -283,6 +453,11 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(IntegrationSessionTimelineResponse))]
 [JsonSerializable(typeof(IntegrationMessageRequest))]
 [JsonSerializable(typeof(IntegrationMessageResponse))]
+[JsonSerializable(typeof(IntegrationProfileUpdateRequest))]
+[JsonSerializable(typeof(IntegrationTextToSpeechRequest))]
+[JsonSerializable(typeof(IntegrationTextToSpeechResponse))]
+[JsonSerializable(typeof(AutomationRunRequest))]
+[JsonSerializable(typeof(LearningProposalReviewRequest))]
 [JsonSerializable(typeof(IntegrationRuntimeEventsResponse))]
 [JsonSerializable(typeof(IntegrationApprovalsResponse))]
 [JsonSerializable(typeof(IntegrationApprovalHistoryResponse))]
@@ -290,49 +465,17 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(IntegrationPluginsResponse))]
 [JsonSerializable(typeof(IntegrationOperatorAuditResponse))]
 [JsonSerializable(typeof(IntegrationDashboardResponse))]
+[JsonSerializable(typeof(IntegrationSessionSearchResponse))]
+[JsonSerializable(typeof(IntegrationProfilesResponse))]
+[JsonSerializable(typeof(IntegrationProfileResponse))]
+[JsonSerializable(typeof(IntegrationAutomationsResponse))]
+[JsonSerializable(typeof(IntegrationAutomationDetailResponse))]
+[JsonSerializable(typeof(LearningProposalListResponse))]
+[JsonSerializable(typeof(IntegrationToolPresetsResponse))]
 [JsonSerializable(typeof(RuntimeEventQuery))]
 [JsonSerializable(typeof(RuntimeEventEntry))]
 [JsonSerializable(typeof(List<RuntimeEventEntry>))]
 [JsonSerializable(typeof(RuntimeEventListResponse))]
-[JsonSerializable(typeof(McpJsonRpcRequest))]
-[JsonSerializable(typeof(McpJsonRpcResponse))]
-[JsonSerializable(typeof(McpJsonRpcError))]
-[JsonSerializable(typeof(McpInitializeRequest))]
-[JsonSerializable(typeof(McpInitializeResult))]
-[JsonSerializable(typeof(McpCapabilities))]
-[JsonSerializable(typeof(McpToolCapabilities))]
-[JsonSerializable(typeof(McpResourceCapabilities))]
-[JsonSerializable(typeof(McpPromptCapabilities))]
-[JsonSerializable(typeof(McpServerInfo))]
-[JsonSerializable(typeof(McpCallToolRequest))]
-[JsonSerializable(typeof(McpToolDefinition))]
-[JsonSerializable(typeof(List<McpToolDefinition>))]
-[JsonSerializable(typeof(McpToolListResult))]
-[JsonSerializable(typeof(McpTextContent))]
-[JsonSerializable(typeof(List<McpTextContent>))]
-[JsonSerializable(typeof(McpCallToolResult))]
-[JsonSerializable(typeof(McpResourceDefinition))]
-[JsonSerializable(typeof(List<McpResourceDefinition>))]
-[JsonSerializable(typeof(McpResourceListResult))]
-[JsonSerializable(typeof(McpResourceTemplateDefinition))]
-[JsonSerializable(typeof(List<McpResourceTemplateDefinition>))]
-[JsonSerializable(typeof(McpResourceTemplateListResult))]
-[JsonSerializable(typeof(McpReadResourceRequest))]
-[JsonSerializable(typeof(McpResourceTextContents))]
-[JsonSerializable(typeof(List<McpResourceTextContents>))]
-[JsonSerializable(typeof(McpReadResourceResult))]
-[JsonSerializable(typeof(McpPromptDefinition))]
-[JsonSerializable(typeof(McpPromptArgumentDefinition))]
-[JsonSerializable(typeof(List<McpPromptArgumentDefinition>))]
-[JsonSerializable(typeof(List<McpPromptDefinition>))]
-[JsonSerializable(typeof(McpPromptListResult))]
-[JsonSerializable(typeof(McpGetPromptRequest))]
-[JsonSerializable(typeof(McpPromptMessage))]
-[JsonSerializable(typeof(List<McpPromptMessage>))]
-[JsonSerializable(typeof(McpGetPromptResult))]
-[JsonSerializable(typeof(PluginOperatorState))]
-[JsonSerializable(typeof(List<PluginOperatorState>))]
-[JsonSerializable(typeof(PluginHealthSnapshot))]
 [JsonSerializable(typeof(PluginOperatorState))]
 [JsonSerializable(typeof(List<PluginOperatorState>))]
 [JsonSerializable(typeof(PluginHealthSnapshot))]
@@ -348,6 +491,8 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(OperatorAuditListResponse))]
 [JsonSerializable(typeof(SessionMetadataSnapshot))]
 [JsonSerializable(typeof(List<SessionMetadataSnapshot>))]
+[JsonSerializable(typeof(SessionTodoItem))]
+[JsonSerializable(typeof(List<SessionTodoItem>))]
 [JsonSerializable(typeof(SessionMetadataUpdateRequest))]
 [JsonSerializable(typeof(SessionDiffResponse))]
 [JsonSerializable(typeof(SessionTimelineResponse))]
@@ -363,6 +508,10 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(ActorRateLimitStatus))]
 [JsonSerializable(typeof(List<ActorRateLimitStatus>))]
 [JsonSerializable(typeof(ActorRateLimitResponse))]
+[JsonSerializable(typeof(SecurityPostureResponse))]
+[JsonSerializable(typeof(ApprovalSimulationRequest))]
+[JsonSerializable(typeof(ApprovalSimulationResponse))]
+[JsonSerializable(typeof(IncidentBundleResponse))]
 [JsonSerializable(typeof(RetentionStatusResponse))]
 [JsonSerializable(typeof(RetentionSweepResponse))]
 [JsonSerializable(typeof(RetentionSweepErrorResponse))]
@@ -380,6 +529,29 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(Dictionary<string, decimal>))]
 [JsonSerializable(typeof(ToolUsageSnapshot))]
 [JsonSerializable(typeof(List<ToolUsageSnapshot>))]
+[JsonSerializable(typeof(OpenClaw.Core.Plugins.BridgeMediaAttachment))]
+[JsonSerializable(typeof(OpenClaw.Core.Plugins.BridgeMediaAttachment[]))]
+[JsonSerializable(typeof(OpenClaw.Core.Plugins.BridgeChannelTypingRequest))]
+[JsonSerializable(typeof(OpenClaw.Core.Plugins.BridgeChannelReceiptRequest))]
+[JsonSerializable(typeof(OpenClaw.Core.Plugins.BridgeChannelReactionRequest))]
+[JsonSerializable(typeof(OpenClaw.Core.Plugins.BridgeChannelAuthEvent))]
+[JsonSerializable(typeof(ChannelAuthStatusResponse))]
+[JsonSerializable(typeof(ChannelAuthStatusItem))]
+[JsonSerializable(typeof(WhatsAppSetupRequest))]
+[JsonSerializable(typeof(WhatsAppSetupResponse))]
+[JsonSerializable(typeof(SkillInstallRequest))]
+[JsonSerializable(typeof(SkillInfoDto))]
+[JsonSerializable(typeof(List<SkillInfoDto>))]
+[JsonSerializable(typeof(SkillsDetailResponse))]
+[JsonSerializable(typeof(SkillMutationResponse))]
+[JsonSerializable(typeof(SlackChannelConfig))]
+[JsonSerializable(typeof(DiscordChannelConfig))]
+[JsonSerializable(typeof(SignalChannelConfig))]
+[JsonSerializable(typeof(RoutingConfig))]
+[JsonSerializable(typeof(AgentRouteConfig))]
+[JsonSerializable(typeof(TailscaleConfig))]
+[JsonSerializable(typeof(GmailPubSubConfig))]
+[JsonSerializable(typeof(MdnsConfig))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,

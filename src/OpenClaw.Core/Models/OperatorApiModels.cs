@@ -1,5 +1,6 @@
 using OpenClaw.Core.Observability;
 using OpenClaw.Core.Plugins;
+using System.Text.Json;
 
 namespace OpenClaw.Core.Models;
 
@@ -44,11 +45,14 @@ public sealed class ProviderPolicyListResponse
 
 public sealed class ProviderRouteHealthSnapshot
 {
+    public string? ProfileId { get; init; }
     public required string ProviderId { get; init; }
     public required string ModelId { get; init; }
     public bool IsDefaultRoute { get; init; }
     public bool IsDynamic { get; init; }
     public string? OwnerId { get; init; }
+    public string[] Tags { get; init; } = [];
+    public string[] ValidationIssues { get; init; } = [];
     public string CircuitState { get; init; } = "Closed";
     public long Requests { get; init; }
     public long Retries { get; init; }
@@ -66,12 +70,15 @@ public sealed class ProviderTurnUsageEntry
     public required string ModelId { get; init; }
     public long InputTokens { get; init; }
     public long OutputTokens { get; init; }
+    public long CacheReadTokens { get; init; }
+    public long CacheWriteTokens { get; init; }
     public required InputTokenComponentEstimate EstimatedInputTokensByComponent { get; init; }
 }
 
 public sealed class ProviderAdminResponse
 {
     public IReadOnlyList<ProviderRouteHealthSnapshot> Routes { get; init; } = [];
+    public ModelProfilesStatusResponse? ModelProfiles { get; init; }
     public IReadOnlyList<ProviderUsageSnapshot> Usage { get; init; } = [];
     public IReadOnlyList<ProviderPolicyRule> Policies { get; init; } = [];
     public IReadOnlyList<ProviderTurnUsageEntry> RecentTurns { get; init; } = [];
@@ -142,6 +149,87 @@ public sealed class PluginListResponse
     public IReadOnlyList<PluginHealthSnapshot> Items { get; init; } = [];
 }
 
+public sealed class ChannelAuthStatusResponse
+{
+    public ChannelAuthStatusItem[] Items { get; init; } = [];
+}
+
+public sealed class ChannelAuthStatusItem
+{
+    public required string ChannelId { get; init; }
+    public required string State { get; init; }
+    public string? Data { get; init; }
+    public string? AccountId { get; init; }
+    public DateTimeOffset UpdatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class WhatsAppSetupRequest
+{
+    public bool Enabled { get; init; }
+    public string Type { get; init; } = "official";
+    public string DmPolicy { get; init; } = "pairing";
+    public string WebhookPath { get; init; } = "/whatsapp/inbound";
+    public string? WebhookPublicBaseUrl { get; init; }
+    public string WebhookVerifyToken { get; init; } = "openclaw-verify";
+    public string WebhookVerifyTokenRef { get; init; } = "env:WHATSAPP_VERIFY_TOKEN";
+    public bool ValidateSignature { get; init; }
+    public string? WebhookAppSecret { get; init; }
+    public string WebhookAppSecretRef { get; init; } = "env:WHATSAPP_APP_SECRET";
+    public string? CloudApiToken { get; init; }
+    public string CloudApiTokenRef { get; init; } = "env:WHATSAPP_CLOUD_API_TOKEN";
+    public string? PhoneNumberId { get; init; }
+    public string? BusinessAccountId { get; init; }
+    public string? BridgeUrl { get; init; }
+    public string? BridgeToken { get; init; }
+    public string BridgeTokenRef { get; init; } = "env:WHATSAPP_BRIDGE_TOKEN";
+    public bool BridgeSuppressSendExceptions { get; init; }
+    public string? PluginId { get; init; }
+    public string? PluginConfigJson { get; init; }
+    public WhatsAppFirstPartyWorkerConfig? FirstPartyWorker { get; init; }
+    public string? FirstPartyWorkerConfigJson { get; init; }
+}
+
+public sealed class WhatsAppSetupResponse
+{
+    public required string ActiveBackend { get; init; }
+    public required string ConfiguredType { get; init; }
+    public string Message { get; init; } = "";
+    public bool RestartRequired { get; init; }
+    public bool Enabled { get; init; }
+    public string DmPolicy { get; init; } = "pairing";
+    public string WebhookPath { get; init; } = "/whatsapp/inbound";
+    public string? WebhookPublicBaseUrl { get; init; }
+    public string WebhookVerifyToken { get; init; } = "openclaw-verify";
+    public string WebhookVerifyTokenRef { get; init; } = "env:WHATSAPP_VERIFY_TOKEN";
+    public bool ValidateSignature { get; init; }
+    public string? WebhookAppSecret { get; init; }
+    public string WebhookAppSecretRef { get; init; } = "env:WHATSAPP_APP_SECRET";
+    public string? CloudApiToken { get; init; }
+    public string CloudApiTokenRef { get; init; } = "env:WHATSAPP_CLOUD_API_TOKEN";
+    public string? PhoneNumberId { get; init; }
+    public string? BusinessAccountId { get; init; }
+    public string? BridgeUrl { get; init; }
+    public string? BridgeToken { get; init; }
+    public string BridgeTokenRef { get; init; } = "env:WHATSAPP_BRIDGE_TOKEN";
+    public bool BridgeSuppressSendExceptions { get; init; }
+    public WhatsAppFirstPartyWorkerConfig? FirstPartyWorker { get; init; }
+    public string? FirstPartyWorkerConfigJson { get; init; }
+    public string? FirstPartyWorkerConfigSchemaJson { get; init; }
+    public bool PluginDetected { get; init; }
+    public string? PluginId { get; init; }
+    public string? PluginConfigJson { get; init; }
+    public string? PluginConfigSchemaJson { get; init; }
+    public string? PluginUiHintsJson { get; init; }
+    public string? PluginWarning { get; init; }
+    public bool RestartSupported { get; init; }
+    public string? RestartHint { get; init; }
+    public string? DerivedWebhookUrl { get; init; }
+    public ChannelReadinessDto? Readiness { get; init; }
+    public ChannelAuthStatusItem[] AuthStates { get; init; } = [];
+    public string[] Warnings { get; init; } = [];
+    public string[] ValidationErrors { get; init; } = [];
+}
+
 public sealed class PluginMutationRequest
 {
     public string? Reason { get; init; }
@@ -199,12 +287,26 @@ public sealed class SessionMetadataSnapshot
     public required string SessionId { get; init; }
     public bool Starred { get; init; }
     public string[] Tags { get; init; } = [];
+    public string? ActivePresetId { get; init; }
+    public IReadOnlyList<SessionTodoItem> TodoItems { get; init; } = [];
 }
 
 public sealed class SessionMetadataUpdateRequest
 {
     public bool? Starred { get; init; }
     public string[]? Tags { get; init; }
+    public string? ActivePresetId { get; init; }
+    public IReadOnlyList<SessionTodoItem>? TodoItems { get; init; }
+}
+
+public sealed class SessionTodoItem
+{
+    public required string Id { get; init; }
+    public string Text { get; init; } = "";
+    public bool Completed { get; init; }
+    public string? Notes { get; init; }
+    public DateTimeOffset CreatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
 }
 
 public sealed class SessionDiffResponse
@@ -295,4 +397,60 @@ public sealed class ActorRateLimitResponse
 {
     public IReadOnlyList<ActorRateLimitPolicy> Policies { get; init; } = [];
     public IReadOnlyList<ActorRateLimitStatus> Active { get; init; } = [];
+}
+
+public sealed class SecurityPostureResponse
+{
+    public bool PublicBind { get; init; }
+    public bool AuthTokenConfigured { get; init; }
+    public bool BrowserSessionCookieSecureEffective { get; init; }
+    public bool BrowserSessionsEnabled { get; init; }
+    public bool TrustForwardedHeaders { get; init; }
+    public bool RequireRequesterMatchForHttpToolApproval { get; init; }
+    public bool ToolApprovalRequired { get; init; }
+    public string AutonomyMode { get; init; } = "full";
+    public bool PluginBridgeEnabled { get; init; }
+    public string PluginBridgeTransportMode { get; init; } = "stdio";
+    public string PluginBridgeSecurityMode { get; init; } = "legacy";
+    public bool SandboxConfigured { get; init; }
+    public bool AllowsRawSecretRefsOnPublicBind { get; init; }
+    public IReadOnlyList<string> RiskFlags { get; init; } = [];
+    public IReadOnlyList<string> Recommendations { get; init; } = [];
+}
+
+public sealed class ApprovalSimulationRequest
+{
+    public string? ToolName { get; init; }
+    public string? ArgumentsJson { get; init; }
+    public string? ChannelId { get; init; }
+    public string? SenderId { get; init; }
+    public string? SessionId { get; init; }
+    public string? AutonomyMode { get; init; }
+    public bool? RequireToolApproval { get; init; }
+    public string[]? ApprovalRequiredTools { get; init; }
+}
+
+public sealed class ApprovalSimulationResponse
+{
+    public required string Decision { get; init; }
+    public required string Reason { get; init; }
+    public string ToolName { get; init; } = "";
+    public string AutonomyMode { get; init; } = "full";
+    public bool RequireToolApproval { get; init; }
+    public IReadOnlyList<string> ApprovalRequiredTools { get; init; } = [];
+}
+
+public sealed class IncidentBundleResponse
+{
+    public required DateTimeOffset GeneratedAtUtc { get; init; }
+    public required SecurityPostureResponse Posture { get; init; }
+    public required OpenClaw.Core.Observability.MetricsSnapshot Metrics { get; init; }
+    public required RetentionRunStatus Retention { get; init; }
+    public IReadOnlyList<ApprovalHistoryEntry> ApprovalHistory { get; init; } = [];
+    public IReadOnlyList<ProviderPolicyRule> ProviderPolicies { get; init; } = [];
+    public IReadOnlyList<ProviderRouteHealthSnapshot> ProviderRoutes { get; init; } = [];
+    public IReadOnlyList<ProviderUsageSnapshot> ProviderUsage { get; init; } = [];
+    public IReadOnlyList<RuntimeEventEntry> RuntimeEvents { get; init; } = [];
+    public IReadOnlyList<WebhookDeadLetterEntry> WebhookDeadLetters { get; init; } = [];
+    public IReadOnlyList<PluginHealthSnapshot> PluginHealth { get; init; } = [];
 }

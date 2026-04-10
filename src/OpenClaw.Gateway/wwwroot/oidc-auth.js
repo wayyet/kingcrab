@@ -1,17 +1,8 @@
 (function () {
     const PREFIX = 'openclaw_oidc_';
 
-    function toBase64Url(buffer) {
-        const bytes = new Uint8Array(buffer);
-        let binary = '';
-        for (let i = 0; i < bytes.byteLength; i += 1) {
-            binary += String.fromCharCode(bytes[i]);
-        }
-        return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    }
-
     function randomString(length) {
-        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
         const data = new Uint8Array(length);
         crypto.getRandomValues(data);
         let out = '';
@@ -19,12 +10,6 @@
             out += chars[data[i] % chars.length];
         }
         return out;
-    }
-
-    async function sha256Base64Url(input) {
-        const bytes = new TextEncoder().encode(input);
-        const digest = await crypto.subtle.digest('SHA-256', bytes);
-        return toBase64Url(digest);
     }
 
     function parseJwtExp(token) {
@@ -115,12 +100,9 @@
             }
 
             const endpoints = await ensureDiscovery();
-            const state = randomString(48);
-            const verifier = randomString(96);
-            const challenge = await sha256Base64Url(verifier);
+            const state = randomString(32);
 
             storage.set('state', state);
-            storage.set('verifier', verifier);
             if (extra?.returnTo) {
                 storage.set('return_to', extra.returnTo);
             }
@@ -130,9 +112,7 @@
                 redirect_uri: redirectUri,
                 response_type: 'code',
                 scope: scope,
-                state: state,
-                code_challenge: challenge,
-                code_challenge_method: 'S256'
+                state: state
             });
 
             window.location.assign(endpoints.authorization_endpoint + '?' + params.toString());
@@ -140,17 +120,12 @@
 
         async function exchangeCode(code) {
             const endpoints = await ensureDiscovery();
-            const verifier = storage.get('verifier');
-            if (!verifier) {
-                throw new Error('Missing PKCE code_verifier.');
-            }
 
             const body = new URLSearchParams({
                 grant_type: 'authorization_code',
                 client_id: clientId,
                 code: code,
-                redirect_uri: redirectUri,
-                code_verifier: verifier
+                redirect_uri: redirectUri
             });
 
             const resp = await fetch(endpoints.token_endpoint, {
@@ -165,7 +140,6 @@
 
             const tokenSet = await resp.json();
             saveTokenSet(tokenSet);
-            storage.remove('verifier');
             return tokenSet;
         }
 

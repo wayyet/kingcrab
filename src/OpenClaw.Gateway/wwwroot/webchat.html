@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OpenClaw.NET WebChat</title>
+    <title>King Crab WebChat</title>
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -138,75 +138,198 @@
             gap: 1rem;
         }
 
-        #token-input,
-        #doctor-button,
-        #oidc-login-button,
-        #oidc-logout-button {
+        /* ─── Header nav controls ─── */
+        .nav-btn {
             background: rgba(255, 255, 255, 0.03);
             border: 1px solid var(--border);
             color: var(--text);
-            padding: 0.6rem 1.2rem;
+            padding: 0.5rem 1rem;
             border-radius: 99px;
             font-family: 'Outfit', sans-serif;
-            font-size: 0.95rem;
-            transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+            font-size: 0.88rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            white-space: nowrap;
         }
-
-        #token-input {
-            width: 240px;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 0.9rem;
-        }
-
-        #token-input:focus,
-        #doctor-button:hover,
-        #oidc-login-button:hover,
-        #oidc-logout-button:hover {
-            outline: none;
+        .nav-btn:hover {
             border-color: rgba(168, 85, 247, 0.5);
-            background: rgba(255, 255, 255, 0.08);
-            box-shadow: 0 0 15px rgba(168, 85, 247, 0.15);
+            background: rgba(255, 255, 255, 0.07);
+            box-shadow: 0 0 14px rgba(168, 85, 247, 0.15);
+        }
+        .nav-btn:active { transform: scale(0.95); }
+
+        .nav-btn.teal {
+            border-color: rgba(20, 184, 166, 0.35);
+            box-shadow: 0 0 10px rgba(20, 184, 166, 0.1);
+        }
+        .nav-btn.teal:hover {
+            border-color: rgba(20, 184, 166, 0.65);
+            background: rgba(20, 184, 166, 0.08);
+            box-shadow: 0 0 16px rgba(20, 184, 166, 0.2);
+        }
+        .nav-btn.danger {
+            border-color: rgba(239, 68, 68, 0.35);
+            box-shadow: 0 0 10px rgba(239, 68, 68, 0.07);
+        }
+        .nav-btn.danger:hover {
+            border-color: rgba(239, 68, 68, 0.6);
+            background: rgba(239, 68, 68, 0.08);
+        }
+        .nav-btn.primary {
+            background: var(--primary-gradient);
+            border: none;
+            color: #fff;
+            box-shadow: 0 3px 12px rgba(99,102,241,0.3);
+        }
+        .nav-btn.primary:hover {
+            opacity: 0.88;
+            box-shadow: 0 5px 18px rgba(99,102,241,0.45);
+            transform: translateY(-1px);
         }
 
+        /* Connection status pill */
+        #conn-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.32rem 0.85rem;
+            border-radius: 99px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            border: 1px solid transparent;
+            transition: all 0.3s ease;
+        }
+        #conn-status.connected {
+            color: #86efac;
+            border-color: rgba(34,197,94,0.25);
+            background: rgba(34,197,94,0.07);
+        }
+        #conn-status.disconnected {
+            color: var(--text-secondary);
+            border-color: var(--border);
+            background: rgba(255,255,255,0.02);
+        }
+        #conn-status.connecting {
+            color: #fbbf24;
+            border-color: rgba(251,191,36,0.25);
+            background: rgba(251,191,36,0.06);
+        }
+        #conn-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: currentColor;
+            flex-shrink: 0;
+        }
+        #conn-status.connected #conn-dot { animation: pulse-dot 2.5s infinite; }
+
+        /* User avatar chip */
+        #user-chip {
+            display: none;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.3rem 0.75rem 0.3rem 0.3rem;
+            border-radius: 99px;
+            border: 1px solid var(--border);
+            background: rgba(255,255,255,0.04);
+            font-size: 0.82rem;
+            color: var(--text-secondary);
+            transition: all 0.25s;
+        }
+        #user-chip:hover { background: rgba(255,255,255,0.08); cursor: default; }
+        #user-avatar-mini {
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            background: var(--primary-gradient);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: #fff;
+            flex-shrink: 0;
+        }
+
+        /* Token collapsible panel */
+        #token-panel {
+            position: relative;
+        }
+        #token-panel-toggle {
+            /* styled via .nav-btn */
+        }
+        #token-dropdown {
+            display: none;
+            position: absolute;
+            top: calc(100% + 8px);
+            right: 0;
+            background: rgba(18,18,22,0.96);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 1rem;
+            width: 260px;
+            z-index: 200;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+        }
+        #token-dropdown.open { display: block; }
+        #token-dropdown label {
+            display: block;
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.45rem;
+        }
+        #token-input {
+            width: 100%;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 0.55rem 0.9rem;
+            border-radius: 8px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+            box-sizing: border-box;
+            margin-bottom: 0.7rem;
+            transition: border-color 0.2s;
+        }
+        #token-input:focus {
+            outline: none;
+            border-color: rgba(168,85,247,0.5);
+            background: rgba(255,255,255,0.08);
+        }
+        #token-input::placeholder { color: rgba(255,255,255,0.25); }
+        #token-dropdown-actions {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
         #remember-token-wrap {
             display: inline-flex;
             align-items: center;
             gap: 0.35rem;
             color: var(--text-secondary);
             font-size: 0.78rem;
-            white-space: nowrap;
             user-select: none;
+            cursor: pointer;
         }
-
         #remember-token {
             accent-color: #a855f7;
-            width: 14px;
-            height: 14px;
+            width: 13px;
+            height: 13px;
             cursor: pointer;
         }
-
-        #doctor-button,
-        #oidc-login-button,
-        #oidc-logout-button {
-            cursor: pointer;
-            font-weight: 500;
+        #token-apply-btn {
+            font-size: 0.8rem;
+            padding: 0.35rem 0.85rem;
         }
 
-        #oidc-login-button {
-            border-color: rgba(20, 184, 166, 0.35);
-            box-shadow: 0 0 12px rgba(20, 184, 166, 0.12);
-        }
-
-        #oidc-logout-button {
-            border-color: rgba(239, 68, 68, 0.35);
-            box-shadow: 0 0 12px rgba(239, 68, 68, 0.1);
-        }
-
-        #doctor-button:active,
-        #oidc-login-button:active,
-        #oidc-logout-button:active {
-            transform: scale(0.95);
-        }
+        #doctor-button { /* inherits .nav-btn */ }
+        #oidc-login-button { /* .nav-btn.teal */ }
+        #oidc-logout-button { /* .nav-btn.danger */ }
 
         /* Chat Stream Container */
         #chat-wrapper {
@@ -506,7 +629,8 @@
             border-top: 1px solid var(--border);
             padding: 1.5rem 0;
             display: flex;
-            justify-content: center;
+            flex-direction: column;
+            align-items: center;
             z-index: 10;
         }
 
@@ -592,6 +716,73 @@
             transform: none;
         }
 
+        /* ─── Image attachment ─── */
+        #attach-btn {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+            padding: 0;
+        }
+        #attach-btn:hover:not(:disabled) {
+            border-color: rgba(168, 85, 247, 0.5);
+            color: var(--text);
+            background: rgba(255, 255, 255, 0.08);
+        }
+        #attach-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        #image-preview-strip {
+            width: 100%;
+            max-width: 900px;
+            padding: 0.5rem 1.5rem 0;
+            display: none;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .preview-thumb {
+            position: relative;
+            width: 64px;
+            height: 64px;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+        .preview-thumb img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .preview-thumb-remove {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            background: rgba(0, 0, 0, 0.7);
+            border: none;
+            color: #fff;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            font-size: 12px;
+            line-height: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            padding: 0;
+        }
+        .preview-thumb-remove:hover { background: rgba(239, 68, 68, 0.9); }
+
         /* Scrollbar Styling */
         ::-webkit-scrollbar {
             width: 8px;
@@ -630,6 +821,236 @@
                 max-width: 90%;
             }
         }
+
+        /* ─── Session History Sidebar ─── */
+        #app-layout {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+            min-height: 0;
+        }
+
+        #sidebar {
+            width: 280px;
+            min-width: 260px;
+            background: rgba(8, 8, 10, 0.92);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            flex-shrink: 0;
+            transition: width 0.3s ease, min-width 0.3s ease, opacity 0.3s ease;
+        }
+
+        #sidebar.collapsed {
+            width: 0;
+            min-width: 0;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        #sidebar-header {
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+
+        #new-chat-btn {
+            background: var(--primary-gradient);
+            color: #fff;
+            border: none;
+            padding: 0.65rem 1rem;
+            border-radius: 10px;
+            font-family: 'Outfit', sans-serif;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            width: 100%;
+        }
+
+        #new-chat-btn:hover {
+            opacity: 0.88;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.35);
+        }
+
+        #session-search {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 0.45rem 0.85rem;
+            border-radius: 8px;
+            font-family: 'Outfit', sans-serif;
+            font-size: 0.88rem;
+            width: 100%;
+            box-sizing: border-box;
+            transition: border-color 0.2s;
+        }
+
+        #session-search:focus {
+            outline: none;
+            border-color: rgba(168, 85, 247, 0.5);
+            background: rgba(255, 255, 255, 0.07);
+        }
+
+        #session-search::placeholder {
+            color: rgba(255, 255, 255, 0.3);
+        }
+
+        #session-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0.5rem;
+        }
+
+        .session-item {
+            padding: 0.7rem 0.85rem;
+            border-radius: 10px;
+            cursor: pointer;
+            margin-bottom: 2px;
+            transition: background 0.15s ease;
+            border: 1px solid transparent;
+        }
+
+        .session-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .session-item.active {
+            background: rgba(99, 102, 241, 0.12);
+            border-color: rgba(99, 102, 241, 0.28);
+        }
+
+        .session-item-title {
+            font-size: 0.88rem;
+            font-weight: 500;
+            color: var(--text);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-bottom: 0.28rem;
+        }
+
+        .session-item-meta {
+            font-size: 0.76rem;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+        }
+
+        .session-active-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #22c55e;
+            box-shadow: 0 0 5px #22c55e;
+            flex-shrink: 0;
+            display: inline-block;
+            animation: pulse-dot 2s infinite;
+        }
+
+        .session-turns-badge {
+            background: rgba(255, 255, 255, 0.08);
+            padding: 1px 6px;
+            border-radius: 99px;
+            font-size: 0.72rem;
+        }
+
+        #sidebar-empty {
+            padding: 1.5rem 1rem;
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+
+        #chat-area {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            overflow: hidden;
+            min-width: 0;
+        }
+
+        #history-banner {
+            background: rgba(20, 184, 166, 0.08);
+            border-bottom: 1px solid rgba(20, 184, 166, 0.18);
+            padding: 0.55rem 1.5rem;
+            display: none;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+            gap: 1rem;
+        }
+
+        #history-banner.visible {
+            display: flex;
+        }
+
+        #history-banner-text {
+            font-size: 0.83rem;
+            color: var(--secondary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        #back-to-live-btn {
+            background: transparent;
+            border: 1px solid rgba(20, 184, 166, 0.35);
+            color: var(--secondary);
+            padding: 0.28rem 0.85rem;
+            border-radius: 99px;
+            font-family: 'Outfit', sans-serif;
+            font-size: 0.8rem;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+
+        #back-to-live-btn:hover {
+            background: rgba(20, 184, 166, 0.12);
+        }
+
+        #sidebar-toggle {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border);
+            color: var(--text);
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            padding: 0;
+            flex-shrink: 0;
+        }
+
+        #sidebar-toggle:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(168, 85, 247, 0.45);
+        }
+
+        @media (max-width: 768px) {
+            #sidebar {
+                position: absolute;
+                top: 0;
+                left: 0;
+                height: 100%;
+                z-index: 50;
+            }
+        }
     </style>
 </head>
 
@@ -639,45 +1060,117 @@
 
     <div id="header">
         <div class="header-brand">
-            <img src="image.png" alt="OpenClaw.NET Logo">
-            <h2>OpenClaw.NET</h2>
+            <img src="image.png" alt="King Crab Logo">
+            <h2>King Crab</h2>
         </div>
         <div class="header-right">
-            <button id="doctor-button" title="Fetch /doctor/text">Doctor</button>
-            <button id="oidc-login-button" title="Sign in with OIDC">OIDC Login</button>
-            <button id="oidc-logout-button" title="Sign out from OIDC">OIDC Logout</button>
-            <input type="password" id="token-input" placeholder="Auth Token (optional)">
-            <label id="remember-token-wrap" title="Persist token in this browser">
-                <input type="checkbox" id="remember-token">
-                Remember
-            </label>
-        </div>
-    </div>
+            <!-- Connection status -->
+            <div id="conn-status" class="disconnected">
+                <span id="conn-dot"></span>
+                <span id="conn-label">Disconnected</span>
+            </div>
 
-    <div id="chat-wrapper">
-        <div id="chat-container">
-            <!-- Messages will render here -->
-            <div class="message-row typing-row" id="typing-row">
-                <div class="agent-avatar"><img src="image.png" alt="Agent" /></div>
-                <div class="typing-indicator">
-                    <div class="dot"></div>
-                    <div class="dot"></div>
-                    <div class="dot"></div>
+            <!-- Doctor diagnostics -->
+            <button id="doctor-button" class="nav-btn" title="Fetch /doctor/text">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                Diagnostics
+            </button>
+
+            <!-- OIDC login (shown when OIDC configured and not logged in) -->
+            <button id="oidc-login-button" class="nav-btn teal" title="Sign in with OIDC" style="display:none">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+                Sign In
+            </button>
+
+            <!-- OIDC logout (shown when OIDC logged in) -->
+            <button id="oidc-logout-button" class="nav-btn danger" title="Sign out from OIDC" style="display:none">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                Sign Out
+            </button>
+
+            <!-- Token panel (shown when OIDC not available) -->
+            <div id="token-panel">
+                <button id="token-panel-toggle" class="nav-btn" title="Set auth token">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                    <span id="token-panel-label">Token</span>
+                </button>
+                <div id="token-dropdown">
+                    <label for="token-input">Auth Token</label>
+                    <input type="password" id="token-input" placeholder="Paste token here…" autocomplete="off">
+                    <div id="token-dropdown-actions">
+                        <label id="remember-token-wrap" title="Persist token in this browser">
+                            <input type="checkbox" id="remember-token">
+                            Remember me
+                        </label>
+                        <button id="token-apply-btn" class="nav-btn primary">Connect</button>
+                    </div>
                 </div>
             </div>
+
+            <!-- Logged-in user chip -->
+            <div id="user-chip">
+                <div id="user-avatar-mini">U</div>
+                <span id="user-display-name">User</span>
+            </div>
+
+            <!-- Sidebar toggle -->
+            <button id="sidebar-toggle" class="nav-btn" title="Toggle session history" style="padding:0.5rem 0.6rem">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+            </button>
         </div>
     </div>
 
-    <div id="input-wrapper">
-        <div id="input-container">
-            <textarea id="message-input" rows="1" placeholder="Message OpenClaw.NET..." disabled></textarea>
-            <button id="send-button" disabled title="Send Message">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
-                    stroke-linecap="round" stroke-linejoin="round">
-                    <line x1="22" y1="2" x2="11" y2="13"></line>
-                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                </svg>
-            </button>
+    <div id="app-layout">
+        <div id="sidebar">
+            <div id="sidebar-header">
+                <button id="new-chat-btn">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                    New Chat
+                </button>
+                <input id="session-search" type="text" placeholder="Search sessions…">
+            </div>
+            <div id="session-list">
+                <div id="sidebar-empty">Loading sessions…</div>
+            </div>
+        </div>
+
+        <div id="chat-area">
+            <div id="history-banner">
+                <span id="history-banner-text">Viewing session history (read-only)</span>
+                <button id="back-to-live-btn">↩ Back to Live Chat</button>
+            </div>
+
+            <div id="chat-wrapper">
+                <div id="chat-container">
+                    <!-- Messages will render here -->
+                    <div class="message-row typing-row" id="typing-row">
+                        <div class="agent-avatar"><img src="image.png" alt="Agent" /></div>
+                        <div class="typing-indicator">
+                            <div class="dot"></div>
+                            <div class="dot"></div>
+                            <div class="dot"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="input-wrapper">
+                <div id="image-preview-strip"></div>
+                <div id="input-container">
+                    <input type="file" id="file-input" accept="image/*" multiple style="display:none">
+                    <button id="attach-btn" disabled title="Attach images">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                    </button>
+                    <textarea id="message-input" rows="1" placeholder="Message King Crab..." disabled></textarea>
+                    <button id="send-button" disabled title="Send Message">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                            stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                        </svg>
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -685,7 +1178,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.1/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.9/purify.min.js"></script>
-    <script src="/oidc-auth.js"></script>
+    <script src="oidc-auth.js"></script>
 
     <script>
         // Set up marked to use highlight.js
@@ -707,12 +1200,16 @@
         const oidcLoginButton = document.getElementById('oidc-login-button');
         const oidcLogoutButton = document.getElementById('oidc-logout-button');
         const typingRow = document.getElementById('typing-row');
+        const fileInput = document.getElementById('file-input');
+        const attachBtn = document.getElementById('attach-btn');
+        const imagePreviewStrip = document.getElementById('image-preview-strip');
         const TOKEN_KEY_PERSIST = 'openclaw_token';
         const TOKEN_KEY_SESSION = 'openclaw_token_session';
 
         const OIDC_CONFIG = {
             enabled: true,
-            authority: 'http://test-passport.zyagi.cn:1080/realms/ai4cbrain',
+            //authority: 'http://test-passport.zyagi.cn:1080/realms/ai4cbrain',
+            authority: 'http://localhost:8080/realms/ai4cbrain', // local-keycloak
             clientId: 'king-crab',
             scope: 'openid profile email'
         };
@@ -724,6 +1221,11 @@
         let reconnectTimer = null;
         let streamRenderTimer = null;
         let oidcClient = null;
+        let viewMode = 'live'; // 'live' | 'history'
+        let sidebarVisible = true;
+        let sessionSearchTimer = null;
+        let liveChatNodes = []; // snapshot of live chat nodes
+        let pendingImages = []; // { name, dataUri, mimeType }
 
         const WEBCHAT_CONFIG = {
             streamRenderDebounceMs: Math.max(20, Number(window.OPENCLAW_WEBCHAT_CONFIG?.streamRenderDebounceMs ?? 120)),
@@ -733,6 +1235,15 @@
             maxReconnectAttempts: Math.max(0, Number(window.OPENCLAW_WEBCHAT_CONFIG?.maxReconnectAttempts ?? 0)),
             retryOnAuthCloseCodes: Boolean(window.OPENCLAW_WEBCHAT_CONFIG?.retryOnAuthCloseCodes ?? false)
         };
+
+        // Derives the URL prefix when served under a sub-path (e.g. sandbox reverse-proxy).
+        // e.g. pathname "/abc/18789/webchat.html" -> basePath "/abc/18789"
+        // e.g. pathname "/webchat.html" or "/" -> basePath ""
+        function getBasePath() {
+            const path = window.location.pathname;
+            const lastSlash = path.lastIndexOf('/');
+            return lastSlash > 0 ? path.substring(0, lastSlash) : '';
+        }
 
         function getStoredToken() {
             return sessionStorage.getItem(TOKEN_KEY_SESSION) || localStorage.getItem(TOKEN_KEY_PERSIST) || '';
@@ -779,15 +1290,85 @@
             localStorage.removeItem(TOKEN_KEY_PERSIST);
         }
 
-        function updateOidcButtons() {
+        // ─── Header state machine ─────────────────────────────────────────────
+        const connStatus   = document.getElementById('conn-status');
+        const connLabel    = document.getElementById('conn-label');
+        const userChip     = document.getElementById('user-chip');
+        const userAvatar   = document.getElementById('user-avatar-mini');
+        const userNameEl   = document.getElementById('user-display-name');
+        const tokenPanel   = document.getElementById('token-panel');
+        const tokenPanelToggle = document.getElementById('token-panel-toggle');
+        const tokenPanelLabel  = document.getElementById('token-panel-label');
+        const tokenDropdown    = document.getElementById('token-dropdown');
+        const tokenApplyBtn    = document.getElementById('token-apply-btn');
+
+        tokenPanelToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            tokenDropdown.classList.toggle('open');
+        });
+        document.addEventListener('click', (e) => {
+            if (!tokenPanel.contains(e.target)) tokenDropdown.classList.remove('open');
+        });
+        tokenApplyBtn.addEventListener('click', async () => {
+            const typed = tokenInput.value.trim();
+            if (!typed) return;
+            persistToken(typed);
+            tokenDropdown.classList.remove('open');
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.close(1000, 'Reconnect with updated token');
+            }
+            await connect();
+        });
+
+        function setConnectionStatus(state) {
+            connStatus.className = state;
+            if (state === 'connected') connLabel.textContent = 'Connected';
+            else if (state === 'connecting') connLabel.textContent = 'Connecting…';
+            else connLabel.textContent = 'Disconnected';
+        }
+
+        function updateOidcButtons() { updateHeaderState(); }
+
+        function updateHeaderState() {
             const hasOidc = Boolean(oidcClient);
-            oidcLoginButton.style.display = hasOidc ? 'inline-flex' : 'none';
-            oidcLogoutButton.style.display = hasOidc ? 'inline-flex' : 'none';
+            const isOidcLoggedIn = hasOidc && Boolean(getCurrentToken());
+
+            // OIDC: show login when OIDC available but not authenticated
+            oidcLoginButton.style.display  = (hasOidc && !isOidcLoggedIn) ? 'inline-flex' : 'none';
+            // OIDC: show logout when authenticated via OIDC
+            oidcLogoutButton.style.display = isOidcLoggedIn ? 'inline-flex' : 'none';
+
+            // Token panel: show when OIDC not available
+            tokenPanel.style.display = hasOidc ? 'none' : '';
+
+            if (isOidcLoggedIn) {
+                // Parse display name from OIDC token (JWT payload.name or email)
+                let displayName = 'User';
+                try {
+                    const payload = JSON.parse(atob(getCurrentToken().split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
+                    displayName = payload.name || payload.preferred_username || payload.email || 'User';
+                } catch (_) {}
+                const initials = displayName.split(/\s+/).map(w => w[0]).slice(0,2).join('').toUpperCase() || 'U';
+                userAvatar.textContent   = initials;
+                userNameEl.textContent   = displayName.split(' ')[0]; // first name only
+                userChip.style.display   = 'inline-flex';
+            } else if (!hasOidc && getCurrentToken()) {
+                // Bearer token mode: show a generic token chip
+                userAvatar.textContent   = '#';
+                userNameEl.textContent   = 'Token';
+                userChip.style.display   = 'inline-flex';
+                tokenPanelLabel.textContent = 'Token ✓';
+            } else {
+                userChip.style.display   = 'none';
+                tokenPanelLabel.textContent = 'Token';
+            }
         }
 
         function setDisconnectedUi() {
+            setConnectionStatus('disconnected');
             messageInput.disabled = true;
             sendButton.disabled = true;
+            attachBtn.disabled = true;
             typingRow.style.display = 'none';
         }
 
@@ -976,9 +1557,10 @@
                 return;
             }
 
-            appendSystem('Connecting to OpenClaw.NET Gateway...');
+            setConnectionStatus('connecting');
+            appendSystem('Connecting to King Crab Gateway...');
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const baseWsUrl = `${protocol}//${window.location.host}/ws`;
+            const baseWsUrl = `${protocol}//${window.location.host}${getBasePath()}/ws`;
             const wsUrl = token
                 ? `${baseWsUrl}?token=${encodeURIComponent(token)}`
                 : baseWsUrl;
@@ -993,10 +1575,14 @@
                     clearTimeout(reconnectTimer);
                     reconnectTimer = null;
                 }
-                appendSystem('Connected successfully.');
+                setConnectionStatus('connected');
+                updateHeaderState();
                 messageInput.disabled = false;
                 sendButton.disabled = false;
+                attachBtn.disabled = false;
                 messageInput.focus();
+                setViewMode('live');
+                setTimeout(() => loadSessions(), 600);
             };
 
             ws.onmessage = (event) => {
@@ -1080,6 +1666,7 @@
             };
 
             ws.onclose = (event) => {
+                setConnectionStatus('disconnected');
                 messageInput.disabled = true;
                 sendButton.disabled = true;
                 typingRow.style.display = 'none';
@@ -1117,31 +1704,159 @@
             };
         }
 
+        function readFileAsDataUrl(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = e => resolve(e.target.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function renderImagePreviews() {
+            imagePreviewStrip.innerHTML = '';
+            if (pendingImages.length === 0) {
+                imagePreviewStrip.style.display = 'none';
+                return;
+            }
+            imagePreviewStrip.style.display = 'flex';
+            pendingImages.forEach((img, i) => {
+                const thumb = document.createElement('div');
+                thumb.className = 'preview-thumb';
+                const imgEl = document.createElement('img');
+                imgEl.src = img.dataUri;
+                imgEl.alt = img.name;
+                const removeBtn = document.createElement('button');
+                removeBtn.className = 'preview-thumb-remove';
+                removeBtn.textContent = '×';
+                removeBtn.title = 'Remove';
+                removeBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    pendingImages.splice(i, 1);
+                    renderImagePreviews();
+                });
+                thumb.appendChild(imgEl);
+                thumb.appendChild(removeBtn);
+                imagePreviewStrip.appendChild(thumb);
+            });
+        }
+
+        attachBtn.addEventListener('click', () => fileInput.click());
+
+        // MIME type lookup by extension, used when file.type is absent (some browsers/OS combos).
+        const IMAGE_MIME_BY_EXT = {
+            jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+            gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
+            ico: 'image/x-icon', svg: 'image/svg+xml',
+            tiff: 'image/tiff', tif: 'image/tiff',
+            avif: 'image/avif', heic: 'image/heic', heif: 'image/heif'
+        };
+
+        // Compress/resize a raster image to JPEG at up to maxSide×maxSide using Canvas.
+        // SVG and GIF are returned as-is (Canvas would lose animation / vector data).
+        // Falls back to the original data URI on any error.
+        async function compressImageIfNeeded(file, originalDataUri) {
+            const mimeType = file.type || IMAGE_MIME_BY_EXT[file.name.split('.').pop()?.toLowerCase()] || '';
+            if (mimeType === 'image/svg+xml' || mimeType === 'image/gif') {
+                return originalDataUri;
+            }
+            const MAX_SIDE = 2048;
+            const QUALITY  = 0.85;
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.onload = () => {
+                    const scale = Math.min(1, MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight, 1));
+                    const w = Math.round(img.naturalWidth * scale);
+                    const h = Math.round(img.naturalHeight * scale);
+                    try {
+                        const canvas = document.createElement('canvas');
+                        canvas.width  = w;
+                        canvas.height = h;
+                        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                        resolve(canvas.toDataURL('image/jpeg', QUALITY));
+                    } catch (_) {
+                        resolve(originalDataUri);
+                    }
+                };
+                img.onerror = () => resolve(originalDataUri);
+                img.src = originalDataUri;
+            });
+        }
+
+        fileInput.addEventListener('change', async () => {
+            const files = Array.from(fileInput.files);
+            fileInput.value = '';
+            for (const file of files) {
+                // Determine MIME type; fall back to extension map if file.type is empty.
+                let mimeType = file.type;
+                if (!mimeType || !mimeType.startsWith('image/')) {
+                    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+                    mimeType = IMAGE_MIME_BY_EXT[ext] || '';
+                }
+                if (!mimeType.startsWith('image/')) continue;
+
+                const rawDataUri = await readFileAsDataUrl(file);
+                // Compress large images so they fit within the WebSocket message limit.
+                const dataUri = await compressImageIfNeeded(file, rawDataUri);
+                pendingImages.push({ name: file.name, dataUri, mimeType });
+            }
+            renderImagePreviews();
+        });
+
+        // Maximum WebSocket payload bytes we will send. Mirrors the server-side
+        // MaxMessageBytes setting (1 048 576) minus a small safety margin.
+        const MAX_WS_PAYLOAD_BYTES = 900 * 1024;
+
         function sendMessage() {
             const text = messageInput.value.trim();
-            if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+            const hasImages = pendingImages.length > 0;
+            if (!text && !hasImages) return;
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
+            // Prepend [IMAGE_URL:data:...] markers so MafAgentRuntime can inject them as vision content
+            const markers = pendingImages.map(img => `[IMAGE_URL:${img.dataUri}]`).join('\n');
+            const fullText = markers ? (markers + (text ? '\n' + text : '')) : text;
+
+            // Preflight: abort if the serialised payload would exceed the server limit.
+            const payload = JSON.stringify({ type: "user_message", text: fullText });
+            if (payload.length > MAX_WS_PAYLOAD_BYTES) {
+                appendSystem(
+                    `Image(s) too large after compression (${Math.round(payload.length / 1024)} KB). ` +
+                    `Please use smaller or fewer images (limit ≈ 900 KB per message).`,
+                    true
+                );
+                return;
+            }
+
+            // Render user bubble: thumbnails + text
             const row = createRow('user');
             const div = document.createElement('div');
             div.className = 'message user';
-            div.textContent = text;
+            if (hasImages) {
+                const thumbsWrap = document.createElement('div');
+                thumbsWrap.style.cssText = `display:flex;flex-wrap:wrap;gap:6px;margin-bottom:${text ? '8px' : '0'}`;
+                pendingImages.forEach(img => {
+                    const imgEl = document.createElement('img');
+                    imgEl.src = img.dataUri;
+                    imgEl.style.cssText = 'width:72px;height:72px;object-fit:cover;border-radius:8px;';
+                    thumbsWrap.appendChild(imgEl);
+                });
+                div.appendChild(thumbsWrap);
+            }
+            if (text) div.appendChild(document.createTextNode(text));
             row.appendChild(div);
-
             chatContainer.insertBefore(row, typingRow);
 
-            ws.send(JSON.stringify({
-                type: "user_message",
-                text: text
-            }));
+            ws.send(payload);
 
             messageInput.value = '';
             messageInput.style.height = 'auto';
             sendButton.style.opacity = '0.7';
+            pendingImages = [];
+            renderImagePreviews();
             activeResponseDiv = null;
             activeRawContent = "";
             scrollToBottom();
-            
-            // Re-focus input after send (optional but good UX for desktop)
             messageInput.focus();
         }
 
@@ -1187,16 +1902,11 @@
         });
 
         tokenInput.addEventListener('keydown', async (event) => {
-            if (event.key !== 'Enter') {
-                return;
-            }
-
+            if (event.key !== 'Enter') return;
             const typed = tokenInput.value.trim();
-            if (!typed) {
-                return;
-            }
-
+            if (!typed) return;
             persistToken(typed);
+            tokenDropdown.classList.remove('open');
             if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.close(1000, 'Reconnect with updated token');
             }
@@ -1230,7 +1940,7 @@
         doctorButton.addEventListener('click', async () => {
             try {
                 const headers = await getAuthHeaders(60);
-                const resp = await fetch('/doctor/text', { method: 'GET', headers: headers });
+                const resp = await fetch(`${getBasePath()}/doctor/text`, { method: 'GET', headers: headers });
                 if (!resp.ok) {
                     appendSystem(`Doctor request failed (${resp.status}).`, true);
                     return;
@@ -1241,6 +1951,222 @@
                 appendSystem('Doctor request failed.', true);
             }
         });
+
+        // ─── Session History Panel ─────────────────────────────────────────────
+        const sidebar = document.getElementById('sidebar');
+        const sessionList = document.getElementById('session-list');
+        const sessionSearch = document.getElementById('session-search');
+        const historyBanner = document.getElementById('history-banner');
+        const historyBannerText = document.getElementById('history-banner-text');
+        const backToLiveBtn = document.getElementById('back-to-live-btn');
+        const newChatBtn = document.getElementById('new-chat-btn');
+        const sidebarToggleBtn = document.getElementById('sidebar-toggle');
+
+        // On mobile start collapsed
+        if (window.innerWidth <= 768) {
+            sidebarVisible = false;
+            sidebar.classList.add('collapsed');
+        }
+
+        function toggleSidebar() {
+            sidebarVisible = !sidebarVisible;
+            sidebar.classList.toggle('collapsed', !sidebarVisible);
+        }
+
+        function setViewMode(mode, label) {
+            viewMode = mode;
+            if (mode === 'history') {
+                historyBanner.classList.add('visible');
+                historyBannerText.textContent = label || 'Viewing session history (read-only)';
+                messageInput.disabled = true;
+                sendButton.disabled = true;
+                attachBtn.disabled = true;
+            } else {
+                historyBanner.classList.remove('visible');
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    messageInput.disabled = false;
+                    sendButton.disabled = false;
+                    attachBtn.disabled = false;
+                }
+            }
+        }
+
+        function relativeTime(iso) {
+            const ms = Date.now() - new Date(iso).getTime();
+            const sec = Math.floor(ms / 1000);
+            if (sec < 60) return 'just now';
+            const min = Math.floor(sec / 60);
+            if (min < 60) return `${min}m ago`;
+            const hr = Math.floor(min / 60);
+            if (hr < 24) return `${hr}h ago`;
+            const day = Math.floor(hr / 24);
+            if (day < 7) return `${day}d ago`;
+            return new Date(iso).toLocaleDateString();
+        }
+
+        function renderSessionItem(summary) {
+            const item = document.createElement('div');
+            item.className = 'session-item';
+            item.dataset.id = summary.id;
+
+            const title = document.createElement('div');
+            title.className = 'session-item-title';
+            const rawLabel = summary.senderId || summary.id;
+            title.textContent = rawLabel.length > 26 ? rawLabel.slice(0, 24) + '…' : rawLabel;
+            title.title = `${summary.senderId} | ch: ${summary.channelId}`;
+
+            const meta = document.createElement('div');
+            meta.className = 'session-item-meta';
+
+            if (summary.isActive) {
+                const dot = document.createElement('span');
+                dot.className = 'session-active-dot';
+                meta.appendChild(dot);
+            }
+
+            const time = document.createElement('span');
+            time.textContent = relativeTime(summary.lastActiveAt);
+
+            const badge = document.createElement('span');
+            badge.className = 'session-turns-badge';
+            badge.textContent = `${summary.historyTurns} turns`;
+
+            meta.appendChild(time);
+            meta.appendChild(badge);
+            item.appendChild(title);
+            item.appendChild(meta);
+
+            item.addEventListener('click', () => openSessionHistory(summary.id, !!summary.isActive));
+            return item;
+        }
+
+        async function loadSessions(search) {
+            const headers = await getAuthHeaders(10);
+            const q = search ? `&search=${encodeURIComponent(search)}` : '';
+            try {
+                const resp = await fetch(`${getBasePath()}/admin/sessions?pageSize=60${q}`, { headers });
+                if (!resp.ok) return;
+                const data = await resp.json();
+                renderSessionList(data.active || [], (data.persisted && data.persisted.items) || []);
+            } catch (e) {
+                // silent – admin API unavailable in some modes
+            }
+        }
+
+        function renderSessionList(active, persisted) {
+            sessionList.innerHTML = '';
+            const all = [
+                ...active.map(s => ({ ...s, isActive: true })),
+                ...persisted.map(s => ({ ...s, isActive: !!s.isActive }))
+            ];
+            const seen = new Set();
+            const deduped = all.filter(s => { if (seen.has(s.id)) return false; seen.add(s.id); return true; });
+            deduped.sort((a, b) => new Date(b.lastActiveAt) - new Date(a.lastActiveAt));
+
+            if (deduped.length === 0) {
+                const empty = document.createElement('div');
+                empty.id = 'sidebar-empty';
+                empty.textContent = 'No sessions found.';
+                sessionList.appendChild(empty);
+                return;
+            }
+            deduped.forEach(s => sessionList.appendChild(renderSessionItem(s)));
+        }
+
+        async function openSessionHistory(id, isActive) {
+            document.querySelectorAll('.session-item').forEach(el => {
+                el.classList.toggle('active', el.dataset.id === id);
+            });
+            const headers = await getAuthHeaders(10);
+            try {
+                const resp = await fetch(`${getBasePath()}/admin/sessions/${encodeURIComponent(id)}`, { headers });
+                if (!resp.ok) { appendSystem('Failed to load session history.', true); return; }
+                const detail = await resp.json();
+                if (!detail.session) { appendSystem('Session data unavailable.', true); return; }
+                renderHistoryInChat(detail.session, isActive);
+            } catch (e) {
+                appendSystem('Error loading session history.', true);
+            }
+        }
+
+        function renderHistoryInChat(session, isActive) {
+            // Save current live chat nodes before overwriting
+            liveChatNodes = Array.from(chatContainer.childNodes)
+                .filter(n => n !== typingRow)
+                .map(n => n.cloneNode(true));
+            chatContainer.innerHTML = '';
+            chatContainer.appendChild(typingRow);
+            const turns = session.history || [];
+            turns.forEach(turn => {
+                if (turn.role === 'user') {
+                    const row = createRow('user');
+                    const div = document.createElement('div');
+                    div.className = 'message user';
+                    div.textContent = turn.content || '';
+                    row.appendChild(div);
+                    chatContainer.insertBefore(row, typingRow);
+                } else if (turn.role === 'assistant') {
+                    const row = createRow('assistant');
+                    const div = document.createElement('div');
+                    div.className = 'message assistant';
+                    div.innerHTML = DOMPurify.sanitize(marked.parse(preprocessMediaMarkers(turn.content || '')));
+                    div.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
+                    row.appendChild(div);
+                    chatContainer.insertBefore(row, typingRow);
+                }
+                if (turn.toolCalls && turn.toolCalls.length > 0) {
+                    turn.toolCalls.forEach(tc => appendToolPill(tc.toolName));
+                }
+            });
+            const sid = session.id.length > 10 ? session.id.slice(0, 10) + '…' : session.id;
+            setViewMode('history', `Session ${sid} · ${turns.length} turns · ${isActive ? '● Active' : 'Ended'}`);
+            scrollToBottom(false);
+        }
+
+        function startNewChatSession() {
+            liveChatNodes = []; // intentional new chat – discard snapshot
+            chatContainer.innerHTML = '';
+            chatContainer.appendChild(typingRow);
+            activeResponseDiv = null;
+            activeRawContent = '';
+            document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
+            setViewMode('live');
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                messageInput.disabled = false;
+                sendButton.disabled = false;
+                messageInput.focus();
+            } else {
+                connect();
+            }
+        }
+
+        newChatBtn.addEventListener('click', startNewChatSession);
+        sidebarToggleBtn.addEventListener('click', toggleSidebar);
+
+        backToLiveBtn.addEventListener('click', () => {
+            // Restore the live chat messages that were visible before
+            chatContainer.innerHTML = '';
+            liveChatNodes.forEach(n => chatContainer.appendChild(n));
+            chatContainer.appendChild(typingRow);
+            activeResponseDiv = null;
+            activeRawContent = '';
+            document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
+            setViewMode('live');
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                messageInput.disabled = false;
+                sendButton.disabled = false;
+                messageInput.focus();
+            } else {
+                connect();
+            }
+            scrollToBottom(false);
+        });
+
+        sessionSearch.addEventListener('input', () => {
+            clearTimeout(sessionSearchTimer);
+            sessionSearchTimer = setTimeout(() => loadSessions(sessionSearch.value.trim()), 400);
+        });
+        // ───────────────────────────────────────────────────────────────────────
 
         async function bootstrapAuth() {
             if (OIDC_CONFIG.enabled && OIDC_CONFIG.authority && OIDC_CONFIG.clientId && window.OpenClawOidc) {

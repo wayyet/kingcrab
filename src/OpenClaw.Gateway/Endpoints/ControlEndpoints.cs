@@ -1,6 +1,8 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using OpenClaw.Core.Models;
 using OpenClaw.Core.Pipeline;
+using OpenClaw.Core.Skills;
 using OpenClaw.Gateway;
 using OpenClaw.Gateway.Bootstrap;
 using OpenClaw.Gateway.Composition;
@@ -167,6 +169,85 @@ internal static class ControlEndpoints
                 CoreJsonContext.Default.SkillsReloadResponse);
         });
 
+        app.MapGet("/admin/skills", (HttpContext ctx) =>
+        {
+            var auth = EndpointHelpers.AuthorizeOperatorRequest(ctx, startup, browserSessions, requireCsrf: false);
+            if (!auth.IsAuthorized)
+                return Results.Unauthorized();
+
+            var loggerFactory = ctx.RequestServices.GetRequiredService<ILoggerFactory>();
+            var logger = loggerFactory.CreateLogger("SkillLoader");
+            var allSkills = SkillLoader.LoadAll(startup.Config.Skills, startup.WorkspacePath, logger);
+            var dtos = allSkills.Select(s => new SkillInfoDto
+            {
+                Name = s.Name,
+                Description = s.Description,
+                Emoji = s.Metadata.Emoji,
+                Source = s.Source.ToString().ToLowerInvariant(),
+                IsUserInstalled = s.Source == SkillSource.Workspace,
+            }).ToList();
+            return Results.Json(new SkillsDetailResponse { Skills = dtos }, CoreJsonContext.Default.SkillsDetailResponse);
+        });
+
+        app.MapPost("/admin/skills", async (HttpContext ctx) =>
+        {
+            var auth = EndpointHelpers.AuthorizeOperatorRequest(ctx, startup, browserSessions, requireCsrf: true);
+            if (!auth.IsAuthorized)
+                return Results.Unauthorized();
+            if (!EndpointHelpers.TryConsumeOperatorRateLimit(ctx, operations, auth, "admin.control", out var blockedByPolicyId))
+                return Results.Json(new OperationStatusResponse { Success = false, Error = $"Rate limit exceeded by policy '{blockedByPolicyId}'." }, CoreJsonContext.Default.OperationStatusResponse, statusCode: StatusCodes.Status429TooManyRequests);
+
+            SkillInstallRequest? request;
+            try { request = await ctx.Request.ReadFromJsonAsync(CoreJsonContext.Default.SkillInstallRequest, ctx.RequestAborted); }
+            catch { request = null; }
+
+            if (request is null || string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.Content))
+                return Results.Json(new SkillMutationResponse { Success = false, Error = "name and content are required." }, CoreJsonContext.Default.SkillMutationResponse, statusCode: StatusCodes.Status400BadRequest);
+
+            if (!Regex.IsMatch(request.Name, @"^[a-zA-Z0-9][a-zA-Z0-9_\-]{0,63}$"))
+                return Results.Json(new SkillMutationResponse { Success = false, Error = "name must be 1-64 alphanumeric/hyphen/underscore characters starting with alphanumeric." }, CoreJsonContext.Default.SkillMutationResponse, statusCode: StatusCodes.Status400BadRequest);
+
+            if (string.IsNullOrWhiteSpace(startup.WorkspacePath))
+                return Results.Json(new SkillMutationResponse { Success = false, Error = "Workspace path is not configured (OPENCLAW_WORKSPACE not set)." }, CoreJsonContext.Default.SkillMutationResponse, statusCode: StatusCodes.Status501NotImplemented);
+
+            var skillDir = Path.Combine(startup.WorkspacePath, "skills", request.Name);
+            Directory.CreateDirectory(skillDir);
+            var skillFile = Path.Combine(skillDir, "SKILL.md");
+            await File.WriteAllTextAsync(skillFile, request.Content, ctx.RequestAborted);
+
+            var reloadedNames = await runtime.AgentRuntime.ReloadSkillsAsync(ctx.RequestAborted);
+            AppendAudit(ctx, operations, auth, "skill_install", request.Name, $"Installed skill '{request.Name}'. Total: {reloadedNames.Count}.", true);
+            return Results.Json(
+                new SkillMutationResponse { Success = true, TotalLoaded = reloadedNames.Count, LoadedNames = reloadedNames },
+                CoreJsonContext.Default.SkillMutationResponse);
+        });
+
+        app.MapDelete("/admin/skills/{name}", async (HttpContext ctx, string name) =>
+        {
+            var auth = EndpointHelpers.AuthorizeOperatorRequest(ctx, startup, browserSessions, requireCsrf: true);
+            if (!auth.IsAuthorized)
+                return Results.Unauthorized();
+            if (!EndpointHelpers.TryConsumeOperatorRateLimit(ctx, operations, auth, "admin.control", out var blockedByPolicyId))
+                return Results.Json(new OperationStatusResponse { Success = false, Error = $"Rate limit exceeded by policy '{blockedByPolicyId}'." }, CoreJsonContext.Default.OperationStatusResponse, statusCode: StatusCodes.Status429TooManyRequests);
+
+            if (!Regex.IsMatch(name, @"^[a-zA-Z0-9][a-zA-Z0-9_\-]{0,63}$"))
+                return Results.Json(new SkillMutationResponse { Success = false, Error = "Invalid skill name." }, CoreJsonContext.Default.SkillMutationResponse, statusCode: StatusCodes.Status400BadRequest);
+
+            if (string.IsNullOrWhiteSpace(startup.WorkspacePath))
+                return Results.Json(new SkillMutationResponse { Success = false, Error = "Workspace path is not configured." }, CoreJsonContext.Default.SkillMutationResponse, statusCode: StatusCodes.Status501NotImplemented);
+
+            var skillDir = Path.Combine(startup.WorkspacePath, "skills", name);
+            if (!Directory.Exists(skillDir))
+                return Results.Json(new SkillMutationResponse { Success = false, Error = $"User-installed skill '{name}' not found in workspace." }, CoreJsonContext.Default.SkillMutationResponse, statusCode: StatusCodes.Status404NotFound);
+
+            Directory.Delete(skillDir, recursive: true);
+            var reloadedNames = await runtime.AgentRuntime.ReloadSkillsAsync(ctx.RequestAborted);
+            AppendAudit(ctx, operations, auth, "skill_remove", name, $"Removed skill '{name}'. Total: {reloadedNames.Count}.", true);
+            return Results.Json(
+                new SkillMutationResponse { Success = true, TotalLoaded = reloadedNames.Count, LoadedNames = reloadedNames },
+                CoreJsonContext.Default.SkillMutationResponse);
+        });
+
         app.MapPost("/tools/approve", (HttpContext ctx, string approvalId, bool approved, string? requesterChannelId, string? requesterSenderId) =>
         {
             var auth = EndpointHelpers.AuthorizeOperatorRequest(ctx, startup, browserSessions, requireCsrf: true);
@@ -186,6 +267,7 @@ internal static class ControlEndpoints
                 var adminOutcome = runtime.ToolApprovalService.TrySetDecisionWithRequest(approvalId, approved, requesterChannelId: null, requesterSenderId: null, requireRequesterMatch: false);
                 if (adminOutcome.Result == ToolApprovalDecisionResult.Recorded && adminOutcome.Request is not null)
                 {
+                    runtime.RuntimeMetrics.IncrementApprovalDecisionsRecorded();
                     runtime.ApprovalAuditStore.RecordDecision(
                         adminOutcome.Request,
                         approved,
@@ -203,6 +285,7 @@ internal static class ControlEndpoints
                 }
                 else if (adminOutcome.Result == ToolApprovalDecisionResult.Unauthorized)
                 {
+                    runtime.RuntimeMetrics.IncrementApprovalDecisionsRejected();
                     AppendRejectedApprovalRuntimeEvent(runtime, adminOutcome.Request, approvalId, "requester_mismatch", "http", auth.AuthMode);
                 }
 
@@ -245,6 +328,7 @@ internal static class ControlEndpoints
 
             if (outcome.Result == ToolApprovalDecisionResult.Recorded && outcome.Request is not null)
             {
+                runtime.RuntimeMetrics.IncrementApprovalDecisionsRecorded();
                 runtime.ApprovalAuditStore.RecordDecision(
                     outcome.Request,
                     approved,
@@ -254,14 +338,15 @@ internal static class ControlEndpoints
                 AppendApprovalRuntimeEvent(
                     runtime,
                     outcome.Request,
-                    approved,
-                    "http_requester",
-                    requesterChannelId,
-                    requesterSenderId);
-                AppendAudit(ctx, operations, auth, "tool_approval_requester", approvalId, $"Requester {(approved ? "approved" : "denied")} tool approval '{approvalId}'.", true);
+                        approved,
+                        "http_requester",
+                        requesterChannelId,
+                        requesterSenderId);
+                AppendAudit(ctx, operations, auth, "tool_approval_admin_requester_match", approvalId, $"Admin {(approved ? "approved" : "denied")} tool approval '{approvalId}' with requester-match guard.", true);
             }
             else if (outcome.Result == ToolApprovalDecisionResult.Unauthorized)
             {
+                runtime.RuntimeMetrics.IncrementApprovalDecisionsRejected();
                 AppendRejectedApprovalRuntimeEvent(runtime, outcome.Request, approvalId, "requester_mismatch", requesterChannelId, requesterSenderId);
             }
 
@@ -271,14 +356,14 @@ internal static class ControlEndpoints
                     new OperationStatusResponse
                     {
                         Success = true,
-                        Mode = "requester_match"
+                        Mode = "admin_requester_match_guard"
                     },
                     CoreJsonContext.Default.OperationStatusResponse),
                 ToolApprovalDecisionResult.Unauthorized => Results.Json(
                     new OperationStatusResponse
                     {
                         Success = false,
-                        Error = "Requester does not match pending approval owner."
+                        Error = "Requester does not match the pending approval owner for this admin approval request."
                     },
                     CoreJsonContext.Default.OperationStatusResponse,
                     statusCode: StatusCodes.Status403Forbidden),

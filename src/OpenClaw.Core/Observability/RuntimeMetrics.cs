@@ -19,11 +19,35 @@ public sealed class RuntimeMetrics
     private long _totalToolTimeouts;
     private long _totalLlmRetries;
     private long _totalLlmErrors;
+    private long _approvalDecisionsRecorded;
+    private long _approvalDecisionsRejected;
+    private long _sessionEvictions;
+    private long _sessionCapacityRejects;
+    private long _estimatedTokenAdmissionRejects;
+    private long _browserCancellationResets;
+    private long _pluginBridgeAuthFailures;
+    private long _pluginBridgeRestartAttempts;
+    private long _pluginBridgeRestartFailures;
+    private long _sandboxLeaseCreates;
+    private long _sandboxLeaseReuses;
+    private long _sandboxLeaseRecoveries;
     private long _retentionSweepRuns;
     private long _retentionSweepFailures;
     private long _retentionArchivedItems;
     private long _retentionDeletedItems;
     private long _retentionSkippedProtectedSessions;
+    private long _operatorAuditWriteFailures;
+    private long _runtimeEventWriteFailures;
+    private long _sessionCacheHits;
+    private long _sessionCacheMisses;
+    private long _memoryRecallSearches;
+    private long _memoryRecallHits;
+    private long _memoryCompactions;
+    private long _promptCacheReads;
+    private long _promptCacheWrites;
+    private long _promptCacheWarmRuns;
+    private long _promptCacheWarmSkips;
+    private long _promptCacheWarmFailures;
 
     // ── Gauges ────────────────────────────────────────────────────────────
     private int _activeSessions;
@@ -41,11 +65,35 @@ public sealed class RuntimeMetrics
     public long TotalToolTimeouts => Interlocked.Read(ref _totalToolTimeouts);
     public long TotalLlmRetries => Interlocked.Read(ref _totalLlmRetries);
     public long TotalLlmErrors => Interlocked.Read(ref _totalLlmErrors);
+    public long ApprovalDecisionsRecorded => Interlocked.Read(ref _approvalDecisionsRecorded);
+    public long ApprovalDecisionsRejected => Interlocked.Read(ref _approvalDecisionsRejected);
+    public long SessionEvictions => Interlocked.Read(ref _sessionEvictions);
+    public long SessionCapacityRejects => Interlocked.Read(ref _sessionCapacityRejects);
+    public long EstimatedTokenAdmissionRejects => Interlocked.Read(ref _estimatedTokenAdmissionRejects);
+    public long BrowserCancellationResets => Interlocked.Read(ref _browserCancellationResets);
+    public long PluginBridgeAuthFailures => Interlocked.Read(ref _pluginBridgeAuthFailures);
+    public long PluginBridgeRestartAttempts => Interlocked.Read(ref _pluginBridgeRestartAttempts);
+    public long PluginBridgeRestartFailures => Interlocked.Read(ref _pluginBridgeRestartFailures);
+    public long SandboxLeaseCreates => Interlocked.Read(ref _sandboxLeaseCreates);
+    public long SandboxLeaseReuses => Interlocked.Read(ref _sandboxLeaseReuses);
+    public long SandboxLeaseRecoveries => Interlocked.Read(ref _sandboxLeaseRecoveries);
     public long RetentionSweepRuns => Interlocked.Read(ref _retentionSweepRuns);
     public long RetentionSweepFailures => Interlocked.Read(ref _retentionSweepFailures);
     public long RetentionArchivedItems => Interlocked.Read(ref _retentionArchivedItems);
     public long RetentionDeletedItems => Interlocked.Read(ref _retentionDeletedItems);
     public long RetentionSkippedProtectedSessions => Interlocked.Read(ref _retentionSkippedProtectedSessions);
+    public long OperatorAuditWriteFailures => Interlocked.Read(ref _operatorAuditWriteFailures);
+    public long RuntimeEventWriteFailures => Interlocked.Read(ref _runtimeEventWriteFailures);
+    public long SessionCacheHits => Interlocked.Read(ref _sessionCacheHits);
+    public long SessionCacheMisses => Interlocked.Read(ref _sessionCacheMisses);
+    public long MemoryRecallSearches => Interlocked.Read(ref _memoryRecallSearches);
+    public long MemoryRecallHits => Interlocked.Read(ref _memoryRecallHits);
+    public long MemoryCompactions => Interlocked.Read(ref _memoryCompactions);
+    public long PromptCacheReads => Interlocked.Read(ref _promptCacheReads);
+    public long PromptCacheWrites => Interlocked.Read(ref _promptCacheWrites);
+    public long PromptCacheWarmRuns => Interlocked.Read(ref _promptCacheWarmRuns);
+    public long PromptCacheWarmSkips => Interlocked.Read(ref _promptCacheWarmSkips);
+    public long PromptCacheWarmFailures => Interlocked.Read(ref _promptCacheWarmFailures);
     public int ActiveSessions => Volatile.Read(ref _activeSessions);
     public int CircuitBreakerState => Volatile.Read(ref _circuitBreakerState);
     public long RetentionLastRunAtUnixSeconds => Interlocked.Read(ref _retentionLastRunAtUnixSeconds);
@@ -61,11 +109,35 @@ public sealed class RuntimeMetrics
     public void IncrementToolTimeouts() => Interlocked.Increment(ref _totalToolTimeouts);
     public void IncrementLlmRetries() => Interlocked.Increment(ref _totalLlmRetries);
     public void IncrementLlmErrors() => Interlocked.Increment(ref _totalLlmErrors);
+    public void IncrementApprovalDecisionsRecorded() => Interlocked.Increment(ref _approvalDecisionsRecorded);
+    public void IncrementApprovalDecisionsRejected() => Interlocked.Increment(ref _approvalDecisionsRejected);
+    public void IncrementSessionEvictions() => Interlocked.Increment(ref _sessionEvictions);
+    public void IncrementSessionCapacityRejects() => Interlocked.Increment(ref _sessionCapacityRejects);
+    public void IncrementEstimatedTokenAdmissionRejects() => Interlocked.Increment(ref _estimatedTokenAdmissionRejects);
+    public void IncrementBrowserCancellationResets() => Interlocked.Increment(ref _browserCancellationResets);
+    public void IncrementPluginBridgeAuthFailures() => Interlocked.Increment(ref _pluginBridgeAuthFailures);
+    public void IncrementPluginBridgeRestartAttempts() => Interlocked.Increment(ref _pluginBridgeRestartAttempts);
+    public void IncrementPluginBridgeRestartFailures() => Interlocked.Increment(ref _pluginBridgeRestartFailures);
+    public void IncrementSandboxLeaseCreates() => Interlocked.Increment(ref _sandboxLeaseCreates);
+    public void IncrementSandboxLeaseReuses() => Interlocked.Increment(ref _sandboxLeaseReuses);
+    public void IncrementSandboxLeaseRecoveries() => Interlocked.Increment(ref _sandboxLeaseRecoveries);
     public void IncrementRetentionSweepRuns() => Interlocked.Increment(ref _retentionSweepRuns);
     public void IncrementRetentionSweepFailures() => Interlocked.Increment(ref _retentionSweepFailures);
     public void AddRetentionArchivedItems(long n) => Interlocked.Add(ref _retentionArchivedItems, n);
     public void AddRetentionDeletedItems(long n) => Interlocked.Add(ref _retentionDeletedItems, n);
     public void AddRetentionSkippedProtectedSessions(long n) => Interlocked.Add(ref _retentionSkippedProtectedSessions, n);
+    public void IncrementOperatorAuditWriteFailures() => Interlocked.Increment(ref _operatorAuditWriteFailures);
+    public void IncrementRuntimeEventWriteFailures() => Interlocked.Increment(ref _runtimeEventWriteFailures);
+    public void IncrementSessionCacheHits() => Interlocked.Increment(ref _sessionCacheHits);
+    public void IncrementSessionCacheMisses() => Interlocked.Increment(ref _sessionCacheMisses);
+    public void IncrementMemoryRecallSearches() => Interlocked.Increment(ref _memoryRecallSearches);
+    public void AddMemoryRecallHits(long n) => Interlocked.Add(ref _memoryRecallHits, n);
+    public void IncrementMemoryCompactions() => Interlocked.Increment(ref _memoryCompactions);
+    public void AddPromptCacheReads(long n) => Interlocked.Add(ref _promptCacheReads, n);
+    public void AddPromptCacheWrites(long n) => Interlocked.Add(ref _promptCacheWrites, n);
+    public void IncrementPromptCacheWarmRuns() => Interlocked.Increment(ref _promptCacheWarmRuns);
+    public void IncrementPromptCacheWarmSkips() => Interlocked.Increment(ref _promptCacheWarmSkips);
+    public void IncrementPromptCacheWarmFailures() => Interlocked.Increment(ref _promptCacheWarmFailures);
     public void SetActiveSessions(int count) => Volatile.Write(ref _activeSessions, count);
     public void SetCircuitBreakerState(int state) => Volatile.Write(ref _circuitBreakerState, state);
     public void SetRetentionLastRun(DateTimeOffset runAtUtc, long durationMs, bool succeeded)
@@ -89,11 +161,35 @@ public sealed class RuntimeMetrics
         TotalToolTimeouts = TotalToolTimeouts,
         TotalLlmRetries = TotalLlmRetries,
         TotalLlmErrors = TotalLlmErrors,
+        ApprovalDecisionsRecorded = ApprovalDecisionsRecorded,
+        ApprovalDecisionsRejected = ApprovalDecisionsRejected,
+        SessionEvictions = SessionEvictions,
+        SessionCapacityRejects = SessionCapacityRejects,
+        EstimatedTokenAdmissionRejects = EstimatedTokenAdmissionRejects,
+        BrowserCancellationResets = BrowserCancellationResets,
+        PluginBridgeAuthFailures = PluginBridgeAuthFailures,
+        PluginBridgeRestartAttempts = PluginBridgeRestartAttempts,
+        PluginBridgeRestartFailures = PluginBridgeRestartFailures,
+        SandboxLeaseCreates = SandboxLeaseCreates,
+        SandboxLeaseReuses = SandboxLeaseReuses,
+        SandboxLeaseRecoveries = SandboxLeaseRecoveries,
         RetentionSweepRuns = RetentionSweepRuns,
         RetentionSweepFailures = RetentionSweepFailures,
         RetentionArchivedItems = RetentionArchivedItems,
         RetentionDeletedItems = RetentionDeletedItems,
         RetentionSkippedProtectedSessions = RetentionSkippedProtectedSessions,
+        OperatorAuditWriteFailures = OperatorAuditWriteFailures,
+        RuntimeEventWriteFailures = RuntimeEventWriteFailures,
+        SessionCacheHits = SessionCacheHits,
+        SessionCacheMisses = SessionCacheMisses,
+        MemoryRecallSearches = MemoryRecallSearches,
+        MemoryRecallHits = MemoryRecallHits,
+        MemoryCompactions = MemoryCompactions,
+        PromptCacheReads = PromptCacheReads,
+        PromptCacheWrites = PromptCacheWrites,
+        PromptCacheWarmRuns = PromptCacheWarmRuns,
+        PromptCacheWarmSkips = PromptCacheWarmSkips,
+        PromptCacheWarmFailures = PromptCacheWarmFailures,
         RetentionLastRunAtUnixSeconds = RetentionLastRunAtUnixSeconds,
         RetentionLastRunDurationMs = RetentionLastRunDurationMs,
         RetentionLastRunSucceeded = RetentionLastRunSucceeded,
@@ -113,11 +209,35 @@ public struct MetricsSnapshot
     public long TotalToolTimeouts { get; set; }
     public long TotalLlmRetries { get; set; }
     public long TotalLlmErrors { get; set; }
+    public long ApprovalDecisionsRecorded { get; set; }
+    public long ApprovalDecisionsRejected { get; set; }
+    public long SessionEvictions { get; set; }
+    public long SessionCapacityRejects { get; set; }
+    public long EstimatedTokenAdmissionRejects { get; set; }
+    public long BrowserCancellationResets { get; set; }
+    public long PluginBridgeAuthFailures { get; set; }
+    public long PluginBridgeRestartAttempts { get; set; }
+    public long PluginBridgeRestartFailures { get; set; }
+    public long SandboxLeaseCreates { get; set; }
+    public long SandboxLeaseReuses { get; set; }
+    public long SandboxLeaseRecoveries { get; set; }
     public long RetentionSweepRuns { get; set; }
     public long RetentionSweepFailures { get; set; }
     public long RetentionArchivedItems { get; set; }
     public long RetentionDeletedItems { get; set; }
     public long RetentionSkippedProtectedSessions { get; set; }
+    public long OperatorAuditWriteFailures { get; set; }
+    public long RuntimeEventWriteFailures { get; set; }
+    public long SessionCacheHits { get; set; }
+    public long SessionCacheMisses { get; set; }
+    public long MemoryRecallSearches { get; set; }
+    public long MemoryRecallHits { get; set; }
+    public long MemoryCompactions { get; set; }
+    public long PromptCacheReads { get; set; }
+    public long PromptCacheWrites { get; set; }
+    public long PromptCacheWarmRuns { get; set; }
+    public long PromptCacheWarmSkips { get; set; }
+    public long PromptCacheWarmFailures { get; set; }
     public long RetentionLastRunAtUnixSeconds { get; set; }
     public long RetentionLastRunDurationMs { get; set; }
     public int RetentionLastRunSucceeded { get; set; }
