@@ -45,7 +45,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty]
     private string _inputText = "";
 
-    public ObservableCollection<ChatMessage> Messages { get; } = new();
+    public ObservableCollection<ChatMessage> Messages { get; } = [];
 
     public MainWindowViewModel()
         : this(new SettingsStore(), new GatewayWebSocketClient(), null)
@@ -163,7 +163,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private void AppendAssistantChunk(string? text, string? inReplyToMessageId)
     {
-        if (string.IsNullOrEmpty(text))
+        if (string.IsNullOrWhiteSpace(text))
             return;
 
         var index = EnsureActiveAssistantMessage(inReplyToMessageId);
@@ -387,7 +387,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
         try
         {
-            var msgId = Guid.NewGuid().ToString("n");
+            var msgId = Guid.CreateVersion7().ToString("n");
             await _client.SendUserMessageAsync(text, msgId, replyToMessageId: null, CancellationToken.None);
         }
         catch (Exception ex)
