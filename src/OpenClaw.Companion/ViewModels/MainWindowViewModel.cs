@@ -47,11 +47,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     public ObservableCollection<ChatMessage> Messages { get; } = [];
 
-    public MainWindowViewModel()
-        : this(new SettingsStore(), new GatewayWebSocketClient(), null)
-    {
-    }
-
     public MainWindowViewModel(
         SettingsStore settingsStore,
         GatewayWebSocketClient client,
