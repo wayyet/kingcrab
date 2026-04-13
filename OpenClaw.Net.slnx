@@ -5,7 +5,6 @@
     <Platform Name="x86" />
   </Configurations>
   <Folder Name="/src/">
-    <Project Path="../../github/openclaw.net/src/OpenClaw.Tui/OpenClaw.Tui.csproj" />
     <Project Path="src/OpenClaw.Agent/OpenClaw.Agent.csproj" />
     <Project Path="src/OpenClaw.Channels/OpenClaw.Channels.csproj" />
     <Project Path="src/OpenClaw.Cli/OpenClaw.Cli.csproj" />
@@ -17,6 +16,7 @@
     <Project Path="src/OpenClaw.SandboxDemo/OpenClaw.SandboxDemo.csproj">
       <Build Solution="Debug|*" Project="false" />
     </Project>
+    <Project Path="src/OpenClaw.Tui/OpenClaw.Tui.csproj" />
     <Project Path="src/OpenClawNet.Sandbox.OpenSandbox/OpenClawNet.Sandbox.OpenSandbox.csproj" />
   </Folder>
   <Folder Name="/tests/">
