@@ -1,4 +1,5 @@
 using OpenClaw.Agent;
+using OpenClaw.Gateway.A2A;
 using OpenClaw.Gateway.Bootstrap;
 using OpenClaw.Gateway.Composition;
 using OpenClaw.Gateway.Endpoints;
@@ -28,6 +29,7 @@ builder.Services.AddOpenApi("openclaw-integration");
 builder.AddOpenClawObservability();
 builder.Services.AddOpenClawCoreServices(startup);
 builder.Services.AddOpenClawChannelServices(startup);
+builder.Services.AddOpenClawBackendServices(startup);
 builder.Services.AddOpenClawToolServices(startup);
 builder.Services.AddOpenClawSecurityServices(startup);
 builder.Services.AddOpenClawMcpServices(startup);
@@ -64,11 +66,13 @@ app.Use(async (ctx, next) =>
 if (!string.IsNullOrEmpty(startup.Config.Security.OidcAuthority))
     app.UseAuthentication();
 app.UseOpenClawMcpAuth(startup, runtime);
+app.UseOpenClawA2AAuth(startup, runtime);
 
 app.UseOpenClawPipeline(startup, runtime);
 app.MapOpenApi("/openapi/{documentName}.json");
 app.MapOpenClawEndpoints(startup, runtime);
 app.MapMcp("/mcp");
+app.MapOpenClawA2AEndpoints(startup, runtime);
 
 if (app.Environment.IsDevelopment())
     app.MapOpenClawDevUI();

@@ -1,9 +1,8 @@
+using System.Collections.Concurrent;
 using OpenClaw.Core.Contacts;
 using OpenClaw.Core.Models;
 using OpenClaw.Core.Pipeline;
 using OpenClaw.Core.Security;
-using System.Collections.Concurrent;
-using System.Net.Mime;
 
 namespace OpenClaw.Gateway;
 
@@ -232,13 +231,13 @@ internal readonly record struct WebhookResult(int StatusCode, string? ContentTyp
     public static WebhookResult Ok() => new(200, null, null);
     public static WebhookResult Unauthorized() => new(401, null, null);
     public static WebhookResult NotFound() => new(404, null, null);
-    public static WebhookResult BadRequest(string message) => new(400, $"{MediaTypeNames.Text.Plain}; charset=utf-8", message);
+    public static WebhookResult BadRequest(string message) => new(400, "text/plain; charset=utf-8", message);
     public static WebhookResult Status(int statusCode) => new(statusCode, null, null);
 
     public static WebhookResult TwiMl(string message)
     {
         var xml = $"""<?xml version="1.0" encoding="UTF-8"?><Response><Message>{EscapeXml(message)}</Message></Response>""";
-        return new WebhookResult(200, $"{MediaTypeNames.Application.Xml}; charset=utf-8", xml);
+        return new WebhookResult(200, "application/xml; charset=utf-8", xml);
     }
 
     private static string EscapeXml(string value)

@@ -1,3 +1,8 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Net;
+using System.Text.Json;
+using System.Threading.Channels;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
@@ -11,12 +16,6 @@ using OpenClaw.Core.Pipeline;
 using OpenClaw.Core.Sessions;
 using OpenClaw.Gateway;
 using OpenClaw.Gateway.Extensions;
-using OpenClaw.Gateway.Models;
-using System.Collections.Concurrent;
-using System.Diagnostics;
-using System.Net;
-using System.Text.Json;
-using System.Threading.Channels;
 using Xunit;
 
 namespace OpenClaw.Tests;
@@ -104,9 +103,7 @@ public sealed class GatewayWorkersTests
         var pairingManager = new OpenClaw.Core.Security.PairingManager(storagePath, NullLogger<OpenClaw.Core.Security.PairingManager>.Instance);
         var commandProcessor = new ChatCommandProcessor(sessionManager);
         var runtimeMetrics = new OpenClaw.Core.Observability.RuntimeMetrics();
-        var modelProfile = new ConfiguredModelProfileRegistry(config, NullLogger<ConfiguredModelProfileRegistry>.Instance);
-        var modelselectionPolicy = new DefaultModelSelectionPolicy(modelProfile);
-        var providerRegistry = new LlmProviderRegistry(); 
+        var providerRegistry = new LlmProviderRegistry();
         var providerPolicies = new ProviderPolicyService(storagePath, NullLogger<ProviderPolicyService>.Instance);
         var runtimeEvents = new RuntimeEventStore(storagePath, NullLogger<RuntimeEventStore>.Instance);
         var operations = new RuntimeOperationsState
@@ -115,8 +112,7 @@ public sealed class GatewayWorkersTests
             ProviderRegistry = providerRegistry,
             LlmExecution = new GatewayLlmExecutionService(
                 config,
-                modelProfile,
-                modelselectionPolicy, 
+                providerRegistry,
                 providerPolicies,
                 runtimeEvents,
                 runtimeMetrics,
@@ -164,7 +160,7 @@ public sealed class GatewayWorkersTests
             SenderId = "attacker",
             Text = $"/approve {approval.ApprovalId} yes",
             MessageId = "msg1"
-        }, CancellationToken.None);
+        });
 
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         var outbound = await adapter.ReadAsync(timeout.Token);
@@ -221,8 +217,6 @@ public sealed class GatewayWorkersTests
         var pairingManager = new OpenClaw.Core.Security.PairingManager(storagePath, NullLogger<OpenClaw.Core.Security.PairingManager>.Instance);
         var commandProcessor = new ChatCommandProcessor(sessionManager);
         var runtimeMetrics = new OpenClaw.Core.Observability.RuntimeMetrics();
-        var modelProfile = new ConfiguredModelProfileRegistry(config, NullLogger<ConfiguredModelProfileRegistry>.Instance);
-        var modelselectionPolicy = new DefaultModelSelectionPolicy(modelProfile);
         var providerRegistry = new LlmProviderRegistry();
         var providerPolicies = new ProviderPolicyService(storagePath, NullLogger<ProviderPolicyService>.Instance);
         var runtimeEvents = new RuntimeEventStore(storagePath, NullLogger<RuntimeEventStore>.Instance);
@@ -243,8 +237,7 @@ public sealed class GatewayWorkersTests
             ProviderRegistry = providerRegistry,
             LlmExecution = new GatewayLlmExecutionService(
                 config,
-                modelProfile,
-                modelselectionPolicy,
+                providerRegistry,
                 providerPolicies,
                 runtimeEvents,
                 runtimeMetrics,
@@ -291,7 +284,7 @@ public sealed class GatewayWorkersTests
             SenderId = "owner",
             Text = "hello",
             MessageId = "msg-grant"
-        }, CancellationToken.None);
+        });
 
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         var outbound = await adapter.ReadAsync(timeout.Token);
@@ -357,8 +350,6 @@ public sealed class GatewayWorkersTests
         var pairingManager = new OpenClaw.Core.Security.PairingManager(storagePath, NullLogger<OpenClaw.Core.Security.PairingManager>.Instance);
         var commandProcessor = new ChatCommandProcessor(sessionManager);
         var runtimeMetrics = new OpenClaw.Core.Observability.RuntimeMetrics();
-        var modelProfile = new ConfiguredModelProfileRegistry(config, NullLogger<ConfiguredModelProfileRegistry>.Instance);
-        var modelselectionPolicy = new DefaultModelSelectionPolicy(modelProfile);
         var providerRegistry = new LlmProviderRegistry();
         var providerPolicies = new ProviderPolicyService(storagePath, NullLogger<ProviderPolicyService>.Instance);
         var runtimeEvents = new RuntimeEventStore(storagePath, NullLogger<RuntimeEventStore>.Instance);
@@ -368,8 +359,7 @@ public sealed class GatewayWorkersTests
             ProviderRegistry = providerRegistry,
             LlmExecution = new GatewayLlmExecutionService(
                 config,
-                modelProfile,
-                modelselectionPolicy,
+                providerRegistry,
                 providerPolicies,
                 runtimeEvents,
                 runtimeMetrics,
@@ -416,7 +406,7 @@ public sealed class GatewayWorkersTests
             SenderId = "analyst",
             Text = "status",
             MessageId = "msg-route"
-        }, CancellationToken.None);
+        });
 
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         var outbound = await adapter.ReadAsync(timeout.Token);
@@ -466,8 +456,6 @@ public sealed class GatewayWorkersTests
         var pairingManager = new OpenClaw.Core.Security.PairingManager(storagePath, NullLogger<OpenClaw.Core.Security.PairingManager>.Instance);
         var commandProcessor = new ChatCommandProcessor(sessionManager);
         var runtimeMetrics = new OpenClaw.Core.Observability.RuntimeMetrics();
-        var modelProfile = new ConfiguredModelProfileRegistry(config, NullLogger<ConfiguredModelProfileRegistry>.Instance);
-        var modelselectionPolicy = new DefaultModelSelectionPolicy(modelProfile);
         var providerRegistry = new LlmProviderRegistry();
         var providerPolicies = new ProviderPolicyService(storagePath, NullLogger<ProviderPolicyService>.Instance);
         var runtimeEvents = new RuntimeEventStore(storagePath, NullLogger<RuntimeEventStore>.Instance);
@@ -477,8 +465,7 @@ public sealed class GatewayWorkersTests
             ProviderRegistry = providerRegistry,
             LlmExecution = new GatewayLlmExecutionService(
                 config,
-                modelProfile,
-                modelselectionPolicy,
+                providerRegistry,
                 providerPolicies,
                 runtimeEvents,
                 runtimeMetrics,
@@ -523,7 +510,7 @@ public sealed class GatewayWorkersTests
             SessionId = "sess-stream",
             Text = "hello",
             MessageId = "msg-stream"
-        }, CancellationToken.None);
+        });
 
         await WaitForAsync(
             () => socket.Sent.Count >= 5,
@@ -592,8 +579,6 @@ public sealed class GatewayWorkersTests
         var pairingManager = new OpenClaw.Core.Security.PairingManager(storagePath, NullLogger<OpenClaw.Core.Security.PairingManager>.Instance);
         var commandProcessor = new ChatCommandProcessor(sessionManager);
         var runtimeMetrics = new OpenClaw.Core.Observability.RuntimeMetrics();
-        var modelProfile = new ConfiguredModelProfileRegistry(config, NullLogger<ConfiguredModelProfileRegistry>.Instance);
-        var modelselectionPolicy = new DefaultModelSelectionPolicy(modelProfile);
         var providerRegistry = new LlmProviderRegistry();
         var providerPolicies = new ProviderPolicyService(storagePath, NullLogger<ProviderPolicyService>.Instance);
         var runtimeEvents = new RuntimeEventStore(storagePath, NullLogger<RuntimeEventStore>.Instance);
@@ -603,8 +588,7 @@ public sealed class GatewayWorkersTests
             ProviderRegistry = providerRegistry,
             LlmExecution = new GatewayLlmExecutionService(
                 config,
-                modelProfile,
-                modelselectionPolicy,
+                providerRegistry,
                 providerPolicies,
                 runtimeEvents,
                 runtimeMetrics,
@@ -651,7 +635,7 @@ public sealed class GatewayWorkersTests
             SenderId = "owner",
             Text = "hello",
             MessageId = "msg-timeout"
-        }, CancellationToken.None);
+        });
 
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
         var approvalPrompt = await adapter.ReadAsync(timeout.Token);
@@ -703,10 +687,7 @@ public sealed class GatewayWorkersTests
         var pairingManager = new OpenClaw.Core.Security.PairingManager(storagePath, NullLogger<OpenClaw.Core.Security.PairingManager>.Instance);
         var commandProcessor = new ChatCommandProcessor(sessionManager);
         var runtimeMetrics = new OpenClaw.Core.Observability.RuntimeMetrics();
-        var modelProfile = new ConfiguredModelProfileRegistry(config, NullLogger<ConfiguredModelProfileRegistry>.Instance);
-        var modelselectionPolicy = new DefaultModelSelectionPolicy(modelProfile);
         var providerRegistry = new LlmProviderRegistry();
-
         var providerPolicies = new ProviderPolicyService(storagePath, NullLogger<ProviderPolicyService>.Instance);
         var runtimeEvents = new RuntimeEventStore(storagePath, NullLogger<RuntimeEventStore>.Instance);
         var operations = new RuntimeOperationsState
@@ -715,8 +696,7 @@ public sealed class GatewayWorkersTests
             ProviderRegistry = providerRegistry,
             LlmExecution = new GatewayLlmExecutionService(
                 config,
-                modelProfile,
-                modelselectionPolicy,
+                providerRegistry,
                 providerPolicies,
                 runtimeEvents,
                 runtimeMetrics,
@@ -766,7 +746,7 @@ public sealed class GatewayWorkersTests
             SenderId = job.RecipientId!,
             Subject = job.Subject,
             Text = job.Prompt
-        }, CancellationToken.None);
+        });
 
         var status = await WaitForHeartbeatStatusAsync(heartbeatService, TimeSpan.FromSeconds(2), static item => item.Outcome == "ok");
 
@@ -811,8 +791,6 @@ public sealed class GatewayWorkersTests
         var pairingManager = new OpenClaw.Core.Security.PairingManager(storagePath, NullLogger<OpenClaw.Core.Security.PairingManager>.Instance);
         var commandProcessor = new ChatCommandProcessor(sessionManager);
         var runtimeMetrics = new OpenClaw.Core.Observability.RuntimeMetrics();
-        var modelProfile = new ConfiguredModelProfileRegistry(config, NullLogger<ConfiguredModelProfileRegistry>.Instance);
-        var modelselectionPolicy = new DefaultModelSelectionPolicy(modelProfile);
         var providerRegistry = new LlmProviderRegistry();
         var providerPolicies = new ProviderPolicyService(storagePath, NullLogger<ProviderPolicyService>.Instance);
         var runtimeEvents = new RuntimeEventStore(storagePath, NullLogger<RuntimeEventStore>.Instance);
@@ -822,8 +800,7 @@ public sealed class GatewayWorkersTests
             ProviderRegistry = providerRegistry,
             LlmExecution = new GatewayLlmExecutionService(
                 config,
-                modelProfile, 
-                modelselectionPolicy,
+                providerRegistry,
                 providerPolicies,
                 runtimeEvents,
                 runtimeMetrics,
@@ -873,7 +850,7 @@ public sealed class GatewayWorkersTests
             SenderId = job.RecipientId!,
             Subject = job.Subject,
             Text = job.Prompt
-        }, CancellationToken.None);
+        });
 
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         var outbound = await adapter.ReadAsync(timeout.Token);
@@ -924,8 +901,6 @@ public sealed class GatewayWorkersTests
         var pairingManager = new OpenClaw.Core.Security.PairingManager(storagePath, NullLogger<OpenClaw.Core.Security.PairingManager>.Instance);
         var commandProcessor = new ChatCommandProcessor(sessionManager);
         var runtimeMetrics = new OpenClaw.Core.Observability.RuntimeMetrics();
-        var modelProfile = new ConfiguredModelProfileRegistry(config, NullLogger<ConfiguredModelProfileRegistry>.Instance);
-        var modelselectionPolicy = new DefaultModelSelectionPolicy(modelProfile);
         var providerRegistry = new LlmProviderRegistry();
         var providerPolicies = new ProviderPolicyService(storagePath, NullLogger<ProviderPolicyService>.Instance);
         var runtimeEvents = new RuntimeEventStore(storagePath, NullLogger<RuntimeEventStore>.Instance);
@@ -935,8 +910,7 @@ public sealed class GatewayWorkersTests
             ProviderRegistry = providerRegistry,
             LlmExecution = new GatewayLlmExecutionService(
                 config,
-                modelProfile,
-                modelselectionPolicy, 
+                providerRegistry,
                 providerPolicies,
                 runtimeEvents,
                 runtimeMetrics,
@@ -986,12 +960,12 @@ public sealed class GatewayWorkersTests
             SenderId = job.RecipientId!,
             Subject = job.Subject,
             Text = job.Prompt
-        }, CancellationToken.None);
+        });
 
         var status = await WaitForHeartbeatStatusAsync(heartbeatService, TimeSpan.FromSeconds(5), static item => item.Outcome == "alert");
 
         // Allow outbound worker time to attempt delivery (which will throw)
-        await Task.Delay(500, CancellationToken.None);
+        await Task.Delay(500);
 
         Assert.False(status.DeliverySuppressed);
         Assert.Null(status.LastDeliveredAtUtc);
@@ -1032,8 +1006,6 @@ public sealed class GatewayWorkersTests
         var pairingManager = new OpenClaw.Core.Security.PairingManager(storagePath, NullLogger<OpenClaw.Core.Security.PairingManager>.Instance);
         var commandProcessor = new ChatCommandProcessor(sessionManager);
         var runtimeMetrics = new OpenClaw.Core.Observability.RuntimeMetrics();
-        var modelProfile = new ConfiguredModelProfileRegistry(config, NullLogger<ConfiguredModelProfileRegistry>.Instance);
-        var modelselectionPolicy = new DefaultModelSelectionPolicy(modelProfile);
         var providerRegistry = new LlmProviderRegistry();
         var providerPolicies = new ProviderPolicyService(storagePath, NullLogger<ProviderPolicyService>.Instance);
         var runtimeEvents = new RuntimeEventStore(storagePath, NullLogger<RuntimeEventStore>.Instance);
@@ -1043,8 +1015,7 @@ public sealed class GatewayWorkersTests
             ProviderRegistry = providerRegistry,
             LlmExecution = new GatewayLlmExecutionService(
                 config,
-                modelProfile,
-                modelselectionPolicy,
+                providerRegistry,
                 providerPolicies,
                 runtimeEvents,
                 runtimeMetrics,
@@ -1094,10 +1065,10 @@ public sealed class GatewayWorkersTests
             SenderId = job.RecipientId!,
             Subject = job.Subject,
             Text = job.Prompt
-        },CancellationToken.None);
+        });
 
         var status = await WaitForHeartbeatStatusAsync(heartbeatService, TimeSpan.FromSeconds(2), static item => item.Outcome == "error");
-        await Task.Delay(150, CancellationToken.None);
+        await Task.Delay(150);
 
         Assert.Equal("error", status.Outcome);
         Assert.True(status.DeliverySuppressed);
@@ -1144,8 +1115,6 @@ public sealed class GatewayWorkersTests
         var pairingManager = new OpenClaw.Core.Security.PairingManager(storagePath, NullLogger<OpenClaw.Core.Security.PairingManager>.Instance);
         var commandProcessor = new ChatCommandProcessor(sessionManager);
         var runtimeMetrics = new OpenClaw.Core.Observability.RuntimeMetrics();
-        var modelProfile = new ConfiguredModelProfileRegistry(config, NullLogger<ConfiguredModelProfileRegistry>.Instance);
-        var modelselectionPolicy = new DefaultModelSelectionPolicy(modelProfile);
         var providerRegistry = new LlmProviderRegistry();
         var providerPolicies = new ProviderPolicyService(storagePath, NullLogger<ProviderPolicyService>.Instance);
         var runtimeEvents = new RuntimeEventStore(storagePath, NullLogger<RuntimeEventStore>.Instance);
@@ -1155,8 +1124,7 @@ public sealed class GatewayWorkersTests
             ProviderRegistry = providerRegistry,
             LlmExecution = new GatewayLlmExecutionService(
                 config,
-                modelProfile,
-                modelselectionPolicy,
+                providerRegistry,
                 providerPolicies,
                 runtimeEvents,
                 runtimeMetrics,
@@ -1201,12 +1169,13 @@ public sealed class GatewayWorkersTests
         {
             ChannelId = "whatsapp",
             SenderId = "user-1",
+            AccountId = "acc-1",
             Text = "hello group",
             MessageId = "msg-group",
             IsGroup = true,
             GroupId = "group-1",
             GroupName = "Test Group"
-        }, CancellationToken.None);
+        });
 
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
         var outbound = await adapter.ReadAsync(timeout.Token);
@@ -1216,20 +1185,23 @@ public sealed class GatewayWorkersTests
             "Timed out waiting for bridged typing lifecycle.");
 
         Assert.Equal("group-1", outbound.RecipientId);
+        Assert.Equal("acc-1", outbound.AccountId);
         Assert.Equal("msg-group", outbound.ReplyToMessageId);
         Assert.Collection(
             adapter.TypingEvents,
             evt =>
             {
                 Assert.Equal("group-1", evt.RecipientId);
+                Assert.Equal("acc-1", evt.AccountId);
                 Assert.True(evt.IsTyping);
             },
             evt =>
             {
                 Assert.Equal("group-1", evt.RecipientId);
+                Assert.Equal("acc-1", evt.AccountId);
                 Assert.False(evt.IsTyping);
             });
-        Assert.Contains("msg-group", adapter.ReadReceiptMessageIds);
+        Assert.Contains(adapter.ReadReceiptEvents, evt => evt.MessageId == "msg-group" && evt.AccountId == "acc-1");
         Assert.NotNull(sessionManager.TryGetActive("whatsapp", "group-1"));
         Assert.Null(sessionManager.TryGetActive("whatsapp", "user-1"));
     }
@@ -1273,8 +1245,6 @@ public sealed class GatewayWorkersTests
         var pairingManager = new OpenClaw.Core.Security.PairingManager(storagePath, NullLogger<OpenClaw.Core.Security.PairingManager>.Instance);
         var commandProcessor = new ChatCommandProcessor(sessionManager);
         var runtimeMetrics = new OpenClaw.Core.Observability.RuntimeMetrics();
-        var modelProfile = new ConfiguredModelProfileRegistry(config, NullLogger<ConfiguredModelProfileRegistry>.Instance);
-        var modelselectionPolicy = new DefaultModelSelectionPolicy(modelProfile);
         var providerRegistry = new LlmProviderRegistry();
         var providerPolicies = new ProviderPolicyService(storagePath, NullLogger<ProviderPolicyService>.Instance);
         var runtimeEvents = new RuntimeEventStore(storagePath, NullLogger<RuntimeEventStore>.Instance);
@@ -1284,8 +1254,7 @@ public sealed class GatewayWorkersTests
             ProviderRegistry = providerRegistry,
             LlmExecution = new GatewayLlmExecutionService(
                 config,
-                modelProfile,
-                modelselectionPolicy,
+                providerRegistry,
                 providerPolicies,
                 runtimeEvents,
                 runtimeMetrics,
@@ -1332,7 +1301,7 @@ public sealed class GatewayWorkersTests
             SenderId = "user-1",
             Text = "hello",
             MessageId = "msg-error"
-        }, CancellationToken.None); 
+        });
 
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
         var outbound = await adapter.ReadAsync(timeout.Token);
@@ -1387,8 +1356,6 @@ public sealed class GatewayWorkersTests
         var pairingManager = new OpenClaw.Core.Security.PairingManager(storagePath, NullLogger<OpenClaw.Core.Security.PairingManager>.Instance);
         var commandProcessor = new ChatCommandProcessor(sessionManager);
         var runtimeMetrics = new OpenClaw.Core.Observability.RuntimeMetrics();
-        var modelProfile = new ConfiguredModelProfileRegistry(config, NullLogger<ConfiguredModelProfileRegistry>.Instance);
-        var modelselectionPolicy = new DefaultModelSelectionPolicy(modelProfile);
         var providerRegistry = new LlmProviderRegistry();
         var providerPolicies = new ProviderPolicyService(storagePath, NullLogger<ProviderPolicyService>.Instance);
         var runtimeEvents = new RuntimeEventStore(storagePath, NullLogger<RuntimeEventStore>.Instance);
@@ -1398,8 +1365,7 @@ public sealed class GatewayWorkersTests
             ProviderRegistry = providerRegistry,
             LlmExecution = new GatewayLlmExecutionService(
                 config,
-                modelProfile,
-                modelselectionPolicy,
+                providerRegistry,
                 providerPolicies,
                 runtimeEvents,
                 runtimeMetrics,
@@ -1446,7 +1412,7 @@ public sealed class GatewayWorkersTests
             SenderId = "user-1",
             Text = "hello",
             MessageId = "msg-cancel"
-        }, CancellationToken.None);
+        });
 
         await WaitForAsync(
             () => adapter.TypingEvents.Count >= 2,
@@ -1594,8 +1560,8 @@ public sealed class GatewayWorkersTests
         public string ChannelId { get; } = channelId;
         public string? SelfId { get; init; }
         public IReadOnlyList<string> SelfIds => string.IsNullOrWhiteSpace(SelfId) ? [] : [SelfId];
-        public List<(string RecipientId, bool IsTyping)> TypingEvents { get; } = [];
-        public List<string> ReadReceiptMessageIds { get; } = [];
+        public List<(string RecipientId, string? AccountId, bool IsTyping)> TypingEvents { get; } = [];
+        public List<(string MessageId, string? AccountId)> ReadReceiptEvents { get; } = [];
 
         public event Func<InboundMessage, CancellationToken, ValueTask> OnMessageReceived
         {
@@ -1608,15 +1574,15 @@ public sealed class GatewayWorkersTests
         public ValueTask SendAsync(OutboundMessage message, CancellationToken ct)
             => _messages.Writer.WriteAsync(message, ct);
 
-        public ValueTask SendTypingAsync(string recipientId, bool isTyping, CancellationToken ct)
+        public ValueTask SendTypingAsync(string recipientId, bool isTyping, string? accountId, CancellationToken ct)
         {
-            TypingEvents.Add((recipientId, isTyping));
+            TypingEvents.Add((recipientId, accountId, isTyping));
             return ValueTask.CompletedTask;
         }
 
-        public ValueTask SendReadReceiptAsync(string messageId, string? remoteJid, string? participant, CancellationToken ct)
+        public ValueTask SendReadReceiptAsync(string messageId, string? remoteJid, string? participant, string? accountId, CancellationToken ct)
         {
-            ReadReceiptMessageIds.Add(messageId);
+            ReadReceiptEvents.Add((messageId, accountId));
             return ValueTask.CompletedTask;
         }
 
