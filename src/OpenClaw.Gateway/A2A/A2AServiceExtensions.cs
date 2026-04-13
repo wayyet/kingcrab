@@ -1,8 +1,7 @@
-#if OPENCLAW_ENABLE_MAF_EXPERIMENT
 using A2A;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using OpenClaw.Gateway.Mcp;
-using OpenClaw.MicrosoftAgentFrameworkAdapter.A2A;
+using OpenClaw.Agent.A2A;
 
 namespace OpenClaw.Gateway.A2A;
 
@@ -27,5 +26,4 @@ internal static class A2AServiceExtensions
 
         return services;
     }
-}
-#endif
+} 

@@ -1,8 +1,7 @@
-#if OPENCLAW_ENABLE_MAF_EXPERIMENT
 using OpenClaw.Core.Middleware;
 using OpenClaw.Core.Models;
 using OpenClaw.Gateway.Mcp;
-using OpenClaw.MicrosoftAgentFrameworkAdapter.A2A;
+using OpenClaw.Agent.A2A;
 
 namespace OpenClaw.Gateway.A2A;
 
@@ -88,5 +87,4 @@ internal sealed class OpenClawA2AExecutionBridge : IOpenClawA2AExecutionBridge
             await runtime.SessionManager.PersistAsync(session, cancellationToken, sessionLockHeld: true);
         }
     }
-}
-#endif
+} 
