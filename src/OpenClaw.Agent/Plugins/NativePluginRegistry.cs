@@ -42,6 +42,9 @@ public sealed class NativePluginRegistry : IDisposable
         if (config.PdfRead.Enabled)
             RegisterTool(new PdfReadTool(config.PdfRead, toolingConfig), "pdf-read");
 
+        if (config.MinerUPdf.Enabled)
+            RegisterTool(new MinerUPdfTool(config.MinerUPdf, toolingConfig), "mineru-pdf");
+
         if (config.Calendar.Enabled)
             RegisterTool(new CalendarTool(config.Calendar), "calendar", config.Calendar.Provider);
 

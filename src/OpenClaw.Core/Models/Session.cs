@@ -313,6 +313,7 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(CodeExecConfig))]
 [JsonSerializable(typeof(ImageGenConfig))]
 [JsonSerializable(typeof(PdfReadConfig))]
+[JsonSerializable(typeof(MinerUPdfConfig))]
 [JsonSerializable(typeof(CalendarConfig))]
 [JsonSerializable(typeof(EmailConfig))]
 [JsonSerializable(typeof(DatabaseConfig))]

@@ -166,6 +166,7 @@ public sealed class NativePluginsConfig
     public ImageGenConfig ImageGen { get; set; } = new();
     public ImageAnalyzeConfig ImageAnalyze { get; set; } = new();
     public PdfReadConfig PdfRead { get; set; } = new();
+    public MinerUPdfConfig MinerUPdf { get; set; } = new();
     public CalendarConfig Calendar { get; set; } = new();
     public EmailConfig Email { get; set; } = new();
     public DatabaseConfig Database { get; set; } = new();
@@ -438,6 +439,38 @@ public sealed class PdfReadConfig
 
     /// <summary>Maximum output characters.</summary>
     public int MaxOutputChars { get; set; } = 100_000;
+}
+
+public sealed class MinerUPdfConfig
+{
+    public bool Enabled { get; set; } = false;
+
+    /// <summary>Base URL of the MinerU FastAPI service (e.g. http://14.103.254.121:8000).</summary>
+    public string Url { get; set; } = "http://localhost:8888";
+
+    /// <summary>Backend type: "pipeline", "vlm-transformers", "vlm-sglang-engine", "vlm-sglang-client".</summary>
+    public string Backend { get; set; } = "pipeline";
+
+    /// <summary>Parse method for the pipeline backend: "auto", "txt", "ocr".</summary>
+    public string ParseMethod { get; set; } = "auto";
+
+    /// <summary>OCR language hint (e.g. "ch", "en"). Used by the pipeline backend.</summary>
+    public string Lang { get; set; } = "ch";
+
+    /// <summary>Enable formula (LaTeX) detection. Pipeline backend only.</summary>
+    public bool FormulaEnable { get; set; } = true;
+
+    /// <summary>Enable table detection. Pipeline backend only.</summary>
+    public bool TableEnable { get; set; } = true;
+
+    /// <summary>SGLang inference server URL. Required when Backend is "vlm-sglang-client".</summary>
+    public string? SglangServerUrl { get; set; }
+
+    /// <summary>HTTP request timeout in seconds. PDF parsing can be slow for large files.</summary>
+    public int TimeoutSeconds { get; set; } = 300;
+
+    /// <summary>Maximum output characters when the Markdown cannot be written to disk.</summary>
+    public int MaxOutputChars { get; set; } = 200_000;
 }
 
 public sealed class CalendarConfig
