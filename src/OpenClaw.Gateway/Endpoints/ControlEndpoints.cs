@@ -232,6 +232,7 @@ internal static class ControlEndpoints
             if (!EndpointHelpers.TryConsumeOperatorRateLimit(ctx, operations, auth, "admin.control", out var blockedByPolicyId))
                 return Results.Json(new OperationStatusResponse { Success = false, Error = $"Rate limit exceeded by policy '{blockedByPolicyId}'." }, CoreJsonContext.Default.OperationStatusResponse, statusCode: StatusCodes.Status429TooManyRequests);
 
+            name = name.Trim().Trim('"').Trim('\'');
             if (!Regex.IsMatch(name, @"^[a-zA-Z0-9][a-zA-Z0-9_\-]{0,63}$"))
                 return Results.Json(new SkillMutationResponse { Success = false, Error = "Invalid skill name." }, CoreJsonContext.Default.SkillMutationResponse, statusCode: StatusCodes.Status400BadRequest);
 
@@ -327,7 +328,7 @@ internal static class ControlEndpoints
                     var ci = line.IndexOf(':');
                     if (ci < 0) continue;
                     if (line[..ci].Trim().Equals("name", StringComparison.OrdinalIgnoreCase))
-                    { skillName = line[(ci + 1)..].Trim(); break; }
+                    { skillName = line[(ci + 1)..].Trim().Trim('"').Trim('\''); break; }
                 }
             }
 
