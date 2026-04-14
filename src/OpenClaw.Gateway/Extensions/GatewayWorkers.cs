@@ -457,7 +457,7 @@ internal static class GatewayWorkers
                             sessionLock = await sessionManager.AcquireSessionLockAsync(session.Id, processingCt);
 
                             // ── Chat Command Processing ──────────────────────
-                            var (handled, cmdResponse) = await commandProcessor.TryProcessCommandAsync(session, msg.Text, processingCt);
+                            var (handled, cmdResponse) = await commandProcessor.TryProcessCommandAsync(session, msg.Text, processingCt, sessionLockHeld: true);
                             if (handled)
                             {
                                 if (cmdResponse is not null)
