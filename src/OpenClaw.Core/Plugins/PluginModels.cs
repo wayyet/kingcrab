@@ -471,6 +471,14 @@ public sealed class MinerUPdfConfig
 
     /// <summary>Maximum output characters when the Markdown cannot be written to disk.</summary>
     public int MaxOutputChars { get; set; } = 200_000;
+
+    /// <summary>
+    /// When true, requests MinerU to return extracted images as base64 and saves them
+    /// to an "images/" subfolder next to the output Markdown file.
+    /// The Markdown image references are rewritten to absolute disk paths so the agent
+    /// can pass each [IMAGE_PATH:...] to a vision model for analysis.
+    /// </summary>
+    public bool ExtractImages { get; set; } = false;
 }
 
 public sealed class CalendarConfig

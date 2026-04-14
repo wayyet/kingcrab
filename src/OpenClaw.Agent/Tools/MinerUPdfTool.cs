@@ -2,6 +2,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Http;
 using OpenClaw.Core.Models;
@@ -13,14 +14,16 @@ namespace OpenClaw.Agent.Tools;
 /// Enhanced PDF parsing tool that sends a PDF to an external MinerU FastAPI service
 /// and converts the result to a structured Markdown file.
 ///
-/// MinerU preserves tables, formulas (LaTeX), headings, and image references —
-/// producing higher-fidelity output than text-extraction-only approaches.
+/// MinerU preserves tables, formulas (LaTeX), headings, and image references.
+/// When <see cref="MinerUPdfConfig.ExtractImages"/> is true, extracted images are saved
+/// to an "images/" subfolder next to the Markdown file, and image references in the
+/// Markdown are rewritten to absolute disk paths so the agent can analyze them visually.
 ///
 /// Workflow:
 ///   1. POST the PDF as multipart/form-data to <see cref="MinerUPdfConfig.Url"/>/file_parse.
-///   2. Receive the Markdown string from the <c>md_content</c> field of the JSON response.
-///   3. Save the Markdown to disk (default: same directory as the PDF, <c>.md</c> extension).
-///   4. Return the saved file path so downstream tools (read_file) can analyze the content.
+///   2. Receive the Markdown (and optionally base64 images) from the JSON response.
+///   3. Save the Markdown and images to disk.
+///   4. Return file paths so downstream tools can analyze content and images.
 /// </summary>
 public sealed class MinerUPdfTool : ITool, IDisposable
 {
@@ -85,11 +88,13 @@ public sealed class MinerUPdfTool : ITool, IDisposable
             ? outputPath
             : Path.ChangeExtension(fullPath, ".md");
 
+        var imagesDir = Path.Combine(Path.GetDirectoryName(mdPath)!, "images");
+
         // Call MinerU FastAPI
-        string mdContent;
+        MinerUParseResult parseResult;
         try
         {
-            mdContent = await CallMinerUAsync(fullPath, ct);
+            parseResult = await CallMinerUAsync(fullPath, imagesDir, ct);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -101,6 +106,8 @@ public sealed class MinerUPdfTool : ITool, IDisposable
             return $"Error: MinerU parsing failed — {ex.Message}";
         }
 
+        var mdContent = parseResult.Markdown;
+
         // Try to save the Markdown to disk
         if (ToolPathPolicy.IsWriteAllowed(_toolingConfig, mdPath))
         {
@@ -111,9 +118,26 @@ public sealed class MinerUPdfTool : ITool, IDisposable
                 var preview = mdContent.Length > 600
                     ? mdContent[..600].TrimEnd() + "\n..."
                     : mdContent;
-                return $"Markdown saved to: {mdPath}\n" +
-                       $"Size: {mdContent.Length:N0} chars, ~{wordCount:N0} words\n\n" +
-                       $"Preview:\n{preview}";
+
+                var sb = new StringBuilder();
+                sb.AppendLine($"Markdown saved to: {mdPath}");
+                sb.AppendLine($"Size: {mdContent.Length:N0} chars, ~{wordCount:N0} words");
+
+                if (parseResult.SavedImagePaths.Count > 0)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine($"Extracted images ({parseResult.SavedImagePaths.Count}):");
+                    foreach (var imgPath in parseResult.SavedImagePaths)
+                        sb.AppendLine($"[IMAGE_PATH:{imgPath}]");
+                    sb.AppendLine();
+                    sb.AppendLine("To build a comprehensive document: analyze each image above with your vision capability, ");
+                    sb.AppendLine("then read the Markdown file and integrate the image descriptions into the final output.");
+                }
+
+                sb.AppendLine();
+                sb.AppendLine($"Preview:");
+                sb.Append(preview);
+                return sb.ToString();
             }
             catch (Exception ex)
             {
@@ -127,6 +151,8 @@ public sealed class MinerUPdfTool : ITool, IDisposable
             : mdContent;
         return $"Note: Write access not allowed for '{mdPath}'. Returning Markdown content directly:\n\n{truncated}";
     }
+
+    private readonly record struct MinerUParseResult(string Markdown, IReadOnlyList<string> SavedImagePaths);
 
     /// <summary>
     /// Resolves the PDF path with fallback search in the media-cache directory.
@@ -199,7 +225,7 @@ public sealed class MinerUPdfTool : ITool, IDisposable
         return null;
     }
 
-    private async Task<string> CallMinerUAsync(string pdfPath, CancellationToken ct)
+    private async Task<MinerUParseResult> CallMinerUAsync(string pdfPath, string imagesDir, CancellationToken ct)
     {
         var endpoint = $"{_config.Url.TrimEnd('/')}/file_parse";
 
@@ -214,6 +240,10 @@ public sealed class MinerUPdfTool : ITool, IDisposable
         // Common parameters
         form.Add(new StringContent(_config.Backend), "backend");
         form.Add(new StringContent("true"),          "return_md");      // request markdown output
+
+        // Optionally request extracted images as base64 in the response
+        if (_config.ExtractImages)
+            form.Add(new StringContent("true"), "return_images");
 
         // Language list — API expects "lang_list" (repeatable form field, treated as array)
         var lang = string.IsNullOrWhiteSpace(_config.Lang) ? "ch" : _config.Lang;
@@ -246,12 +276,114 @@ public sealed class MinerUPdfTool : ITool, IDisposable
 
         using var result = JsonDocument.Parse(json);
 
-        if (TryExtractMarkdown(result.RootElement, out var markdown))
-            return markdown;
+        if (!TryExtractMarkdown(result.RootElement, out var markdown))
+            throw new InvalidOperationException(
+                $"MinerU response did not contain 'md_content' or 'md' field. Keys present: " +
+                string.Join(", ", result.RootElement.EnumerateObject().Select(p => p.Name)));
 
-        throw new InvalidOperationException(
-            $"MinerU response did not contain 'md_content' or 'md' field. Keys present: " +
-            string.Join(", ", result.RootElement.EnumerateObject().Select(p => p.Name)));
+        // Extract and save images if enabled
+        IReadOnlyList<string> savedImages = [];
+        if (_config.ExtractImages)
+        {
+            var base64Images = ExtractImagesFromResponse(result.RootElement);
+            if (base64Images.Count > 0)
+            {
+                savedImages = await SaveImagesAsync(base64Images, imagesDir, ct);
+                // Rewrite relative image refs in Markdown to absolute paths
+                markdown = RewriteMarkdownImagePaths(markdown, imagesDir);
+            }
+        }
+
+        return new MinerUParseResult(markdown, savedImages);
+    }
+
+    /// <summary>
+    /// Walks the JSON response and collects all image name → base64-data-URI pairs.
+    /// Handles both flat { "images": {...} } and nested { "results": { "id": { "images": {...} } } } forms.
+    /// </summary>
+    private static Dictionary<string, string> ExtractImagesFromResponse(JsonElement element)
+    {
+        var collected = new Dictionary<string, string>(StringComparer.Ordinal);
+        CollectImages(element, collected);
+        return collected;
+    }
+
+    private static void CollectImages(JsonElement element, Dictionary<string, string> collected)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            if (element.TryGetProperty("images", out var imagesEl) && imagesEl.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var prop in imagesEl.EnumerateObject())
+                {
+                    if (prop.Value.ValueKind == JsonValueKind.String)
+                        collected.TryAdd(prop.Name, prop.Value.GetString()!);
+                }
+            }
+
+            foreach (var prop in element.EnumerateObject())
+                CollectImages(prop.Value, collected);
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+                CollectImages(item, collected);
+        }
+    }
+
+    /// <summary>
+    /// Saves base64-encoded images to <paramref name="imagesDir"/> and returns their absolute paths.
+    /// </summary>
+    private static async Task<IReadOnlyList<string>> SaveImagesAsync(
+        Dictionary<string, string> base64Images, string imagesDir, CancellationToken ct)
+    {
+        Directory.CreateDirectory(imagesDir);
+        var paths = new List<string>(base64Images.Count);
+
+        foreach (var (name, dataUri) in base64Images)
+        {
+            try
+            {
+                // Strip data URI prefix: "data:image/png;base64,"
+                var base64 = dataUri.Contains(',') ? dataUri[(dataUri.IndexOf(',') + 1)..] : dataUri;
+                var bytes = Convert.FromBase64String(base64);
+
+                // Sanitize filename — keep only safe characters
+                var safeName = Regex.Replace(name, @"[^\w.\-]", "_");
+                var destPath = Path.Combine(imagesDir, safeName);
+
+                await File.WriteAllBytesAsync(destPath, bytes, ct);
+                paths.Add(destPath);
+            }
+            catch
+            {
+                // Skip images that cannot be decoded — don't fail the whole parse
+            }
+        }
+
+        return paths;
+    }
+
+    /// <summary>
+    /// Rewrites relative Markdown image references to absolute paths inside <paramref name="imagesDir"/>.
+    /// E.g. <c>![](images/fig-001.png)</c> → <c>![](C:\...\images\fig-001.png)</c>
+    /// </summary>
+    private static string RewriteMarkdownImagePaths(string markdown, string imagesDir)
+    {
+        // Match ![alt](path) where path does not start with http or /
+        return Regex.Replace(
+            markdown,
+            @"(!\[[^\]]*\]\()(?!https?://|/)([^)]+)(\))",
+            m =>
+            {
+                var rawPath = m.Groups[2].Value.Trim();
+                // Resolve relative path against imagesDir
+                var fileName = Path.GetFileName(rawPath);
+                var candidate = Path.Combine(imagesDir, fileName);
+                var resolvedPath = File.Exists(candidate) ? candidate : Path.Combine(imagesDir, rawPath);
+                return $"{m.Groups[1].Value}{resolvedPath}{m.Groups[3].Value}";
+            },
+            RegexOptions.None);
     }
 
     private static bool TryExtractMarkdown(JsonElement element, out string markdown)
