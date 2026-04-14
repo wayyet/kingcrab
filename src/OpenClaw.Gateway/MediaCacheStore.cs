@@ -28,7 +28,7 @@ internal sealed class MediaCacheStore
         {
             Id = id,
             MediaType = mediaType,
-            FileName = Path.GetFileName(assetPath),
+            FileName = !string.IsNullOrWhiteSpace(fileName) ? fileName : Path.GetFileName(assetPath),
             Path = assetPath,
             SizeBytes = data.Length,
             CreatedAtUtc = DateTimeOffset.UtcNow

@@ -35,7 +35,7 @@ internal sealed class ToolPresetResolver : IToolPresetResolver
         "shell", "read_file", "write_file", "edit_file", "apply_patch", "process", "git",
         "code_exec", "browser", "memory", "memory_search", "memory_get", "project_memory",
         "sessions", "session_search", "session_status", "delegate_agent",
-        "web_search", "web_fetch", "pdf_read", "image_gen", "vision_analyze"
+        "web_search", "web_fetch", "pdf_parse", "image_analyze"
     ];
 
     private static readonly string[] MessagingPresetAllow =

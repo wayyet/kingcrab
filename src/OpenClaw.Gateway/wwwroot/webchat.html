@@ -783,6 +783,37 @@
         }
         .preview-thumb-remove:hover { background: rgba(239, 68, 68, 0.9); }
 
+        .preview-thumb-file {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 64px;
+            min-width: 80px;
+            max-width: 120px;
+            padding: 0 20px 0 6px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: var(--surface);
+            font-size: 11px;
+            color: var(--text-secondary);
+            overflow: hidden;
+            flex-shrink: 0;
+            gap: 3px;
+        }
+        .preview-thumb-file .file-icon { font-size: 18px; line-height: 1; }
+        .preview-thumb-file .file-name {
+            max-width: 90px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            text-align: center;
+        }
+        .preview-thumb-file .file-size { font-size: 10px; opacity: 0.7; }
+        .preview-thumb-file.uploading { opacity: 0.6; }
+        .preview-thumb-file.upload-error { border-color: rgba(239, 68, 68, 0.6); }
+
         /* Scrollbar Styling */
         ::-webkit-scrollbar {
             width: 8px;
@@ -1157,8 +1188,8 @@
             <div id="input-wrapper">
                 <div id="image-preview-strip"></div>
                 <div id="input-container">
-                    <input type="file" id="file-input" accept="image/*" multiple style="display:none">
-                    <button id="attach-btn" disabled title="Attach images">
+                    <input type="file" id="file-input" accept="*/*" multiple style="display:none">
+                    <button id="attach-btn" disabled title="Attach images or files">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
                     </button>
                     <textarea id="message-input" rows="1" placeholder="Message King Crab..." disabled></textarea>
@@ -1208,8 +1239,8 @@
 
         const OIDC_CONFIG = {
             enabled: true,
-            //authority: 'http://test-passport.zyagi.cn:1080/realms/ai4cbrain',
-            authority: 'http://localhost:8080/realms/ai4cbrain', // local-keycloak
+            authority: 'http://test-passport.zyagi.cn:1080/realms/ai4cbrain',
+            //authority: 'http://localhost:8080/realms/ai4cbrain', // local-keycloak
             clientId: 'king-crab',
             scope: 'openid profile email'
         };
@@ -1225,7 +1256,10 @@
         let sidebarVisible = true;
         let sessionSearchTimer = null;
         let liveChatNodes = []; // snapshot of live chat nodes
-        let pendingImages = []; // { name, dataUri, mimeType }
+        // pendingAttachments item shapes:
+        //   image:  { type:'image', name, dataUri, mimeType }
+        //   file:   { type:'file',  name, mimeType, sizeBytes, mediaUrl, uploading, uploadError }
+        let pendingImages = [];
 
         const WEBCHAT_CONFIG = {
             streamRenderDebounceMs: Math.max(20, Number(window.OPENCLAW_WEBCHAT_CONFIG?.streamRenderDebounceMs ?? 120)),
@@ -1713,6 +1747,16 @@
             });
         }
 
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return `${bytes} B`;
+            if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+            return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+        }
+
+        function hasUploadingAttachments() {
+            return pendingImages.some(a => a.type === 'file' && a.uploading);
+        }
+
         function renderImagePreviews() {
             imagePreviewStrip.innerHTML = '';
             if (pendingImages.length === 0) {
@@ -1720,12 +1764,7 @@
                 return;
             }
             imagePreviewStrip.style.display = 'flex';
-            pendingImages.forEach((img, i) => {
-                const thumb = document.createElement('div');
-                thumb.className = 'preview-thumb';
-                const imgEl = document.createElement('img');
-                imgEl.src = img.dataUri;
-                imgEl.alt = img.name;
+            pendingImages.forEach((item, i) => {
                 const removeBtn = document.createElement('button');
                 removeBtn.className = 'preview-thumb-remove';
                 removeBtn.textContent = '×';
@@ -1735,9 +1774,37 @@
                     pendingImages.splice(i, 1);
                     renderImagePreviews();
                 });
-                thumb.appendChild(imgEl);
-                thumb.appendChild(removeBtn);
-                imagePreviewStrip.appendChild(thumb);
+
+                if (item.type === 'image') {
+                    const thumb = document.createElement('div');
+                    thumb.className = 'preview-thumb';
+                    const imgEl = document.createElement('img');
+                    imgEl.src = item.dataUri;
+                    imgEl.alt = item.name;
+                    thumb.appendChild(imgEl);
+                    thumb.appendChild(removeBtn);
+                    imagePreviewStrip.appendChild(thumb);
+                } else {
+                    const chip = document.createElement('div');
+                    chip.className = 'preview-thumb-file' +
+                        (item.uploading ? ' uploading' : '') +
+                        (item.uploadError ? ' upload-error' : '');
+                    const icon = document.createElement('span');
+                    icon.className = 'file-icon';
+                    icon.textContent = item.uploading ? '⏳' : (item.uploadError ? '⚠️' : '📄');
+                    const nameEl = document.createElement('span');
+                    nameEl.className = 'file-name';
+                    nameEl.textContent = item.name;
+                    nameEl.title = item.uploadError || item.name;
+                    const sizeEl = document.createElement('span');
+                    sizeEl.className = 'file-size';
+                    sizeEl.textContent = item.uploading ? 'Uploading…' : (item.uploadError ? 'Error' : formatFileSize(item.sizeBytes));
+                    chip.appendChild(icon);
+                    chip.appendChild(nameEl);
+                    chip.appendChild(sizeEl);
+                    chip.appendChild(removeBtn);
+                    imagePreviewStrip.appendChild(chip);
+                }
             });
         }
 
@@ -1789,16 +1856,45 @@
             for (const file of files) {
                 // Determine MIME type; fall back to extension map if file.type is empty.
                 let mimeType = file.type;
-                if (!mimeType || !mimeType.startsWith('image/')) {
+                if (!mimeType) {
                     const ext = file.name.split('.').pop()?.toLowerCase() || '';
-                    mimeType = IMAGE_MIME_BY_EXT[ext] || '';
+                    mimeType = IMAGE_MIME_BY_EXT[ext] || 'application/octet-stream';
                 }
-                if (!mimeType.startsWith('image/')) continue;
 
-                const rawDataUri = await readFileAsDataUrl(file);
-                // Compress large images so they fit within the WebSocket message limit.
-                const dataUri = await compressImageIfNeeded(file, rawDataUri);
-                pendingImages.push({ name: file.name, dataUri, mimeType });
+                if (mimeType.startsWith('image/')) {
+                    // Images: compress and send inline as base64 data URI via WebSocket.
+                    const rawDataUri = await readFileAsDataUrl(file);
+                    const dataUri = await compressImageIfNeeded(file, rawDataUri);
+                    pendingImages.push({ type: 'image', name: file.name, dataUri, mimeType });
+                } else {
+                    // Non-image files: upload via HTTP to /media/upload, then reference by URL.
+                    const placeholder = { type: 'file', name: file.name, mimeType, sizeBytes: file.size, uploading: true, uploadError: null, mediaUrl: null };
+                    pendingImages.push(placeholder);
+                    renderImagePreviews();
+
+                    (async () => {
+                        try {
+                            const headers = await getAuthHeaders();
+                            const formData = new FormData();
+                            formData.append('file', file);
+                            const resp = await fetch('/media/upload', { method: 'POST', headers, body: formData });
+                            if (!resp.ok) {
+                                const err = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
+                                placeholder.uploadError = err.error || `Upload failed (${resp.status})`;
+                            } else {
+                                const data = await resp.json();
+                                placeholder.mediaUrl = data.url;
+                                placeholder.sizeBytes = data.sizeBytes;
+                            }
+                        } catch (e) {
+                            placeholder.uploadError = e.message || 'Upload failed';
+                        } finally {
+                            placeholder.uploading = false;
+                            renderImagePreviews();
+                        }
+                    })();
+                    continue;
+                }
             }
             renderImagePreviews();
         });
@@ -1813,8 +1909,23 @@
             if (!text && !hasImages) return;
             if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
-            // Prepend [IMAGE_URL:data:...] markers so MafAgentRuntime can inject them as vision content
-            const markers = pendingImages.map(img => `[IMAGE_URL:${img.dataUri}]`).join('\n');
+            // Check for pending uploads.
+            if (hasUploadingAttachments()) {
+                appendSystem('Some files are still uploading. Please wait a moment and try again.', false);
+                return;
+            }
+            // Reject attachments with upload errors.
+            const erroredFiles = pendingImages.filter(a => a.type === 'file' && a.uploadError);
+            if (erroredFiles.length > 0) {
+                appendSystem(`Upload failed for: ${erroredFiles.map(f => f.name).join(', ')}. Remove them and try again.`, true);
+                return;
+            }
+
+            // Build [IMAGE_URL:...] markers for inline images and [FILE_URL:...] for uploaded files.
+            const markers = pendingImages.map(item => {
+                if (item.type === 'image') return `[IMAGE_URL:${item.dataUri}]`;
+                return `[FILE_URL:${item.mediaUrl}]\nAttached file: ${item.name} (${formatFileSize(item.sizeBytes)})`;
+            }).join('\n');
             const fullText = markers ? (markers + (text ? '\n' + text : '')) : text;
 
             // Preflight: abort if the serialised payload would exceed the server limit.
@@ -1828,18 +1939,26 @@
                 return;
             }
 
-            // Render user bubble: thumbnails + text
+            // Render user bubble: thumbnails + file chips + text
             const row = createRow('user');
             const div = document.createElement('div');
             div.className = 'message user';
             if (hasImages) {
                 const thumbsWrap = document.createElement('div');
-                thumbsWrap.style.cssText = `display:flex;flex-wrap:wrap;gap:6px;margin-bottom:${text ? '8px' : '0'}`;
-                pendingImages.forEach(img => {
-                    const imgEl = document.createElement('img');
-                    imgEl.src = img.dataUri;
-                    imgEl.style.cssText = 'width:72px;height:72px;object-fit:cover;border-radius:8px;';
-                    thumbsWrap.appendChild(imgEl);
+                thumbsWrap.style.cssText = `display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:${text ? '8px' : '0'}`;
+                pendingImages.forEach(item => {
+                    if (item.type === 'image') {
+                        const imgEl = document.createElement('img');
+                        imgEl.src = item.dataUri;
+                        imgEl.style.cssText = 'width:72px;height:72px;object-fit:cover;border-radius:8px;';
+                        thumbsWrap.appendChild(imgEl);
+                    } else {
+                        const chip = document.createElement('span');
+                        chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,0.1);font-size:12px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+                        chip.textContent = `📄 ${item.name}`;
+                        chip.title = `${item.name} (${formatFileSize(item.sizeBytes)})`;
+                        thumbsWrap.appendChild(chip);
+                    }
                 });
                 div.appendChild(thumbsWrap);
             }
