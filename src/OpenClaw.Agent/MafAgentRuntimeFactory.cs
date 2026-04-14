@@ -64,7 +64,11 @@ public sealed class MafAgentRuntimeFactory : IAgentRuntimeFactory
             RequireToolApproval = context.RequireToolApproval,
             ApprovalRequiredTools = context.ApprovalRequiredTools,
             ToolSandbox = context.ToolSandbox,
-            ToolUsageTracker = context.ToolUsageTracker
+            ToolUsageTracker = context.ToolUsageTracker,
+            IsContractTokenBudgetExceeded = context.IsContractTokenBudgetExceeded,
+            IsContractRuntimeBudgetExceeded = context.IsContractRuntimeBudgetExceeded,
+            RecordContractTurnUsage = context.RecordContractTurnUsage,
+            AppendContractSnapshot = context.AppendContractSnapshot
         });
 
     private static GatewayConfig CreateDelegatedConfig(
@@ -106,6 +110,7 @@ public sealed class MafAgentRuntimeFactory : IAgentRuntimeFactory
             MaxConcurrentSessions = config.MaxConcurrentSessions,
             SessionTimeoutMinutes = config.SessionTimeoutMinutes,
             SessionTokenBudget = config.SessionTokenBudget,
+            EnableEstimatedTokenAdmissionControl = config.EnableEstimatedTokenAdmissionControl,
             SessionRateLimitPerMinute = config.SessionRateLimitPerMinute,
             GracefulShutdownSeconds = config.GracefulShutdownSeconds,
             TokenCostRates = config.TokenCostRates
@@ -150,7 +155,11 @@ public sealed class MafAgentRuntimeFactory : IAgentRuntimeFactory
             RequireToolApproval = context.RequireToolApproval,
             ApprovalRequiredTools = context.ApprovalRequiredTools,
             ToolSandbox = context.ToolSandbox,
-            ToolUsageTracker = context.ToolUsageTracker
+            ToolUsageTracker = context.ToolUsageTracker,
+            IsContractTokenBudgetExceeded = context.IsContractTokenBudgetExceeded,
+            IsContractRuntimeBudgetExceeded = context.IsContractRuntimeBudgetExceeded,
+            RecordContractTurnUsage = context.RecordContractTurnUsage,
+            AppendContractSnapshot = context.AppendContractSnapshot
         });
     }
 }

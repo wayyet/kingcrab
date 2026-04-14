@@ -88,7 +88,74 @@ internal sealed class GatewayLlmExecutionService : ILlmExecutionService
         _promptCacheWarmRegistry = promptCacheWarmRegistry;
         _logger = logger;
     }
- 
+
+    internal GatewayLlmExecutionService(
+        GatewayConfig config,
+        LlmProviderRegistry registry,
+        ProviderPolicyService policyService,
+        RuntimeEventStore eventStore,
+        RuntimeMetrics runtimeMetrics,
+        ProviderUsageTracker providerUsage,
+        ILogger<GatewayLlmExecutionService> logger)
+        : this(
+            config,
+            registry,
+            policyService,
+            eventStore,
+            runtimeMetrics,
+            providerUsage,
+            new PromptCacheCoordinator(config, new PromptCacheTraceWriter(config)),
+            new PromptCacheWarmRegistry(),
+            logger)
+    {
+    }
+
+    internal GatewayLlmExecutionService(
+        GatewayConfig config,
+        LlmProviderRegistry registry,
+        ProviderPolicyService policyService,
+        RuntimeEventStore eventStore,
+        RuntimeMetrics runtimeMetrics,
+        ProviderUsageTracker providerUsage,
+        PromptCacheCoordinator promptCacheCoordinator,
+        PromptCacheWarmRegistry promptCacheWarmRegistry,
+        ILogger<GatewayLlmExecutionService> logger)
+        : this(
+            config,
+            CreateCompatibilityServices(config, registry),
+            policyService,
+            eventStore,
+            runtimeMetrics,
+            providerUsage,
+            promptCacheCoordinator,
+            promptCacheWarmRegistry,
+            logger)
+    {
+    }
+
+    private GatewayLlmExecutionService(
+        GatewayConfig config,
+        CompatibilityServices compatibility,
+        ProviderPolicyService policyService,
+        RuntimeEventStore eventStore,
+        RuntimeMetrics runtimeMetrics,
+        ProviderUsageTracker providerUsage,
+        PromptCacheCoordinator promptCacheCoordinator,
+        PromptCacheWarmRegistry promptCacheWarmRegistry,
+        ILogger<GatewayLlmExecutionService> logger)
+        : this(
+            config,
+            compatibility.Registry,
+            compatibility.SelectionPolicy,
+            policyService,
+            eventStore,
+            runtimeMetrics,
+            providerUsage,
+            promptCacheCoordinator,
+            promptCacheWarmRegistry,
+            logger)
+    {
+    }
 
     public CircuitState DefaultCircuitState
     {
