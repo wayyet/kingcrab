@@ -45,10 +45,11 @@ internal static class GatewayWorkers
         RuntimeMetrics? runtimeMetrics = null,
         LearningService? learningService = null,
         GatewayAutomationService? automationService = null,
-        ContractGovernanceService? contractGovernance = null)
+        ContractGovernanceService? contractGovernance = null,
+        MediaCacheStore? mediaCache = null)
     {
         StartSessionCleanup(lifetime, logger, sessionManager, sessionLocks, lockLastUsed);
-        StartInboundWorkers(lifetime, logger, workerCount, isNonLoopbackBind, sessionManager, sessionLocks, lockLastUsed, pipeline, middlewarePipeline, wsChannel, agentRuntime, channelAdapters, config, cronScheduler, heartbeatService, toolApprovalService, approvalAuditStore, pairingManager, commandProcessor, operations, runtimeMetrics, learningService, automationService, contractGovernance);
+        StartInboundWorkers(lifetime, logger, workerCount, isNonLoopbackBind, sessionManager, sessionLocks, lockLastUsed, pipeline, middlewarePipeline, wsChannel, agentRuntime, channelAdapters, config, cronScheduler, heartbeatService, toolApprovalService, approvalAuditStore, pairingManager, commandProcessor, operations, runtimeMetrics, learningService, automationService, contractGovernance, mediaCache);
         StartOutboundWorkers(lifetime, logger, workerCount, pipeline, channelAdapters, heartbeatService);
     }
 
@@ -178,7 +179,8 @@ internal static class GatewayWorkers
         RuntimeMetrics? runtimeMetrics,
         LearningService? learningService,
         GatewayAutomationService? automationService,
-        ContractGovernanceService? contractGovernance)
+        ContractGovernanceService? contractGovernance,
+        MediaCacheStore? mediaCache = null)
     {
         var routeResolver = config.Routing.Enabled
             ? new OpenClaw.Gateway.Integrations.AgentRouteResolver(config.Routing)
@@ -517,6 +519,13 @@ internal static class GatewayWorkers
                                 var marker = BuildMediaMarker(msg);
                                 if (!string.IsNullOrWhiteSpace(marker))
                                     messageText = string.IsNullOrWhiteSpace(messageText) ? marker : $"{marker}\n{messageText}";
+                            }
+
+                            // Resolve [FILE_URL:/media/{id}] markers to [FILE_PATH:{diskPath}] so the
+                            // agent can use read_file directly instead of trying an HTTP path.
+                            if (mediaCache is not null && messageText.Contains("[FILE_URL:/media/", StringComparison.Ordinal))
+                            {
+                                messageText = await ResolveFileUrlMarkersAsync(messageText, mediaCache, processingCt);
                             }
                             var useStreaming = msg.ChannelId == "websocket" && wsChannel.IsClientUsingEnvelopes(msg.SenderId);
 
@@ -1023,4 +1032,58 @@ internal static class GatewayWorkers
             "document" or "file" => $"[FILE_URL:{message.MediaUrl}]",
             _ => null
         };
+
+    // Resolves [FILE_URL:/media/{id}] markers to [FILE_PATH:{diskPath}] so the agent
+    // can read the file directly via the read_file tool.
+    private static async Task<string> ResolveFileUrlMarkersAsync(string text, MediaCacheStore mediaCache, CancellationToken ct)
+    {
+        // Fast path: no relevant markers.
+        if (!text.Contains("[FILE_URL:/media/", StringComparison.Ordinal))
+            return text;
+
+        var result = new System.Text.StringBuilder(text.Length);
+        const string prefix = "[FILE_URL:/media/";
+        var searchFrom = 0;
+
+        while (true)
+        {
+            var startIdx = text.IndexOf(prefix, searchFrom, StringComparison.Ordinal);
+            if (startIdx < 0)
+            {
+                result.Append(text, searchFrom, text.Length - searchFrom);
+                break;
+            }
+
+            result.Append(text, searchFrom, startIdx - searchFrom);
+
+            var closeIdx = text.IndexOf(']', startIdx + prefix.Length);
+            if (closeIdx < 0)
+            {
+                result.Append(text, startIdx, text.Length - startIdx);
+                break;
+            }
+
+            // Extract the media ID: everything between "/media/" and "]"
+            var mediaId = text.Substring(startIdx + prefix.Length, closeIdx - (startIdx + prefix.Length));
+
+            // Only resolve IDs that look like our generated ones (no path separators).
+            if (!mediaId.Contains('/') && !mediaId.Contains('\\') && !mediaId.Contains('.'))
+            {
+                var asset = await mediaCache.GetAsync(mediaId, ct);
+                if (asset is not null && File.Exists(asset.Path))
+                {
+                    result.Append($"[FILE_PATH:{asset.Path}]");
+                    searchFrom = closeIdx + 1;
+                    continue;
+                }
+            }
+
+            // Leave unchanged if not resolvable.
+            result.Append(text, startIdx, closeIdx + 1 - startIdx);
+            searchFrom = closeIdx + 1;
+        }
+
+        return result.ToString();
+    }
 }
+
