@@ -88,13 +88,18 @@ public sealed class MinerUPdfTool : ITool, IDisposable
             ? outputPath
             : Path.ChangeExtension(fullPath, ".md");
 
-        var imagesDir = Path.Combine(Path.GetDirectoryName(mdPath)!, "images");
+        var imagesDir = Path.Combine(
+            Path.GetDirectoryName(mdPath)!,
+            "images",
+            Path.GetFileNameWithoutExtension(fullPath));  // per-PDF subdirectory
+
+        var mdDir = Path.GetDirectoryName(mdPath)!;
 
         // Call MinerU FastAPI
         MinerUParseResult parseResult;
         try
         {
-            parseResult = await CallMinerUAsync(fullPath, imagesDir, ct);
+            parseResult = await CallMinerUAsync(fullPath, imagesDir, mdDir, ct);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -225,7 +230,7 @@ public sealed class MinerUPdfTool : ITool, IDisposable
         return null;
     }
 
-    private async Task<MinerUParseResult> CallMinerUAsync(string pdfPath, string imagesDir, CancellationToken ct)
+    private async Task<MinerUParseResult> CallMinerUAsync(string pdfPath, string imagesDir, string mdDir, CancellationToken ct)
     {
         var endpoint = $"{_config.Url.TrimEnd('/')}/file_parse";
 
@@ -289,8 +294,8 @@ public sealed class MinerUPdfTool : ITool, IDisposable
             if (base64Images.Count > 0)
             {
                 savedImages = await SaveImagesAsync(base64Images, imagesDir, ct);
-                // Rewrite relative image refs in Markdown to absolute paths
-                markdown = RewriteMarkdownImagePaths(markdown, imagesDir);
+                // Rewrite image refs in Markdown to paths relative to the md file
+                markdown = RewriteMarkdownImagePaths(markdown, imagesDir, mdDir);
             }
         }
 
@@ -365,22 +370,28 @@ public sealed class MinerUPdfTool : ITool, IDisposable
     }
 
     /// <summary>
-    /// Rewrites relative Markdown image references to absolute paths inside <paramref name="imagesDir"/>.
-    /// E.g. <c>![](images/fig-001.png)</c> → <c>![](C:\...\images\fig-001.png)</c>
+    /// Rewrites relative Markdown image references to paths relative to <paramref name="mdDir"/>.
+    /// Relative paths work in VS Code preview and are portable across machines.
+    /// E.g. <c>![](images/fig-001.png)</c> → <c>![](images/media_xxx/fig-001.png)</c>
     /// </summary>
-    private static string RewriteMarkdownImagePaths(string markdown, string imagesDir)
+    private static string RewriteMarkdownImagePaths(string markdown, string imagesDir, string mdDir)
     {
-        // Match ![alt](path) where path does not start with http or /
+        // Match ![alt](path) where path does not start with http or data:
         return Regex.Replace(
             markdown,
-            @"(!\[[^\]]*\]\()(?!https?://|/)([^)]+)(\))",
+            @"(!\[[^\]]*\]\()(?!https?://|data:)([^)]+)(\))",
             m =>
             {
-                var rawPath = m.Groups[2].Value.Trim();
-                // Resolve relative path against imagesDir
+                // Strip any embedded whitespace MinerU may have added to long paths
+                var rawPath = Regex.Replace(m.Groups[2].Value, @"\s+", "").Trim();
+                // Apply the same sanitization SaveImagesAsync used when saving to disk
                 var fileName = Path.GetFileName(rawPath);
-                var candidate = Path.Combine(imagesDir, fileName);
-                var resolvedPath = File.Exists(candidate) ? candidate : Path.Combine(imagesDir, rawPath);
+                var safeFileName = Regex.Replace(fileName, @"[^\w.\-]", "_");
+                var candidate = Path.Combine(imagesDir, safeFileName);
+                // Prefer a relative path so Markdown renders in VS Code and is portable
+                var resolvedPath = File.Exists(candidate)
+                    ? Path.GetRelativePath(mdDir, candidate).Replace('\\', '/')
+                    : Path.GetRelativePath(mdDir, Path.Combine(imagesDir, rawPath)).Replace('\\', '/');
                 return $"{m.Groups[1].Value}{resolvedPath}{m.Groups[3].Value}";
             },
             RegexOptions.None);
