@@ -1436,13 +1436,44 @@
                 const mFileUrl = trimmed.match(/^\[FILE_URL:(.+)\]$/);
                 if (mFileUrl) {
                     const url = mFileUrl[1].trim();
-                    out.push(`[file](${url})`);
+                    const name = url.split('/').pop() || 'file';
+                    out.push(`[⬇ ${name}](${url})`);
+                    continue;
+                }
+                // Strip raw FILE_PATH markers – they are internal and should not be shown.
+                if (/^\[FILE_PATH:.+\]$/.test(trimmed)) {
                     continue;
                 }
                 out.push(line);
             }
             return out.join('\n');
         }
+
+        // Intercept clicks on /media/ links rendered inside chat messages.
+        // Browser navigation strips auth headers, so we fetch with Bearer and serve via blob URL.
+        chatContainer.addEventListener('click', async (e) => {
+            const anchor = e.target.closest('a[href]');
+            if (!anchor) return;
+            const href = anchor.getAttribute('href');
+            if (!href || !href.includes('/media/')) return;
+            e.preventDefault();
+            try {
+                const headers = await getAuthHeaders();
+                const resp = await fetch(href, { headers });
+                if (!resp.ok) { alert('Download failed: ' + resp.status); return; }
+                const blob = await resp.blob();
+                const blobUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = blobUrl;
+                a.download = anchor.textContent.replace(/^[⬇\s]+/, '').trim() || href.split('/').pop() || 'file';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+            } catch (err) {
+                alert('Download error: ' + err.message);
+            }
+        });
 
         function appendAssistantMarkdown(md) {
             const row = createRow('assistant');
@@ -1670,6 +1701,44 @@
 
                         case 'tool_result':
                             break;
+
+                        case 'file_attachment': {
+                            const fileUrl = env.fileUrl || '';
+                            const fileName = env.fileName || env.text || 'file';
+                            const mimeType = env.mimeType || '';
+                            const sizeBytes = env.fileSizeBytes;
+                            const sizeLabel = sizeBytes != null
+                                ? (sizeBytes < 1024 ? sizeBytes + ' B'
+                                    : sizeBytes < 1048576 ? (sizeBytes / 1024).toFixed(1) + ' KB'
+                                    : (sizeBytes / 1048576).toFixed(1) + ' MB')
+                                : '';
+                            const row = createRow('assistant');
+                            const card = document.createElement('div');
+                            card.className = 'message assistant';
+                            card.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 14px;';
+                            const icon = document.createElement('span');
+                            icon.textContent = '📎';
+                            icon.style.fontSize = '1.4em';
+                            const info = document.createElement('div');
+                            info.style.flex = '1';
+                            const link = document.createElement('a');
+                            link.href = fileUrl; // delegated handler on chatContainer intercepts this
+                            link.textContent = fileName;
+                            link.style.cssText = 'font-weight:600;word-break:break-all;';
+                            info.appendChild(link);
+                            if (sizeLabel) {
+                                const meta = document.createElement('div');
+                                meta.textContent = sizeLabel + (mimeType ? ' · ' + mimeType : '');
+                                meta.style.cssText = 'font-size:0.8em;opacity:0.65;margin-top:2px;';
+                                info.appendChild(meta);
+                            }
+                            card.appendChild(icon);
+                            card.appendChild(info);
+                            row.appendChild(card);
+                            chatContainer.insertBefore(row, typingRow);
+                            scrollToBottom();
+                            break;
+                        }
 
                         case 'tool_approval_required': {
                             const toolName = env.toolName || 'unknown';
