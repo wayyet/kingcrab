@@ -530,7 +530,6 @@ internal static class RuntimeInitializationExtensions
 
             // Communication & data tools
             new MessageTool(services.Pipeline),
-            new XSearchTool(),
             new MemoryGetTool(services.MemoryStore),
             new ProfileWriteTool(services.UserProfileStore),
             new SessionsYieldTool(services.SessionManager, services.Pipeline, services.MemoryStore),
@@ -538,6 +537,9 @@ internal static class RuntimeInitializationExtensions
 
         if (config.Tooling.EnableBrowserTool)
             tools.Add(new BrowserTool(config.Tooling, services.RuntimeMetrics));
+
+        if (config.Tooling.EnableXSearch)
+            tools.Add(new XSearchTool());
 
         if (string.Equals(Environment.GetEnvironmentVariable("OPENCLAW_ENABLE_STREAMING_SMOKE_TOOL"), "1", StringComparison.Ordinal))
             tools.Add(new StreamingSmokeEchoTool());

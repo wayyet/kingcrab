@@ -353,6 +353,7 @@ public sealed class ToolingConfig
     public int ToolApprovalTimeoutSeconds { get; set; } = 300;
 
     public bool EnableBrowserTool { get; set; } = true;
+    public bool EnableXSearch { get; set; } = true;
     public bool AllowBrowserEvaluate { get; set; } = true;
     public bool BrowserHeadless { get; set; } = true;
     public int BrowserTimeoutSeconds { get; set; } = 30;
