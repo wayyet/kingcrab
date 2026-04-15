@@ -642,6 +642,7 @@ internal static class GatewayWorkers
                                 await wsChannel.SendStreamEventAsync(msg.SenderId, "typing_start", "", msg.MessageId, processingCt);
 
                                 AgentStreamEvent? doneEvent = null;
+                                var streamHistoryCountBefore = session.History.Count;
                                 await foreach (var evt in agentRuntime.RunStreamingAsync(
                                     session, messageText, processingCt, approvalCallback: ApprovalCallback))
                                 {
@@ -655,6 +656,35 @@ internal static class GatewayWorkers
                                         msg.SenderId, evt.EnvelopeType, evt.Content, msg.MessageId,
                                         processingCt);
                                 }
+
+                                // Upload files written by write_file by scanning history (same as non-streaming path).
+                                var streamFileUploads = new List<StoredMediaAsset>();
+                                if (mediaCache is not null)
+                                {
+                                    for (var hi = streamHistoryCountBefore; hi < session.History.Count; hi++)
+                                    {
+                                        var hturn = session.History[hi];
+                                        if (hturn.ToolCalls is null) continue;
+                                        foreach (var call in hturn.ToolCalls)
+                                        {
+                                            if (call.Result is null || !call.Result.Contains("[FILE_PATH:", StringComparison.Ordinal))
+                                                continue;
+                                            var (fileMarkers, _) = MediaMarkerProtocol.Extract(call.Result);
+                                            foreach (var marker in fileMarkers.Where(m => m.Kind == MediaMarkerKind.FilePath))
+                                            {
+                                                var fileAsset = await TryUploadFilePathAsync(marker.Value, config, mediaCache, processingCt);
+                                                if (fileAsset is not null)
+                                                    streamFileUploads.Add(fileAsset);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Inject FILE_URL markers into the last assistant ChatTurn BEFORE persisting
+                                // so that history replays show download links via preprocessMediaMarkers.
+                                if (streamFileUploads.Count > 0)
+                                    InjectFileUrlMarkersIntoHistory(session, streamFileUploads);
+
                                 await sessionManager.PersistAsync(session, processingCt, sessionLockHeld: true);
                                 if (learningService is not null)
                                     await learningService.ObserveSessionAsync(session, processingCt);
@@ -687,6 +717,21 @@ internal static class GatewayWorkers
                                         processingCt);
                                 }
 
+                                // Deliver file_attachment envelopes for files written during this turn.
+                                foreach (var fileAsset in streamFileUploads)
+                                {
+                                    await wsChannel.SendEnvelopeAsync(msg.SenderId, new WsServerEnvelope
+                                    {
+                                        Type = "file_attachment",
+                                        Text = fileAsset.FileName,
+                                        FileUrl = $"/media/{fileAsset.Id}",
+                                        FileName = fileAsset.FileName,
+                                        MimeType = fileAsset.MediaType,
+                                        FileSizeBytes = fileAsset.SizeBytes,
+                                        InReplyToMessageId = msg.MessageId
+                                    }, processingCt);
+                                }
+
                                 await wsChannel.SendStreamEventAsync(msg.SenderId, "typing_stop", "", msg.MessageId, processingCt);
                             }
                             else
@@ -715,7 +760,40 @@ internal static class GatewayWorkers
                                     bridgedTypingStarted = true;
                                 }
 
+                                var historyCountBefore = session.History.Count;
                                 var responseText = await agentRuntime.RunAsync(session, messageText, processingCt, approvalCallback: ApprovalCallback);
+
+                                // Upload files from write_file tool results and build asset list BEFORE persisting,
+                                // so FILE_URL markers are injected into history for replay.
+                                var nonStreamFileUploads = new List<StoredMediaAsset>();
+                                if (mediaCache is not null)
+                                {
+                                    for (var hi = historyCountBefore; hi < session.History.Count; hi++)
+                                    {
+                                        var hturn = session.History[hi];
+                                        if (hturn.ToolCalls is null) continue;
+                                        foreach (var call in hturn.ToolCalls)
+                                        {
+                                            if (call.Result is null || !call.Result.Contains("[FILE_PATH:", StringComparison.Ordinal))
+                                                continue;
+                                            var (fileMarkers, _) = MediaMarkerProtocol.Extract(call.Result);
+                                            foreach (var marker in fileMarkers.Where(m => m.Kind == MediaMarkerKind.FilePath))
+                                            {
+                                                var fileAsset = await TryUploadFilePathAsync(marker.Value, config, mediaCache, processingCt);
+                                                if (fileAsset is not null)
+                                                    nonStreamFileUploads.Add(fileAsset);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Append FILE_URL markers to history and responseText before persisting.
+                                if (nonStreamFileUploads.Count > 0)
+                                {
+                                    InjectFileUrlMarkersIntoHistory(session, nonStreamFileUploads);
+                                    responseText += BuildFileUrlSuffix(nonStreamFileUploads);
+                                }
+
                                 await sessionManager.PersistAsync(session, processingCt, sessionLockHeld: true);
                                 if (learningService is not null)
                                     await learningService.ObserveSessionAsync(session, processingCt);
@@ -746,6 +824,26 @@ internal static class GatewayWorkers
                                 // Append Usage Tracking string if configured
                                 if (config.UsageFooter is "tokens")
                                     responseText += $"\n\n---\n↑ {session.TotalInputTokens} in / {session.TotalOutputTokens} out tokens";
+
+                                // Deliver file_attachment envelopes for files uploaded this turn (WebSocket only).
+                                if (nonStreamFileUploads.Count > 0 &&
+                                    msg.ChannelId == "websocket" &&
+                                    wsChannel.IsClientUsingEnvelopes(msg.SenderId))
+                                {
+                                    foreach (var fileAsset in nonStreamFileUploads)
+                                    {
+                                        await wsChannel.SendEnvelopeAsync(msg.SenderId, new WsServerEnvelope
+                                        {
+                                            Type = "file_attachment",
+                                            Text = fileAsset.FileName,
+                                            FileUrl = $"/media/{fileAsset.Id}",
+                                            FileName = fileAsset.FileName,
+                                            MimeType = fileAsset.MediaType,
+                                            FileSizeBytes = fileAsset.SizeBytes,
+                                            InReplyToMessageId = msg.MessageId
+                                        }, processingCt);
+                                    }
+                                }
 
                                 if (!suppressHeartbeatDelivery)
                                 {
@@ -1084,6 +1182,117 @@ internal static class GatewayWorkers
         }
 
         return result.ToString();
+    }
+
+    // Reads a file from disk (validating it is within an allowed write root) and saves it
+    // to the media cache, returning the stored asset. Returns null if the file does not
+    // exist or the path is not within an allowed write root.
+    private static async Task<StoredMediaAsset?> TryUploadFilePathAsync(
+        string filePath,
+        GatewayConfig config,
+        MediaCacheStore mediaCache,
+        CancellationToken ct)
+    {
+        try
+        {
+            var fullPath = Path.GetFullPath(filePath);
+
+            // Validate the path is within an allowed write root.
+            var roots = config.Tooling.AllowedWriteRoots;
+            if (roots.Length == 0)
+                return null;
+
+            var pathAllowed = roots.Length == 1 && roots[0] == "*";
+            if (!pathAllowed)
+            {
+                foreach (var root in roots)
+                {
+                    if (root == "*")
+                    {
+                        pathAllowed = true;
+                        break;
+                    }
+
+                    var fullRoot = Path.GetFullPath(root);
+                    if (fullPath.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase) &&
+                        (fullPath.Length == fullRoot.Length ||
+                         fullPath[fullRoot.Length] == Path.DirectorySeparatorChar ||
+                         fullPath[fullRoot.Length] == Path.AltDirectorySeparatorChar))
+                    {
+                        pathAllowed = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!pathAllowed || !File.Exists(fullPath))
+                return null;
+
+            var bytes = await File.ReadAllBytesAsync(fullPath, ct);
+            var fileName = Path.GetFileName(fullPath);
+            var mimeType = GuessMimeTypeFromExtension(Path.GetExtension(fullPath));
+            return await mediaCache.SaveAsync(bytes.AsMemory(), mimeType, fileName, ct);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string GuessMimeTypeFromExtension(string extension) =>
+        extension.ToLowerInvariant() switch
+        {
+            ".html" or ".htm" => "text/html",
+            ".css" => "text/css",
+            ".js" => "application/javascript",
+            ".json" => "application/json",
+            ".xml" => "application/xml",
+            ".txt" => "text/plain",
+            ".md" => "text/markdown",
+            ".csv" => "text/csv",
+            ".py" => "text/x-python",
+            ".sh" => "text/x-sh",
+            ".zip" => "application/zip",
+            ".tar" => "application/x-tar",
+            ".gz" => "application/gzip",
+            ".pdf" => "application/pdf",
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".gif" => "image/gif",
+            ".svg" => "image/svg+xml",
+            ".webp" => "image/webp",
+            ".mp3" => "audio/mpeg",
+            ".wav" => "audio/wav",
+            ".mp4" => "video/mp4",
+            _ => "application/octet-stream"
+        };
+
+    // Builds a newline-prefixed block of [FILE_URL:] markers to append to response text.
+    private static string BuildFileUrlSuffix(List<StoredMediaAsset> assets)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var a in assets)
+            sb.Append($"\n[FILE_URL:/media/{a.Id}]");
+        return sb.ToString();
+    }
+
+    // Appends [FILE_URL:] markers to the last assistant ChatTurn in history.
+    // ChatTurn is a record so we replace the entry in History.
+    private static void InjectFileUrlMarkersIntoHistory(Session session, List<StoredMediaAsset> assets)
+    {
+        if (assets.Count == 0) return;
+        for (var i = session.History.Count - 1; i >= 0; i--)
+        {
+            var turn = session.History[i];
+            if (!string.Equals(turn.Role, "assistant", StringComparison.Ordinal))
+                continue;
+            // Skip the [tool_use] placeholder turn — target the text response turn.
+            if (string.Equals(turn.Content, "[tool_use]", StringComparison.Ordinal))
+                continue;
+
+            session.History[i] = turn with { Content = turn.Content + BuildFileUrlSuffix(assets) };
+            return;
+        }
     }
 }
 

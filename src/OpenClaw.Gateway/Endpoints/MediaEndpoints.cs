@@ -73,7 +73,13 @@ internal static class MediaEndpoints
             if (asset is null || !File.Exists(asset.Path))
                 return Results.NotFound();
 
-            ctx.Response.Headers.ContentDisposition = $"inline; filename=\"{Uri.EscapeDataString(asset.FileName)}\"";
+            // Use inline disposition for media types the browser renders natively;
+            // everything else (HTML, code, archives, etc.) uses attachment so the browser downloads instead.
+            var isInline = asset.MediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
+                || asset.MediaType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase)
+                || asset.MediaType.StartsWith("video/", StringComparison.OrdinalIgnoreCase);
+            var disposition = isInline ? "inline" : "attachment";
+            ctx.Response.Headers.ContentDisposition = $"{disposition}; filename=\"{Uri.EscapeDataString(asset.FileName)}\"";
             return Results.File(asset.Path, asset.MediaType, enableRangeProcessing: true);
         });
     }
