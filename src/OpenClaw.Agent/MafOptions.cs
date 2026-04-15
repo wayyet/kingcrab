@@ -19,7 +19,7 @@ public sealed class MafOptions
         set => EnableStreaming = value;
     }
 
-    public bool EnableA2A { get; set; } = false;
+    public bool EnableA2A { get; set; } = true;
 
     public string A2APathPrefix { get; set; } = "/a2a";
 
