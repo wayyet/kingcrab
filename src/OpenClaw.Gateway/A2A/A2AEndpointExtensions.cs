@@ -25,17 +25,12 @@ internal static class A2AEndpointExtensions
         var requestHandler = app.Services.GetRequiredService<IA2ARequestHandler>();
         var cardFactory = app.Services.GetRequiredService<OpenClawAgentCardFactory>();
         var fallbackBaseUrl = ResolvePublicBaseUrl(null, startup, options);
-        var agentCard = cardFactory.Create(BuildAgentUrl(fallbackBaseUrl, pathPrefix));
+        var agentUrl = BuildAgentUrl(fallbackBaseUrl, pathPrefix);
+        var agentCard = cardFactory.Create(agentUrl);
 
         app.MapHttpA2A(requestHandler, agentCard, pathPrefix);
-        app.MapGet(GetWellKnownAgentCardPath(pathPrefix), (HttpContext ctx) =>
-        {
-            var publicBaseUrl = ResolvePublicBaseUrl(ctx, startup, options);
-            return Results.Json(
-                cardFactory.Create(BuildAgentUrl(publicBaseUrl, pathPrefix)),
-                MafJsonContext.Default.AgentCard);
-        });
-        app.Logger.LogInformation("A2A endpoints enabled at {PathPrefix}.", pathPrefix);
+        app.MapWellKnownAgentCard(agentCard, pathPrefix);
+        app.Logger.LogInformation("A2A endpoints enabled at {PathPrefix}.", agentUrl);
     }
 
     public static void UseOpenClawA2AAuth(

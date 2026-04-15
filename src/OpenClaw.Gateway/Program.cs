@@ -35,6 +35,7 @@ builder.Services.AddOpenClawSecurityServices(startup);
 builder.Services.AddOpenClawMcpServices(startup);
 builder.Services.ApplyOpenClawRuntimeProfile(startup);
 builder.Services.AddMicrosoftAgentFramework(builder.Configuration);
+builder.Services.AddOpenClawA2AServices();
 if (builder.Environment.IsDevelopment())
     builder.Services.AddOpenClawDevUI(startup.Config);
 #if OPENCLAW_ENABLE_OPENSANDBOX
