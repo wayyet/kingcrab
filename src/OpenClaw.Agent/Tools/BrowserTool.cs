@@ -35,6 +35,7 @@ public sealed class BrowserTool : ITool, ISandboxCapableTool, IAsyncDisposable
             switch (payload.action) {
               case 'goto': {
                 await page.goto(payload.url, { waitUntil: 'load' });
+                try { await page.waitForLoadState('networkidle', { timeout: 5000 }); } catch {}
                 const title = await page.title();
                 output = `Navigated to ${payload.url}. Title: '${title}'`;
                 break;
@@ -65,6 +66,7 @@ public sealed class BrowserTool : ITool, ISandboxCapableTool, IAsyncDisposable
               }
 
               case 'screenshot': {
+                try { await page.waitForLoadState('networkidle', { timeout: 3000 }); } catch {}
                 const bytes = await page.screenshot({ fullPage: true });
                 output = `Screenshot taken. Base64: ${bytes.toString('base64')}`;
                 break;
@@ -198,6 +200,13 @@ public sealed class BrowserTool : ITool, ISandboxCapableTool, IAsyncDisposable
                     var url = args.RootElement.GetProperty("url").GetString()!;
                     await WithCancellationAsync(
                         page.GotoAsync(url, new PageGotoOptions { WaitUntil = WaitUntilState.Load }), ct);
+                    // Wait for SPA content to finish rendering after initial load event
+                    try
+                    {
+                        await page.WaitForLoadStateAsync(LoadState.NetworkIdle,
+                            new PageWaitForLoadStateOptions { Timeout = 5000 });
+                    }
+                    catch (TimeoutException) { }
                     var title = await WithCancellationAsync(page.TitleAsync(), ct);
                     return $"Navigated to {url}. Title: '{title}'";
                 }
@@ -242,6 +251,13 @@ public sealed class BrowserTool : ITool, ISandboxCapableTool, IAsyncDisposable
 
                 case "screenshot":
                 {
+                    // Ensure any pending SPA renders complete before capturing
+                    try
+                    {
+                        await page.WaitForLoadStateAsync(LoadState.NetworkIdle,
+                            new PageWaitForLoadStateOptions { Timeout = 3000 });
+                    }
+                    catch (TimeoutException) { }
                     var bytes = await WithCancellationAsync(
                         page.ScreenshotAsync(new PageScreenshotOptions { FullPage = true }), ct);
                     return $"Screenshot taken. Base64: {Convert.ToBase64String(bytes)}";
