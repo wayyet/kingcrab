@@ -1258,3 +1258,344 @@
         }
 
         bootstrapAuth();
+
+        // --- MCP Server Management ---
+        (function () {
+            const overlay     = document.getElementById('mcp-overlay');
+            const openBtn     = document.getElementById('mcp-panel-btn');
+            const closeBtn    = document.getElementById('mcp-close-btn');
+            const serverList  = document.getElementById('mcp-server-list');
+            const addBtn      = document.getElementById('mcp-add-btn');
+            const formSection = document.getElementById('mcp-form-section');
+            const formTitle   = document.getElementById('mcp-form-title');
+            const formError   = document.getElementById('mcp-form-error');
+            const cancelBtn   = document.getElementById('mcp-form-cancel-btn');
+            const saveBtn     = document.getElementById('mcp-form-save-btn');
+            const statusBar   = document.getElementById('mcp-panel-status');
+
+            const fId             = document.getElementById('mcp-f-id');
+            const fName           = document.getElementById('mcp-f-name');
+            const fUrl            = document.getElementById('mcp-f-url');
+            const fToken          = document.getElementById('mcp-f-token');
+            const fPrefix         = document.getElementById('mcp-f-prefix');
+            const fStartupTimeout = document.getElementById('mcp-f-startup-timeout');
+            const fRequestTimeout = document.getElementById('mcp-f-request-timeout');
+            const fEnabled        = document.getElementById('mcp-f-enabled');
+
+            // user config: editable, saved to .kingcrab/mcp.json
+            let mcpConfig     = { Enabled: true, Servers: {} };
+            // builtin config: read-only, from appsettings
+            let builtinConfig = { Enabled: false, Servers: {} };
+            // null = adding new; string = editing existing user server id
+            let editingId = null;
+
+            // Normalize camelCase keys to PascalCase (builtin config comes as camelCase from ASP.NET Core JSON)
+            function normalizePascal(obj) {
+                if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return obj;
+                const out = {};
+                for (const [k, v] of Object.entries(obj)) {
+                    const key = k.charAt(0).toUpperCase() + k.slice(1);
+                    out[key] = (v && typeof v === 'object' && !Array.isArray(v)) ? normalizePascal(v) : v;
+                }
+                return out;
+            }
+
+            function showStatus(msg, isErr) {
+                statusBar.textContent = msg;
+                statusBar.className = 'mcp-panel-status ' + (isErr ? 'err' : 'ok');
+                statusBar.style.display = '';
+                clearTimeout(showStatus._t);
+                if (!isErr) showStatus._t = setTimeout(() => { statusBar.style.display = 'none'; }, 3000);
+            }
+
+            // Build a single server card element.
+            // builtin=true => read-only: no toggle/delete, no token shown, view-only
+            function buildCard(id, cfg, builtin) {
+                const card = document.createElement('div');
+                card.className = 'mcp-server-card' + (cfg.Enabled === false ? ' disabled' : '');
+
+                const info = document.createElement('div');
+                info.className = 'mcp-server-info';
+
+                const nameEl = document.createElement('div');
+                nameEl.className = 'mcp-server-name';
+                nameEl.textContent = cfg.Name || id;
+
+                const urlEl = document.createElement('div');
+                urlEl.className = 'mcp-server-url';
+                urlEl.textContent = cfg.Url || cfg.Command || '';
+
+                info.appendChild(nameEl);
+                info.appendChild(urlEl);
+
+                const badge = document.createElement('span');
+                badge.className = 'mcp-server-badge' + (builtin ? ' builtin' : '');
+                badge.textContent = builtin
+                    ? (cfg.Enabled === false ? 'builtin \u00b7 disabled' : 'builtin')
+                    : (cfg.Enabled === false ? 'disabled' : (cfg.Transport || 'http'));
+
+                const actions = document.createElement('div');
+                actions.className = 'mcp-server-actions';
+
+                if (!builtin) {
+                    const isEnabled = cfg.Enabled !== false;
+                    const toggleBtn = document.createElement('button');
+                    toggleBtn.className = 'mcp-icon-btn';
+                    toggleBtn.title = isEnabled ? 'Disable' : 'Enable';
+                    toggleBtn.innerHTML = isEnabled
+                        ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/></svg>'
+                        : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>';
+                    toggleBtn.addEventListener('click', () => {
+                        mcpConfig.Servers[id] = Object.assign({}, cfg, { Enabled: !isEnabled });
+                        renderList();
+                        saveConfig();
+                    });
+
+                    const editBtn = document.createElement('button');
+                    editBtn.className = 'mcp-icon-btn';
+                    editBtn.title = 'Edit';
+                    editBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+                    editBtn.addEventListener('click', () => openForm(id));
+
+                    const delBtn = document.createElement('button');
+                    delBtn.className = 'mcp-icon-btn danger';
+                    delBtn.title = 'Delete';
+                    delBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
+                    delBtn.addEventListener('click', () => {
+                        if (!confirm('Delete server "' + (cfg.Name || id) + '"?')) return;
+                        delete mcpConfig.Servers[id];
+                        renderList();
+                        saveConfig();
+                    });
+
+                    actions.append(toggleBtn, editBtn, delBtn);
+                } else {
+                    // Builtin: view-only button
+                    const viewBtn = document.createElement('button');
+                    viewBtn.className = 'mcp-icon-btn';
+                    viewBtn.title = 'View (read-only)';
+                    viewBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+                    viewBtn.addEventListener('click', () => openBuiltinView(id, cfg));
+                    actions.appendChild(viewBtn);
+                }
+
+                card.append(info, badge, actions);
+                return card;
+            }
+
+            function makeSectionLabel(text) {
+                const label = document.createElement('div');
+                label.className = 'mcp-section-label';
+                label.textContent = text;
+                return label;
+            }
+
+            function renderList() {
+                serverList.innerHTML = '';
+                const builtinIds = Object.keys(builtinConfig.Servers || {});
+                const userIds    = Object.keys(mcpConfig.Servers   || {});
+
+                if (builtinIds.length === 0 && userIds.length === 0) {
+                    const empty = document.createElement('div');
+                    empty.className = 'mcp-server-empty';
+                    empty.textContent = 'No MCP servers configured.';
+                    serverList.appendChild(empty);
+                    return;
+                }
+
+                if (builtinIds.length > 0) {
+                    serverList.appendChild(makeSectionLabel('Built-in'));
+                    builtinIds.forEach(id => {
+                        serverList.appendChild(buildCard(id, builtinConfig.Servers[id], true));
+                    });
+                }
+
+                if (userIds.length > 0) {
+                    serverList.appendChild(makeSectionLabel('Workspace'));
+                    userIds.forEach(id => {
+                        serverList.appendChild(buildCard(id, mcpConfig.Servers[id], false));
+                    });
+                }
+            }
+
+            function openBuiltinView(id, cfg) {
+                editingId = null;
+                formTitle.textContent = 'Built-in Server (read-only)';
+                formError.style.display = 'none';
+
+                fId.value             = id;
+                fId.readOnly          = true;
+                fName.value           = cfg.Name || '';
+                fUrl.value            = cfg.Url || cfg.Command || '';
+                fToken.value          = cfg.HasToken ? '(hidden)' : '';
+                fPrefix.value         = cfg.ToolNamePrefix || '';
+                fStartupTimeout.value = cfg.StartupTimeoutSeconds != null ? cfg.StartupTimeoutSeconds : '';
+                fRequestTimeout.value = cfg.RequestTimeoutSeconds != null ? cfg.RequestTimeoutSeconds : '';
+                fEnabled.checked      = cfg.Enabled !== false;
+
+                [fId, fName, fUrl, fToken, fPrefix, fStartupTimeout, fRequestTimeout, fEnabled]
+                    .forEach(el => { el.disabled = true; });
+                saveBtn.style.display = 'none';
+                cancelBtn.textContent = 'Close';
+
+                formSection.style.display = '';
+                addBtn.style.display      = 'none';
+            }
+
+            function openForm(serverId) {
+                editingId = serverId || null;
+                formTitle.textContent = serverId ? 'Edit Server' : 'Add Server';
+                formError.style.display = 'none';
+
+                [fId, fName, fUrl, fToken, fPrefix, fStartupTimeout, fRequestTimeout, fEnabled]
+                    .forEach(el => { el.disabled = false; });
+                saveBtn.style.display = '';
+                cancelBtn.textContent = 'Cancel';
+
+                if (serverId) {
+                    const cfg = mcpConfig.Servers[serverId] || {};
+                    fId.value             = serverId;
+                    fId.readOnly          = true;
+                    fName.value           = cfg.Name || '';
+                    fUrl.value            = cfg.Url || '';
+                    const authHeader      = (cfg.Headers && cfg.Headers['Authorization']) || '';
+                    fToken.value          = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+                    fPrefix.value         = cfg.ToolNamePrefix || '';
+                    fStartupTimeout.value = cfg.StartupTimeoutSeconds != null ? cfg.StartupTimeoutSeconds : '';
+                    fRequestTimeout.value = cfg.RequestTimeoutSeconds != null ? cfg.RequestTimeoutSeconds : '';
+                    fEnabled.checked      = cfg.Enabled !== false;
+                } else {
+                    fId.value             = '';
+                    fId.readOnly          = false;
+                    fName.value           = '';
+                    fUrl.value            = '';
+                    fToken.value          = '';
+                    fPrefix.value         = '';
+                    fStartupTimeout.value = '';
+                    fRequestTimeout.value = '';
+                    fEnabled.checked      = true;
+                }
+
+                formSection.style.display = '';
+                addBtn.style.display      = 'none';
+                (fId.readOnly ? fName : fId).focus();
+            }
+
+            function closeForm() {
+                [fId, fName, fUrl, fToken, fPrefix, fStartupTimeout, fRequestTimeout, fEnabled]
+                    .forEach(el => { el.disabled = false; });
+                saveBtn.style.display     = '';
+                cancelBtn.textContent     = 'Cancel';
+                formSection.style.display = 'none';
+                addBtn.style.display      = '';
+                editingId                 = null;
+            }
+
+            function buildServerConfig() {
+                const id = fId.value.trim();
+                if (!id) return { error: 'Server ID is required.' };
+                if (!/^[\w\-\.]+$/.test(id)) return { error: 'Server ID may only contain letters, digits, hyphens, underscores and dots.' };
+
+                const url = fUrl.value.trim();
+                if (!url) return { error: 'URL is required.' };
+                try { new URL(url); } catch (_) { return { error: 'URL is not valid.' }; }
+
+                const cfg = { Transport: 'streamable-http', Url: url, Enabled: fEnabled.checked };
+                const name = fName.value.trim();
+                if (name) cfg.Name = name;
+
+                const token = fToken.value.trim();
+                if (token) cfg.Headers = { 'Authorization': 'Bearer ' + token };
+
+                const prefix = fPrefix.value.trim();
+                if (prefix) cfg.ToolNamePrefix = prefix;
+
+                const startupSec = parseInt(fStartupTimeout.value, 10);
+                if (!isNaN(startupSec) && startupSec > 0) cfg.StartupTimeoutSeconds = startupSec;
+
+                const requestSec = parseInt(fRequestTimeout.value, 10);
+                if (!isNaN(requestSec) && requestSec > 0) cfg.RequestTimeoutSeconds = requestSec;
+
+                return { id, cfg };
+            }
+
+            async function saveConfig() {
+                try {
+                    const headers = Object.assign({ 'Content-Type': 'application/json' }, await getAuthHeaders());
+                    const resp = await fetch(getBasePath() + '/admin/workspace/mcp', {
+                        method: 'PUT',
+                        headers,
+                        body: JSON.stringify(mcpConfig)
+                    });
+                    if (!resp.ok) {
+                        const text = await resp.text().catch(() => resp.status);
+                        showStatus('Save failed (' + resp.status + '): ' + text, true);
+                    } else {
+                        showStatus('Saved \u2014 hot-reload will apply changes automatically.', false);
+                    }
+                } catch (e) {
+                    showStatus('Save failed: ' + e.message, true);
+                }
+            }
+
+            async function loadConfig() {
+                try {
+                    const headers = await getAuthHeaders();
+                    const resp = await fetch(getBasePath() + '/admin/workspace/mcp', { headers });
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        // builtin comes as camelCase from ASP.NET Core serializer — normalize to PascalCase
+                        const rawBuiltin = data.builtin || {};
+                        builtinConfig = { Enabled: !!(rawBuiltin.enabled ?? rawBuiltin.Enabled), Servers: {} };
+                        for (const [id, srv] of Object.entries(rawBuiltin.servers || rawBuiltin.Servers || {})) {
+                            builtinConfig.Servers[id] = normalizePascal(srv);
+                        }
+                        // user config is raw file JSON — already PascalCase
+                        mcpConfig = Object.assign({ Enabled: true, Servers: {} }, data.user || {});
+                        if (!mcpConfig.Servers) mcpConfig.Servers = {};
+                    } else {
+                        showStatus('Load failed (' + resp.status + ').', true);
+                    }
+                } catch (e) {
+                    showStatus('Load failed: ' + e.message, true);
+                }
+                renderList();
+            }
+
+            openBtn.addEventListener('click', async () => {
+                overlay.classList.add('open');
+                closeForm();
+                statusBar.style.display = 'none';
+                await loadConfig();
+            });
+
+            closeBtn.addEventListener('click', () => {
+                overlay.classList.remove('open');
+                closeForm();
+            });
+
+            overlay.addEventListener('click', e => {
+                if (e.target === overlay) {
+                    overlay.classList.remove('open');
+                    closeForm();
+                }
+            });
+
+            addBtn.addEventListener('click', () => openForm(null));
+            cancelBtn.addEventListener('click', closeForm);
+
+            saveBtn.addEventListener('click', async () => {
+                const result = buildServerConfig();
+                if (result.error) {
+                    formError.textContent   = result.error;
+                    formError.style.display = '';
+                    return;
+                }
+                formError.style.display = 'none';
+                mcpConfig.Servers[result.id] = result.cfg;
+                renderList();
+                closeForm();
+                await saveConfig();
+            });
+        })();
+        // ---

@@ -80,6 +80,81 @@
             <button id="sidebar-toggle" class="nav-btn" title="Toggle session history" style="padding:0.5rem 0.6rem">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
             </button>
+
+            <!-- MCP Servers button -->
+            <button id="mcp-panel-btn" class="nav-btn" title="Manage workspace MCP servers">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                MCP
+            </button>
+        </div>
+    </div>
+
+    <!-- MCP Server Management Modal -->
+    <div id="mcp-overlay" class="mcp-overlay" role="dialog" aria-modal="true" aria-label="MCP Servers">
+        <div class="mcp-panel">
+            <div class="mcp-panel-header">
+                <div class="mcp-panel-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                    MCP Servers
+                </div>
+                <button id="mcp-close-btn" class="mcp-close-btn" title="Close" aria-label="Close MCP panel">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+
+            <div class="mcp-panel-body">
+                <!-- Server list -->
+                <div id="mcp-server-list" class="mcp-server-list"></div>
+
+                <!-- Add/Edit form -->
+                <div id="mcp-form-section" class="mcp-form-section" style="display:none">
+                    <div class="mcp-form-title" id="mcp-form-title">Add Server</div>
+                    <div class="mcp-form-grid">
+                        <label class="mcp-label">Server ID <span class="mcp-hint">(unique key)</span></label>
+                        <input id="mcp-f-id" class="mcp-input" type="text" placeholder="my-server" autocomplete="off">
+
+                        <label class="mcp-label">Display Name <span class="mcp-hint">(optional)</span></label>
+                        <input id="mcp-f-name" class="mcp-input" type="text" placeholder="My MCP Server" autocomplete="off">
+
+                        <label class="mcp-label">Transport</label>
+                        <input id="mcp-f-transport" class="mcp-input" type="text" value="streamable-http" readonly>
+
+                        <label class="mcp-label">URL</label>
+                        <input id="mcp-f-url" class="mcp-input" type="url" placeholder="https://example.com/mcp" autocomplete="off">
+
+                        <label class="mcp-label">Bearer Token <span class="mcp-hint">(Authorization header)</span></label>
+                        <input id="mcp-f-token" class="mcp-input" type="password" placeholder="Leave blank if none" autocomplete="new-password">
+
+                        <label class="mcp-label">Tool Name Prefix <span class="mcp-hint">(optional)</span></label>
+                        <input id="mcp-f-prefix" class="mcp-input" type="text" placeholder="e.g. myserver_" autocomplete="off">
+
+                        <label class="mcp-label">Startup Timeout (s) <span class="mcp-hint">(default 10)</span></label>
+                        <input id="mcp-f-startup-timeout" class="mcp-input" type="number" min="1" placeholder="10" autocomplete="off">
+
+                        <label class="mcp-label">Request Timeout (s) <span class="mcp-hint">(default 60)</span></label>
+                        <input id="mcp-f-request-timeout" class="mcp-input" type="number" min="1" placeholder="60" autocomplete="off">
+
+                        <label class="mcp-label">Enabled</label>
+                        <label class="mcp-toggle">
+                            <input id="mcp-f-enabled" type="checkbox" checked>
+                            <span class="mcp-toggle-track"></span>
+                        </label>
+                    </div>
+                    <div id="mcp-form-error" class="mcp-form-error" style="display:none"></div>
+                    <div class="mcp-form-actions">
+                        <button id="mcp-form-cancel-btn" class="nav-btn">Cancel</button>
+                        <button id="mcp-form-save-btn" class="nav-btn primary">Save</button>
+                    </div>
+                </div>
+
+                <!-- Add button (shown when form is hidden) -->
+                <button id="mcp-add-btn" class="mcp-add-btn">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    Add Server
+                </button>
+            </div>
+
+            <div id="mcp-panel-status" class="mcp-panel-status" style="display:none"></div>
         </div>
     </div>
 

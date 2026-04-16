@@ -1616,6 +1616,136 @@ internal static class AdminEndpoints
             var response = BuildWhatsAppSetupResponse(startup, runtime, adminSettings, pluginAdminSettings, message: "WhatsApp channel restarted.");
             return Results.Json(response, CoreJsonContext.Default.WhatsAppSetupResponse);
         });
+
+        // ── Workspace MCP config ────────────────────────────────────────────────
+        // GET  /admin/workspace/mcp  →  returns { builtin: {...}, user: {...} }
+        //   builtin = appsettings Plugins.Mcp with Headers stripped (tokens hidden)
+        //   user    = .kingcrab/mcp.json (or empty template)
+        // PUT  /admin/workspace/mcp  →  atomically writes .kingcrab/mcp.json
+
+        app.MapGet("/admin/workspace/mcp", async (HttpContext ctx) =>
+        {
+            var auth = EndpointHelpers.AuthorizeOperatorRequest(ctx, startup, browserSessions, requireCsrf: false);
+            if (!auth.IsAuthorized)
+                return Results.Unauthorized();
+
+            // Built-in servers from appsettings — strip Headers so tokens are never sent to the browser
+            var builtinCfg = startup.Config.Plugins.Mcp;
+            var builtinServers = builtinCfg.Servers
+                .ToDictionary(
+                    kv => kv.Key,
+                    kv => (object)new
+                    {
+                        kv.Value.Enabled,
+                        kv.Value.Name,
+                        kv.Value.Transport,
+                        kv.Value.Url,
+                        kv.Value.ToolNamePrefix,
+                        kv.Value.StartupTimeoutSeconds,
+                        kv.Value.RequestTimeoutSeconds,
+                        HasToken = kv.Value.Headers.ContainsKey("Authorization")
+                    },
+                    StringComparer.Ordinal);
+
+            var builtinPayload = new { builtinCfg.Enabled, Servers = builtinServers };
+
+            // User workspace servers from .kingcrab/mcp.json
+            object userPayload;
+            var workspacePath = startup.WorkspacePath;
+            if (string.IsNullOrEmpty(workspacePath))
+            {
+                userPayload = new { Enabled = true, Servers = new Dictionary<string, object>() };
+            }
+            else
+            {
+                var filePath = Path.Combine(workspacePath, ".kingcrab", "mcp.json");
+                if (!File.Exists(filePath))
+                {
+                    userPayload = new { Enabled = true, Servers = new Dictionary<string, object>() };
+                }
+                else
+                {
+                    try
+                    {
+                        var raw = await File.ReadAllTextAsync(filePath, ctx.RequestAborted);
+                        using var doc = JsonDocument.Parse(raw);
+                        userPayload = doc.RootElement.Clone();
+                    }
+                    catch (IOException ex)
+                    {
+                        app.Services.GetRequiredService<ILoggerFactory>()
+                            .CreateLogger("WorkspaceMcp")
+                            .LogWarning(ex, "Failed to read workspace MCP config from {Path}", filePath);
+                        return Results.StatusCode(StatusCodes.Status500InternalServerError);
+                    }
+                }
+            }
+
+            return Results.Json(new { builtin = builtinPayload, user = userPayload });
+        });
+
+        app.MapPut("/admin/workspace/mcp", async (HttpContext ctx) =>
+        {
+            var auth = EndpointHelpers.AuthorizeOperatorRequest(ctx, startup, browserSessions, requireCsrf: false);
+            if (!auth.IsAuthorized)
+                return Results.Unauthorized();
+
+            var workspacePath = startup.WorkspacePath;
+            if (string.IsNullOrEmpty(workspacePath))
+                return Results.Json(new { success = false, error = "No workspace path configured." },
+                    statusCode: StatusCodes.Status409Conflict);
+
+            if (ctx.Request.ContentLength is > MaxAdminJsonBodyBytes)
+                return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+
+            string body;
+            try
+            {
+                using var reader = new StreamReader(ctx.Request.Body);
+                body = await reader.ReadToEndAsync(ctx.RequestAborted);
+            }
+            catch (IOException ex)
+            {
+                app.Services.GetRequiredService<ILoggerFactory>()
+                    .CreateLogger("WorkspaceMcp")
+                    .LogWarning(ex, "Failed to read workspace MCP request body");
+                return Results.StatusCode(StatusCodes.Status500InternalServerError);
+            }
+
+            // Validate it's well-formed JSON that matches our config shape
+            try
+            {
+                var parsed = JsonSerializer.Deserialize<McpPluginsConfig>(body,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                if (parsed is null)
+                    return Results.Json(new { success = false, error = "Invalid MCP config." },
+                        statusCode: StatusCodes.Status400BadRequest);
+            }
+            catch (JsonException ex)
+            {
+                return Results.Json(new { success = false, error = $"JSON parse error: {ex.Message}" },
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            var dir = Path.Combine(workspacePath, ".kingcrab");
+            var filePath = Path.Combine(dir, "mcp.json");
+            try
+            {
+                Directory.CreateDirectory(dir);
+                // Atomic write via temp file + rename
+                var tmp = filePath + ".tmp";
+                await File.WriteAllTextAsync(tmp, body, ctx.RequestAborted);
+                File.Move(tmp, filePath, overwrite: true);
+                return Results.Json(new { success = true });
+            }
+            catch (IOException ex)
+            {
+                app.Services.GetRequiredService<ILoggerFactory>()
+                    .CreateLogger("WorkspaceMcp")
+                    .LogWarning(ex, "Failed to write workspace MCP config to {Path}", filePath);
+                return Results.StatusCode(StatusCodes.Status500InternalServerError);
+            }
+        });
     }
 
     private static async Task<JsonBodyReadResult<T>> ReadJsonBodyAsync<T>(HttpContext ctx, JsonTypeInfo<T> typeInfo)
