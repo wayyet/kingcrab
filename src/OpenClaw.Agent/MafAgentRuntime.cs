@@ -516,6 +516,8 @@ public sealed class MafAgentRuntime : IAgentRuntime
             systemPrompt = _systemPrompt;
         }
 
+        systemPrompt += AgentSystemPromptBuilder.BuildDynamicSuffix();
+
         if (string.IsNullOrWhiteSpace(session.SystemPromptOverride))
             return systemPrompt;
 
