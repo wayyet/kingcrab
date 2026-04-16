@@ -472,6 +472,7 @@ internal static class RuntimeInitializationExtensions
             NativeRegistry = services.NativeRegistry,
             SessionLocks = services.SessionManager.SessionLocks,
             LockLastUsed = services.SessionManager.LockLastUsed,
+            AbortRegistry = new SessionAbortRegistry(),
             AllowedOriginsSet = config.Security.AllowedOrigins.Length > 0
                 ? config.Security.AllowedOrigins.ToFrozenSet(StringComparer.Ordinal)
                 : null,

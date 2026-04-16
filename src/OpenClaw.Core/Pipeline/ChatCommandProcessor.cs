@@ -28,6 +28,7 @@ public sealed class ChatCommandProcessor
         "/think",
         "/compact",
         "/verbose",
+        "/stop",
         "/help"
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
@@ -163,8 +164,11 @@ public sealed class ChatCommandProcessor
                 }
                 return (true, "Usage: /verbose on|off");
 
+            case "/stop":
+                return (true, "There is no active execution to stop.");
+
             case "/help":
-                return (true, "Available commands:\n/status - Show session details\n/new (or /reset) - Clear conversation history\n/model <name> - Override the LLM model for this session\n/model reset - Clear model override\n/usage - Show token counts\n/think <level> - Set reasoning effort (off/low/medium/high)\n/compact - Compact conversation history\n/verbose on|off - Toggle verbose output\n/help - Show this message");
+                return (true, "Available commands:\n/status - Show session details\n/new (or /reset) - Clear conversation history\n/model <name> - Override the LLM model for this session\n/model reset - Clear model override\n/usage - Show token counts\n/think <level> - Set reasoning effort (off/low/medium/high)\n/compact - Compact conversation history\n/verbose on|off - Toggle verbose output\n/stop - Cancel the current in-flight response\n/help - Show this message");
 
             default:
                 if (_dynamicCommands.TryGetValue(command, out var dynamicHandler))

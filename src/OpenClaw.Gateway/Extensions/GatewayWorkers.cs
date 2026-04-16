@@ -46,10 +46,11 @@ internal static class GatewayWorkers
         LearningService? learningService = null,
         GatewayAutomationService? automationService = null,
         ContractGovernanceService? contractGovernance = null,
-        MediaCacheStore? mediaCache = null)
+        MediaCacheStore? mediaCache = null,
+        SessionAbortRegistry? abortRegistry = null)
     {
         StartSessionCleanup(lifetime, logger, sessionManager, sessionLocks, lockLastUsed);
-        StartInboundWorkers(lifetime, logger, workerCount, isNonLoopbackBind, sessionManager, sessionLocks, lockLastUsed, pipeline, middlewarePipeline, wsChannel, agentRuntime, channelAdapters, config, cronScheduler, heartbeatService, toolApprovalService, approvalAuditStore, pairingManager, commandProcessor, operations, runtimeMetrics, learningService, automationService, contractGovernance, mediaCache);
+        StartInboundWorkers(lifetime, logger, workerCount, isNonLoopbackBind, sessionManager, sessionLocks, lockLastUsed, pipeline, middlewarePipeline, wsChannel, agentRuntime, channelAdapters, config, cronScheduler, heartbeatService, toolApprovalService, approvalAuditStore, pairingManager, commandProcessor, operations, runtimeMetrics, learningService, automationService, contractGovernance, mediaCache, abortRegistry);
         StartOutboundWorkers(lifetime, logger, workerCount, pipeline, channelAdapters, heartbeatService);
     }
 
@@ -180,7 +181,8 @@ internal static class GatewayWorkers
         LearningService? learningService,
         GatewayAutomationService? automationService,
         ContractGovernanceService? contractGovernance,
-        MediaCacheStore? mediaCache = null)
+        MediaCacheStore? mediaCache = null,
+        SessionAbortRegistry? abortRegistry = null)
     {
         var routeResolver = config.Routing.Enabled
             ? new OpenClaw.Gateway.Integrations.AgentRouteResolver(config.Routing)
@@ -196,6 +198,7 @@ internal static class GatewayWorkers
                         {
                             Session? session = null;
                             IAsyncDisposable? sessionLock = null;
+                            CancellationTokenSource? abortCts = null;
                             IBridgedChannelControl? bridgedAdapter = null;
                             var bridgedTypingStarted = false;
                             long initialInputTokens = 0;
@@ -456,7 +459,35 @@ internal static class GatewayWorkers
                             initialInputTokens = session.TotalInputTokens;
                             initialOutputTokens = session.TotalOutputTokens;
 
+                            // ── Abort Intercept (pre-lock) ───────────────────────────────
+                            // Must run BEFORE AcquireSessionLockAsync so a /stop command
+                            // from any channel (Telegram, WhatsApp, Discord, WebSocket…)
+                            // signals cancellation to the in-flight execution that holds the
+                            // lock, rather than queuing behind it and arriving too late.
+                            // If no execution is active TryAbort returns false and the message
+                            // falls through to the command processor for a graceful reply.
+                            if (!msg.IsSystem && abortRegistry is not null && IsAbortCommand(msg.Text))
+                            {
+                                if (abortRegistry.TryAbort(session.Id))
+                                {
+                                    await pipeline.OutboundWriter.WriteAsync(new OutboundMessage
+                                    {
+                                        ChannelId = msg.ChannelId,
+                                        RecipientId = conversationRecipientId,
+                                        AccountId = msg.AccountId,
+                                        Text = "Stopped.",
+                                        ReplyToMessageId = msg.MessageId
+                                    }, processingCt);
+                                    continue;
+                                }
+                                // No in-flight execution — fall through to command processor.
+                            }
+
                             sessionLock = await sessionManager.AcquireSessionLockAsync(session.Id, processingCt);
+
+                            // Register abort CTS so an admin can cancel this execution externally.
+                            abortCts = abortRegistry?.Register(session.Id, processingCt);
+                            var executionCt = abortCts?.Token ?? processingCt;
 
                             // ── Chat Command Processing ──────────────────────
                             var (handled, cmdResponse) = await commandProcessor.TryProcessCommandAsync(session, msg.Text, processingCt, sessionLockHeld: true);
@@ -644,7 +675,7 @@ internal static class GatewayWorkers
                                 AgentStreamEvent? doneEvent = null;
                                 var streamHistoryCountBefore = session.History.Count;
                                 await foreach (var evt in agentRuntime.RunStreamingAsync(
-                                    session, messageText, processingCt, approvalCallback: ApprovalCallback))
+                                    session, messageText, executionCt, approvalCallback: ApprovalCallback))
                                 {
                                     if (string.Equals(evt.EnvelopeType, "assistant_done", StringComparison.Ordinal))
                                     {
@@ -761,7 +792,7 @@ internal static class GatewayWorkers
                                 }
 
                                 var historyCountBefore = session.History.Count;
-                                var responseText = await agentRuntime.RunAsync(session, messageText, processingCt, approvalCallback: ApprovalCallback);
+                                var responseText = await agentRuntime.RunAsync(session, messageText, executionCt, approvalCallback: ApprovalCallback);
 
                                 // Upload files from write_file tool results and build asset list BEFORE persisting,
                                 // so FILE_URL markers are injected into history for replay.
@@ -935,6 +966,9 @@ internal static class GatewayWorkers
                             cronScheduler?.MarkJobCompleted(msg.CronJobName);
                             automationService?.MarkRunCompleted(msg.CronJobName);
 
+                            if (session is not null)
+                                abortRegistry?.Unregister(session.Id);
+
                             if (sessionLock is not null)
                                 await sessionLock.DisposeAsync();
                         }
@@ -1028,6 +1062,15 @@ internal static class GatewayWorkers
         => msg.IsGroup && !string.IsNullOrWhiteSpace(msg.GroupId)
             ? msg.GroupId!
             : msg.SenderId;
+
+    private static bool IsAbortCommand(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        var t = text.Trim();
+        return string.Equals(t, "/stop", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(t, "/cancel", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(t, "/abort", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static void RecordApprovalDecisionEvent(
         RuntimeOperationsState operations,

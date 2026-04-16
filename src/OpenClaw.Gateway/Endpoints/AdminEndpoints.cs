@@ -969,6 +969,38 @@ internal static class AdminEndpoints
                 : Results.Json(diff, CoreJsonContext.Default.SessionDiffResponse);
         });
 
+        app.MapPost("/admin/sessions/{id}/abort", (HttpContext ctx, string id) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: true, endpointScope: "admin.session.abort");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+            var auth = authResult.Authorization!;
+
+            var aborted = runtime.AbortRegistry.TryAbort(id);
+            RecordOperatorAudit(ctx, operations, auth, "session_abort", id,
+                aborted ? $"Aborted in-flight execution for session '{id}'." : $"No active execution found for session '{id}'.",
+                success: aborted, before: null, after: null);
+            return Results.Json(
+                new OperationStatusResponse
+                {
+                    Success = aborted,
+                    Message = aborted ? "Session execution cancelled." : null,
+                    Error = aborted ? null : "No active execution found for the given session id."
+                },
+                CoreJsonContext.Default.OperationStatusResponse,
+                statusCode: aborted ? StatusCodes.Status200OK : StatusCodes.Status404NotFound);
+        });
+
+        app.MapGet("/admin/sessions/active", (HttpContext ctx) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: false, endpointScope: "admin.sessions.active");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+
+            var ids = runtime.AbortRegistry.ActiveSessionIds.ToList();
+            return Results.Json(ids, CoreJsonContext.Default.ListString);
+        });
+
         app.MapPost("/admin/sessions/{id}/metadata", async (HttpContext ctx, string id) =>
         {
             var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: true, endpointScope: "admin.session.metadata");
