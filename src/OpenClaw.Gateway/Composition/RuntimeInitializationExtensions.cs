@@ -153,6 +153,13 @@ internal static class RuntimeInitializationExtensions
             app.Services.GetRequiredService<ILogger<SkillWatcherService>>());
         skillWatcher.Start(app.Lifetime.ApplicationStopping);
 
+        var mcpWatcher = new McpWorkspaceWatcherService(
+            services.McpRegistry,
+            agentRuntime,
+            startup.WorkspacePath,
+            app.Services.GetRequiredService<ILogger<McpWorkspaceWatcherService>>());
+        mcpWatcher.Start(app.Lifetime.ApplicationStopping);
+
         await services.AutomationService.RefreshCacheAsync(app.Lifetime.ApplicationStopping);
         var cronTask = StartCronIfEnabled(loggerFactory, services.Pipeline, services.CronJobSource, app.Lifetime.ApplicationStopping);
         StartNativeEventBridges(config, loggerFactory, services.Pipeline, app.Lifetime.ApplicationStopping);

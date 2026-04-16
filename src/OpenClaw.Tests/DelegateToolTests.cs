@@ -125,6 +125,15 @@ public sealed class DelegateToolTests
             return Task.FromResult<IReadOnlyList<string>>([]);
         }
 
+        public Task ApplyMcpToolChangesAsync(
+            IReadOnlyList<ITool> toAdd,
+            IReadOnlyList<string> toRemove,
+            CancellationToken ct = default)
+        {
+            _ = toAdd; _ = toRemove; _ = ct;
+            return Task.CompletedTask;
+        }
+
         public async IAsyncEnumerable<AgentStreamEvent> RunStreamingAsync(
             Session session,
             string userMessage,
