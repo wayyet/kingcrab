@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.DependencyInjection;
@@ -62,6 +63,7 @@ public static class Extensions
             .WithTracing(tracing =>
             {
                 tracing.AddSource(builder.Environment.ApplicationName)
+                    .AddSource("OpenClaw.*")
                     .AddAspNetCoreInstrumentation(tracing =>
                         // Exclude health check requests from tracing
                         tracing.Filter = context =>
@@ -80,19 +82,29 @@ public static class Extensions
 
     private static TBuilder AddOpenTelemetryExporters<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
-        var useOtlpExporter = !string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]);
+        var otlpEndpoint = builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"];
+        var langfuseHost = builder.Configuration["LANGFUSE_HOST"]?.Trim().Trim('"');
+        var langfusePublicKey = builder.Configuration["LANGFUSE_PUBLIC_KEY"];
+        var langfuseSecretKey = builder.Configuration["LANGFUSE_SECRET_KEY"];
 
-        if (useOtlpExporter)
+        if (string.IsNullOrWhiteSpace(otlpEndpoint)
+            && !string.IsNullOrWhiteSpace(langfuseHost)
+            && !string.IsNullOrWhiteSpace(langfusePublicKey)
+            && !string.IsNullOrWhiteSpace(langfuseSecretKey))
+        {
+            var authorization = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{langfusePublicKey}:{langfuseSecretKey}"));
+
+            builder.Configuration["OTEL_EXPORTER_OTLP_PROTOCOL"] = "http/protobuf";
+            builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"] = $"{langfuseHost.TrimEnd('/')}/api/public/otel/v1/traces";
+            builder.Configuration["OTEL_EXPORTER_OTLP_HEADERS"] = $"Authorization=Basic {authorization}";
+
+            otlpEndpoint = builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"];
+        }
+
+        if (!string.IsNullOrWhiteSpace(otlpEndpoint))
         {
             builder.Services.AddOpenTelemetry().UseOtlpExporter();
         }
-
-        // Uncomment the following lines to enable the Azure Monitor exporter (requires the Azure.Monitor.OpenTelemetry.AspNetCore package)
-        //if (!string.IsNullOrEmpty(builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"]))
-        //{
-        //    builder.Services.AddOpenTelemetry()
-        //       .UseAzureMonitor();
-        //}
 
         return builder;
     }
