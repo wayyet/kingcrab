@@ -14,10 +14,12 @@ COPY src/OpenClaw.Channels/OpenClaw.Channels.csproj src/OpenClaw.Channels/
 COPY src/OpenClaw.PluginKit/OpenClaw.PluginKit.csproj src/OpenClaw.PluginKit/
 COPY src/OpenClawNet.Sandbox.OpenSandbox/OpenClawNet.Sandbox.OpenSandbox.csproj src/OpenClawNet.Sandbox.OpenSandbox/
 COPY src/OpenClaw.Gateway/OpenClaw.Gateway.csproj src/OpenClaw.Gateway/
+COPY Kingcrab.ServiceDefaults/Kingcrab.ServiceDefaults.csproj Kingcrab.ServiceDefaults/
 
 RUN dotnet restore src/OpenClaw.Gateway/OpenClaw.Gateway.csproj
 
 COPY src/ src/
+COPY Kingcrab.ServiceDefaults/ Kingcrab.ServiceDefaults/
 
 RUN dotnet publish src/OpenClaw.Gateway/OpenClaw.Gateway.csproj \
     -c ${CONFIGURATION} \
