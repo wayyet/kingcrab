@@ -26,7 +26,7 @@ if (bootstrap.ShouldExit)
 var startup = bootstrap.Startup
     ?? throw new InvalidOperationException("Bootstrap completed without a startup context.");
 builder.Services.AddOpenApi("openclaw-integration");
-builder.AddOpenClawObservability();
+// builder.AddOpenClawObservability();
 builder.Services.AddOpenClawCoreServices(startup);
 builder.Services.AddOpenClawChannelServices(startup);
 builder.Services.AddOpenClawBackendServices(startup);
@@ -41,6 +41,9 @@ if (builder.Environment.IsDevelopment())
 #if OPENCLAW_ENABLE_OPENSANDBOX
 builder.Services.AddOpenSandboxIntegration(builder.Configuration);
 #endif
+
+// Add service defaults & Aspire components.
+builder.AddServiceDefaults();
 
 var app = builder.Build();
 var runtime = await app.InitializeOpenClawRuntimeAsync(startup);
