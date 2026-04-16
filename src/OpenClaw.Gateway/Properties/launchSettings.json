@@ -4,7 +4,8 @@
       "commandName": "Project",
       "launchBrowser": true,
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "OPENCLAW_WORKSPACE": "../../../workspace"
       },
       "applicationUrl": "https://localhost:16823;http://localhost:16824"
     }

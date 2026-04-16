@@ -45,7 +45,8 @@ public sealed class MafAgentRuntime : IAgentRuntime
     private readonly Action<Session, string>? _appendContractSnapshot;
     private readonly string? _memoryRecallPrefix;
     private readonly object _skillGate = new();
-    private readonly IList<AITool> _mafTools;
+    private readonly object _mafToolsLock = new();
+    private IList<AITool> _mafTools;
     private string _systemPrompt = string.Empty;
     private string[] _loadedSkillNames = [];
     private int _systemPromptLength;
@@ -124,6 +125,31 @@ public sealed class MafAgentRuntime : IAgentRuntime
     }
 
     public IReadOnlyList<AITool> LoadedTools => _mafTools is IReadOnlyList<AITool> r ? r : [.. _mafTools];
+
+    public Task ApplyMcpToolChangesAsync(
+        IReadOnlyList<ITool> toAdd,
+        IReadOnlyList<string> toRemove,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        // Update the executor dispatch table first (fast, non-blocking)
+        _toolExecutor.ReplaceMcpTools(toAdd, toRemove);
+
+        // Atomically swap the LLM-visible tool list
+        lock (_mafToolsLock)
+        {
+            var removedSet = new HashSet<string>(toRemove, StringComparer.Ordinal);
+            var updated = _mafTools
+                .Where(t => !removedSet.Contains(t.Name))
+                .ToList();
+            foreach (var tool in toAdd)
+                updated.Add(new MafToolAdapter(tool, _toolExecutor));
+            _mafTools = updated;
+        }
+
+        return Task.CompletedTask;
+    }
 
     public Task<IReadOnlyList<string>> ReloadSkillsAsync(CancellationToken ct = default)
     {

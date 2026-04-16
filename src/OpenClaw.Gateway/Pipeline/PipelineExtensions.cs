@@ -114,7 +114,8 @@ internal static class PipelineExtensions
             app.Services.GetService<LearningService>(),
             app.Services.GetService<GatewayAutomationService>(),
             app.Services.GetService<ContractGovernanceService>(),
-            app.Services.GetService<MediaCacheStore>());
+            app.Services.GetService<MediaCacheStore>(),
+            runtime.AbortRegistry);
     }
 
     private static void StartChannels(WebApplication app, GatewayAppRuntime runtime)

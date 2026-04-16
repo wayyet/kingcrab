@@ -153,6 +153,13 @@ internal static class RuntimeInitializationExtensions
             app.Services.GetRequiredService<ILogger<SkillWatcherService>>());
         skillWatcher.Start(app.Lifetime.ApplicationStopping);
 
+        var mcpWatcher = new McpWorkspaceWatcherService(
+            services.McpRegistry,
+            agentRuntime,
+            startup.WorkspacePath,
+            app.Services.GetRequiredService<ILogger<McpWorkspaceWatcherService>>());
+        mcpWatcher.Start(app.Lifetime.ApplicationStopping);
+
         await services.AutomationService.RefreshCacheAsync(app.Lifetime.ApplicationStopping);
         var cronTask = StartCronIfEnabled(loggerFactory, services.Pipeline, services.CronJobSource, app.Lifetime.ApplicationStopping);
         StartNativeEventBridges(config, loggerFactory, services.Pipeline, app.Lifetime.ApplicationStopping);
@@ -472,6 +479,7 @@ internal static class RuntimeInitializationExtensions
             NativeRegistry = services.NativeRegistry,
             SessionLocks = services.SessionManager.SessionLocks,
             LockLastUsed = services.SessionManager.LockLastUsed,
+            AbortRegistry = new SessionAbortRegistry(),
             AllowedOriginsSet = config.Security.AllowedOrigins.Length > 0
                 ? config.Security.AllowedOrigins.ToFrozenSet(StringComparer.Ordinal)
                 : null,
@@ -501,6 +509,7 @@ internal static class RuntimeInitializationExtensions
             new ShellTool(config.Tooling),
             new FileReadTool(config.Tooling),
             new FileWriteTool(config.Tooling),
+            new PublishFileTool(config.Tooling),
             new ProcessTool(services.ProcessService, config.Tooling),
             new MemoryNoteTool(services.MemoryStore),
             new MemorySearchTool((IMemoryNoteSearch)services.MemoryStore),

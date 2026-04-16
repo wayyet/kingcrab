@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.AI;
+using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Models;
 
 namespace OpenClaw.Agent;
@@ -28,6 +29,15 @@ public interface IAgentRuntime
         JsonElement? responseSchema = null);
 
     Task<IReadOnlyList<string>> ReloadSkillsAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Applies a diff of workspace MCP tools: registers <paramref name="toAdd"/> and
+    /// unregisters <paramref name="toRemove"/> (by tool name) without restarting.
+    /// </summary>
+    Task ApplyMcpToolChangesAsync(
+        IReadOnlyList<ITool> toAdd,
+        IReadOnlyList<string> toRemove,
+        CancellationToken ct = default);
 
     IAsyncEnumerable<AgentStreamEvent> RunStreamingAsync(
         Session session,

@@ -45,6 +45,7 @@ internal sealed class GatewayAppRuntime
     public required NativePluginRegistry NativeRegistry { get; init; }
     public required ConcurrentDictionary<string, SemaphoreSlim> SessionLocks { get; init; }
     public required ConcurrentDictionary<string, DateTimeOffset> LockLastUsed { get; init; }
+    public required SessionAbortRegistry AbortRegistry { get; init; }
     public required FrozenSet<string>? AllowedOriginsSet { get; init; }
     public required IReadOnlyList<string> DynamicProviderOwners { get; init; }
     public required int EstimatedSkillPromptChars { get; init; }
