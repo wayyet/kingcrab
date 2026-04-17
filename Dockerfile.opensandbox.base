@@ -1,0 +1,73 @@
+# ============================================================
+# OpenSandbox BASE image
+#
+# Build this image infrequently (when OS packages, Node, or
+# Playwright browser pins change). Tag it with a date stamp so
+# that the fast "app" image can pin to a stable base.
+#
+# Suggested tag format:
+#   ai4c-tcr.tencentcloudcr.com/agentfoundry/king-crab:opensandbox-base-<YYYYMMDDHHMM>
+#
+# See scripts/build-opensandbox-base-image.ps1 for a ready-made
+# build command.
+# ============================================================
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# OpenSandbox tooling layer (matches Dockerfile.opensandbox):
+# - python3        : CodeExecTool Python execution
+# - poppler-utils  : PdfReadTool uses pdftotext for high-quality PDF extraction
+# - libnss3 et al. : Playwright/Chromium shared-library dependencies (BrowserTool)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        bash \
+        ca-certificates \
+        curl \
+        git \
+        jq \
+        procps \
+        python3 \
+        python3-pip \
+        python3-venv \
+        poppler-utils \
+        libnss3 \
+        libatk1.0-0 \
+        libatk-bridge2.0-0 \
+        libcups2 \
+        libdrm2 \
+        libxkbcommon0 \
+        libxcomposite1 \
+        libxdamage1 \
+        libxfixes3 \
+        libxrandr2 \
+        libgbm1 \
+        libasound2t64 \
+        libx11-xcb1 \
+        libpangocairo-1.0-0 \
+        fonts-liberation \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && npm install -g playwright \
+    && npm cache clean --force \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh
+
+WORKDIR /app
+
+RUN groupadd --gid 10001 openclaw \
+    && useradd --uid 10001 --gid 10001 --create-home --home-dir /home/openclaw --shell /bin/bash openclaw \
+    && mkdir -p /app/memory /workspace /home/openclaw/.cache/ms-playwright \
+    && chown -R openclaw:openclaw /app /workspace /home/openclaw
+
+# Point both npm playwright and .NET Microsoft.Playwright to the same browser directory.
+# NODE_PATH lets Node.js require() resolve globally installed packages (e.g. playwright).
+ENV PLAYWRIGHT_BROWSERS_PATH=/home/openclaw/.cache/ms-playwright \
+    NODE_PATH=/usr/lib/node_modules
+
+# Pre-install Playwright Chromium browser binary as the openclaw user.
+USER 10001:10001
+RUN npx playwright install chromium
+
+USER root
