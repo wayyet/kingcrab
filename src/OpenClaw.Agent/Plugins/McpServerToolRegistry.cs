@@ -92,18 +92,18 @@ public sealed class McpServerToolRegistry : IDisposable
         var discoveredTools = new List<DiscoveredMcpTool>();
         var discoveredClients = new List<McpClient>();
 
-        try
+        foreach (var (serverId, serverConfig) in _config.Servers ?? [])
         {
-            foreach (var (serverId, serverConfig) in _config.Servers ?? [])
-            {
-                if (!serverConfig.Enabled)
-                    continue;
+            if (!serverConfig.Enabled)
+                continue;
 
+            McpClient? client = null;
+            try
+            {
                 var transport = CreateTransport(serverId, serverConfig);
                 using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 timeoutCts.CancelAfter(TimeSpan.FromSeconds(serverConfig.StartupTimeoutSeconds));
-                var client = await McpClient.CreateAsync(transport, cancellationToken: timeoutCts.Token);
-                discoveredClients.Add(client);
+                client = await McpClient.CreateAsync(transport, cancellationToken: timeoutCts.Token);
 
                 var displayName = string.IsNullOrWhiteSpace(serverConfig.Name) ? serverId : serverConfig.Name!;
                 var pluginId = $"mcp:{serverId}";
@@ -117,27 +117,29 @@ public sealed class McpServerToolRegistry : IDisposable
                         new McpNativeTool(client, tool.LocalName, tool.RemoteName, tool.Description, tool.InputSchemaText),
                         displayName));
                 }
-            }
 
-            _clients.AddRange(discoveredClients);
-            _tools.AddRange(discoveredTools);
-            _loaded = true;
-            return _tools;
-        }
-        catch
-        {
-            foreach (var client in discoveredClients)
-            {
-                try
-                {
-                    DisposeClient(client);
-                }
-                catch
-                {
-                }
+                discoveredClients.Add(client);
             }
-            throw;
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                if (client is not null)
+                    DisposeClient(client);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "MCP server '{ServerId}' failed to connect or load tools and will be skipped. Check the server URL and SSL configuration.",
+                    serverId);
+                if (client is not null)
+                    DisposeClient(client);
+            }
         }
+
+        _clients.AddRange(discoveredClients);
+        _tools.AddRange(discoveredTools);
+        _loaded = true;
+        return _tools;
     }
 
     private async Task<IReadOnlyList<McpToolDescriptor>> LoadToolsFromClientAsync(
