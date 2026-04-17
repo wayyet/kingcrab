@@ -117,13 +117,25 @@
                         <input id="mcp-f-name" class="mcp-input" type="text" placeholder="My MCP Server" autocomplete="off">
 
                         <label class="mcp-label">Transport</label>
-                        <input id="mcp-f-transport" class="mcp-input" type="text" value="streamable-http" readonly>
+                        <select id="mcp-f-transport" class="mcp-input">
+                            <option value="streamable-http">streamable-http</option>
+                            <option value="sse">sse</option>
+                        </select>
 
                         <label class="mcp-label">URL</label>
                         <input id="mcp-f-url" class="mcp-input" type="url" placeholder="https://example.com/mcp" autocomplete="off">
 
                         <label class="mcp-label">Bearer Token <span class="mcp-hint">(Authorization header)</span></label>
                         <input id="mcp-f-token" class="mcp-input" type="password" placeholder="Leave blank if none" autocomplete="new-password">
+
+                        <label class="mcp-label mcp-label-top">Extra Headers <span class="mcp-hint">(key / value)</span></label>
+                        <div id="mcp-f-headers-wrap" class="mcp-headers-wrap">
+                            <div id="mcp-f-headers-rows"></div>
+                            <button type="button" id="mcp-f-add-header-btn" class="mcp-add-header-btn">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                Add Header
+                            </button>
+                        </div>
 
                         <label class="mcp-label">Tool Name Prefix <span class="mcp-hint">(optional)</span></label>
                         <input id="mcp-f-prefix" class="mcp-input" type="text" placeholder="e.g. myserver_" autocomplete="off">

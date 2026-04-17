@@ -1275,8 +1275,11 @@
 
             const fId             = document.getElementById('mcp-f-id');
             const fName           = document.getElementById('mcp-f-name');
+            const fTransport      = document.getElementById('mcp-f-transport');
             const fUrl            = document.getElementById('mcp-f-url');
             const fToken          = document.getElementById('mcp-f-token');
+            const fHeadersRows    = document.getElementById('mcp-f-headers-rows');
+            const fAddHeaderBtn   = document.getElementById('mcp-f-add-header-btn');
             const fPrefix         = document.getElementById('mcp-f-prefix');
             const fStartupTimeout = document.getElementById('mcp-f-startup-timeout');
             const fRequestTimeout = document.getElementById('mcp-f-request-timeout');
@@ -1288,6 +1291,69 @@
             let builtinConfig = { Enabled: false, Servers: {} };
             // null = adding new; string = editing existing user server id
             let editingId = null;
+
+            // --- Headers editor helpers ---
+            function clearHeaderRows() { fHeadersRows.innerHTML = ''; }
+
+            function addHeaderRow(key, value, disabled) {
+                const row = document.createElement('div');
+                row.className = 'mcp-header-row';
+
+                const kInput = document.createElement('input');
+                kInput.type = 'text';
+                kInput.className = 'mcp-input mcp-header-key';
+                kInput.placeholder = 'Header name';
+                kInput.value = key || '';
+                kInput.autocomplete = 'off';
+                kInput.disabled = !!disabled;
+
+                const vInput = document.createElement('input');
+                vInput.type = 'text';
+                vInput.className = 'mcp-input mcp-header-val';
+                vInput.placeholder = 'Value';
+                vInput.value = value || '';
+                vInput.autocomplete = 'off';
+                vInput.disabled = !!disabled;
+
+                const delBtn = document.createElement('button');
+                delBtn.type = 'button';
+                delBtn.className = 'mcp-icon-btn danger';
+                delBtn.title = 'Remove';
+                delBtn.disabled = !!disabled;
+                delBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+                delBtn.addEventListener('click', () => row.remove());
+
+                row.append(kInput, vInput, delBtn);
+                fHeadersRows.appendChild(row);
+            }
+
+            function getHeadersFromRows() {
+                const result = {};
+                fHeadersRows.querySelectorAll('.mcp-header-row').forEach(row => {
+                    const k = row.querySelector('.mcp-header-key').value.trim();
+                    const v = row.querySelector('.mcp-header-val').value.trim();
+                    if (k) result[k] = v;
+                });
+                return Object.keys(result).length ? result : null;
+            }
+
+            function setHeadersFromConfig(headers, disabled) {
+                clearHeaderRows();
+                if (headers && typeof headers === 'object') {
+                    for (const [k, v] of Object.entries(headers)) {
+                        addHeaderRow(k, v, disabled);
+                    }
+                }
+            }
+
+            function setAllFormDisabled(disabled) {
+                [fId, fName, fTransport, fUrl, fToken, fPrefix, fStartupTimeout, fRequestTimeout, fEnabled]
+                    .forEach(el => { el.disabled = disabled; });
+                fAddHeaderBtn.style.display = disabled ? 'none' : '';
+                fHeadersRows.querySelectorAll('input, button').forEach(el => { el.disabled = disabled; });
+            }
+
+            fAddHeaderBtn.addEventListener('click', () => addHeaderRow('', '', false));
 
             // Normalize camelCase keys to PascalCase (builtin config comes as camelCase from ASP.NET Core JSON)
             function normalizePascal(obj) {
@@ -1426,15 +1492,24 @@
                 fId.value             = id;
                 fId.readOnly          = true;
                 fName.value           = cfg.Name || '';
+                fTransport.value      = cfg.Transport || 'streamable-http';
                 fUrl.value            = cfg.Url || cfg.Command || '';
-                fToken.value          = cfg.HasToken ? '(hidden)' : '';
+                // Show token from Authorization header if present
+                const authHeader = (cfg.Headers && cfg.Headers['Authorization']) || '';
+                fToken.value = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+                // Show extra headers (everything except Authorization)
+                const extra = Object.fromEntries(
+                    Object.entries(cfg.Headers || {}).filter(([k]) => k !== 'Authorization')
+                );
+                setHeadersFromConfig(Object.keys(extra).length ? extra : null, true);
+                if (!cfg.Headers && cfg.HasToken) fToken.value = '(hidden)';
                 fPrefix.value         = cfg.ToolNamePrefix || '';
                 fStartupTimeout.value = cfg.StartupTimeoutSeconds != null ? cfg.StartupTimeoutSeconds : '';
                 fRequestTimeout.value = cfg.RequestTimeoutSeconds != null ? cfg.RequestTimeoutSeconds : '';
                 fEnabled.checked      = cfg.Enabled !== false;
 
-                [fId, fName, fUrl, fToken, fPrefix, fStartupTimeout, fRequestTimeout, fEnabled]
-                    .forEach(el => { el.disabled = true; });
+                setAllFormDisabled(true);
+                fId.readOnly = true;
                 saveBtn.style.display = 'none';
                 cancelBtn.textContent = 'Close';
 
@@ -1447,30 +1522,36 @@
                 formTitle.textContent = serverId ? 'Edit Server' : 'Add Server';
                 formError.style.display = 'none';
 
-                [fId, fName, fUrl, fToken, fPrefix, fStartupTimeout, fRequestTimeout, fEnabled]
-                    .forEach(el => { el.disabled = false; });
+                setAllFormDisabled(false);
+                fId.readOnly = !!serverId;
                 saveBtn.style.display = '';
                 cancelBtn.textContent = 'Cancel';
 
                 if (serverId) {
                     const cfg = mcpConfig.Servers[serverId] || {};
                     fId.value             = serverId;
-                    fId.readOnly          = true;
                     fName.value           = cfg.Name || '';
+                    fTransport.value      = cfg.Transport || 'streamable-http';
                     fUrl.value            = cfg.Url || '';
                     const authHeader      = (cfg.Headers && cfg.Headers['Authorization']) || '';
                     fToken.value          = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+                    // populate extra headers (all except Authorization)
+                    const extra = Object.fromEntries(
+                        Object.entries(cfg.Headers || {}).filter(([k]) => k !== 'Authorization')
+                    );
+                    setHeadersFromConfig(Object.keys(extra).length ? extra : null, false);
                     fPrefix.value         = cfg.ToolNamePrefix || '';
                     fStartupTimeout.value = cfg.StartupTimeoutSeconds != null ? cfg.StartupTimeoutSeconds : '';
                     fRequestTimeout.value = cfg.RequestTimeoutSeconds != null ? cfg.RequestTimeoutSeconds : '';
                     fEnabled.checked      = cfg.Enabled !== false;
                 } else {
-                    fId.value             = '';
-                    fId.readOnly          = false;
+                    fId.value             = 'streaming-' + Math.random().toString(36).slice(2, 8);
                     fName.value           = '';
+                    fTransport.value      = 'streamable-http';
                     fUrl.value            = '';
                     fToken.value          = '';
-                    fPrefix.value         = '';
+                    clearHeaderRows();
+                    fPrefix.value         = 'streaming.';
                     fStartupTimeout.value = '';
                     fRequestTimeout.value = '';
                     fEnabled.checked      = true;
@@ -1478,17 +1559,17 @@
 
                 formSection.style.display = '';
                 addBtn.style.display      = 'none';
-                (fId.readOnly ? fName : fId).focus();
+                (serverId ? fName : fUrl).focus();
             }
 
             function closeForm() {
-                [fId, fName, fUrl, fToken, fPrefix, fStartupTimeout, fRequestTimeout, fEnabled]
-                    .forEach(el => { el.disabled = false; });
+                setAllFormDisabled(false);
                 saveBtn.style.display     = '';
                 cancelBtn.textContent     = 'Cancel';
                 formSection.style.display = 'none';
                 addBtn.style.display      = '';
                 editingId                 = null;
+                clearHeaderRows();
             }
 
             function buildServerConfig() {
@@ -1500,12 +1581,17 @@
                 if (!url) return { error: 'URL is required.' };
                 try { new URL(url); } catch (_) { return { error: 'URL is not valid.' }; }
 
-                const cfg = { Transport: 'streamable-http', Url: url, Enabled: fEnabled.checked };
+                const cfg = { Transport: fTransport.value || 'streamable-http', Url: url, Enabled: fEnabled.checked };
                 const name = fName.value.trim();
                 if (name) cfg.Name = name;
 
+                // Merge bearer token + extra headers into cfg.Headers
+                const allHeaders = {};
                 const token = fToken.value.trim();
-                if (token) cfg.Headers = { 'Authorization': 'Bearer ' + token };
+                if (token) allHeaders['Authorization'] = 'Bearer ' + token;
+                const extra = getHeadersFromRows();
+                if (extra) Object.assign(allHeaders, extra);
+                if (Object.keys(allHeaders).length) cfg.Headers = allHeaders;
 
                 const prefix = fPrefix.value.trim();
                 if (prefix) cfg.ToolNamePrefix = prefix;

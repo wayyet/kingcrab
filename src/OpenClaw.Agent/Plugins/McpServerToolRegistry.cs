@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol;
 using ModelContextProtocol.Client;
+using ModelContextProtocol.Protocol;
 using OpenClaw.Agent.Tools;
 using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Plugins;
@@ -149,10 +150,20 @@ public sealed class McpServerToolRegistry : IDisposable
     {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(TimeSpan.FromSeconds(config.RequestTimeoutSeconds));
-        var response = await client.ListToolsAsync(cancellationToken: timeoutCts.Token);
+
+        var allTools = new List<Tool>();
+        var listParams = new ListToolsRequestParams();
+        do
+        {
+            var page = await client.ListToolsAsync(listParams, cancellationToken: timeoutCts.Token);
+            allTools.AddRange(page.Tools);
+            var next = page.NextCursor;
+            listParams = new ListToolsRequestParams { Cursor = string.IsNullOrEmpty(next) ? null : next };
+        }
+        while (listParams.Cursor is not null);
 
         var tools = new List<McpToolDescriptor>();
-        foreach (var tool in response)
+        foreach (var tool in allTools)
         {
             var remoteName = tool.Name;
             if (string.IsNullOrWhiteSpace(remoteName))
@@ -162,7 +173,7 @@ public sealed class McpServerToolRegistry : IDisposable
             var description = !string.IsNullOrWhiteSpace(tool.Description)
                 ? $"{tool.Description} (from MCP server '{displayName}')"
                 : $"MCP tool '{remoteName}' from server '{displayName}'.";
-            var inputSchema = ResolveInputSchemaText(tool.JsonSchema);
+            var inputSchema = ResolveInputSchemaText(tool.InputSchema);
             tools.Add(new McpToolDescriptor(localName, remoteName, description, inputSchema));
         }
 
@@ -379,14 +390,23 @@ public sealed class McpServerToolRegistry : IDisposable
                 EnvironmentVariables = ResolveEnv(config.Environment),
                 Name = serverId,
             }),
-            "http" => new HttpClientTransport(new HttpClientTransportOptions
-            {
-                Endpoint = new Uri(config.Url!),
-                AdditionalHeaders = ResolveHeaders(config.Headers),
-                Name = serverId,
-            }),
+            "http" => CreateHttpTransport(serverId, config, HttpTransportMode.StreamableHttp),
+            "sse"  => CreateHttpTransport(serverId, config, HttpTransportMode.Sse),
             _ => throw new InvalidOperationException($"Unsupported MCP transport '{config.Transport}' for server '{serverId}'.")
         };
+    }
+
+    private static HttpClientTransport CreateHttpTransport(string serverId, McpServerConfig config, HttpTransportMode mode)
+    {
+        var options = new HttpClientTransportOptions
+        {
+            Endpoint = new Uri(config.Url!),
+            AdditionalHeaders = ResolveHeaders(config.Headers),
+            TransportMode = mode,
+            Name = serverId,
+        };
+        var httpClient = new HttpClient(new RemoveCharsetDelegatingHandler());
+        return new HttpClientTransport(options, httpClient, ownsHttpClient: true);
     }
 
     private static Dictionary<string, string?>? ResolveEnv(Dictionary<string, string>? environment)
@@ -449,6 +469,18 @@ public sealed class McpServerToolRegistry : IDisposable
 
         if (client is IDisposable disposable)
             disposable.Dispose();
+    }
+
+    private sealed class RemoveCharsetDelegatingHandler() : DelegatingHandler(new HttpClientHandler())
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            if (request.Content?.Headers?.ContentType is { CharSet: not null } contentType)
+                contentType.CharSet = null;
+            return base.SendAsync(request, cancellationToken);
+        }
     }
 
     internal sealed record DiscoveredMcpTool(string PluginId, ITool Tool, string Detail);
