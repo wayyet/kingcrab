@@ -161,9 +161,10 @@ public sealed class EmailChannel : IChannelAdapter
     private async Task<IMailFolder> GetInboundFolderAsync(ImapClient client, CancellationToken ct)
     {
         if (string.Equals(_config.InboundFolder, "INBOX", StringComparison.OrdinalIgnoreCase))
-            return client.Inbox;
+            return client.Inbox ?? throw new InvalidOperationException("IMAP client Inbox is null.");
 
-        return await client.GetFolderAsync(_config.InboundFolder, ct);
+        return await client.GetFolderAsync(_config.InboundFolder, ct)
+            ?? throw new InvalidOperationException($"IMAP folder '{_config.InboundFolder}' not found.");
     }
 
     private static string ExtractBody(MimeMessage message)

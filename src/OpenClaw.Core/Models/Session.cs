@@ -590,6 +590,7 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(SlackChannelConfig))]
 [JsonSerializable(typeof(DiscordChannelConfig))]
 [JsonSerializable(typeof(SignalChannelConfig))]
+[JsonSerializable(typeof(FeishuChannelConfig))]
 [JsonSerializable(typeof(RoutingConfig))]
 [JsonSerializable(typeof(AgentRouteConfig))]
 [JsonSerializable(typeof(TailscaleConfig))]

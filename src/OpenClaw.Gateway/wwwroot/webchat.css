@@ -1483,3 +1483,39 @@
 
         .mcp-panel-status.ok { color: #22c55e; }
         .mcp-panel-status.err { color: var(--error); }
+
+        /* ── Channel config panel tabs ─────────────────────────────────────── */
+        .ch-tabs {
+            display: flex;
+            gap: 0.4rem;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0.6rem;
+            margin-bottom: 0.2rem;
+        }
+
+        .ch-tab {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border);
+            border-radius: 7px;
+            color: var(--text-secondary);
+            font-family: 'Outfit', sans-serif;
+            font-size: 0.83rem;
+            font-weight: 500;
+            padding: 0.35rem 0.85rem;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .ch-tab:hover {
+            border-color: rgba(99, 102, 241, 0.35);
+            color: var(--text);
+        }
+
+        .ch-tab.active {
+            background: rgba(99, 102, 241, 0.15);
+            border-color: rgba(99, 102, 241, 0.5);
+            color: var(--primary);
+        }

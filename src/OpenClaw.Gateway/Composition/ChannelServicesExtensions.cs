@@ -1,13 +1,28 @@
 using OpenClaw.Channels;
+using OpenClaw.Core.Models;
 using OpenClaw.Gateway.Bootstrap;
+using OpenClaw.Gateway.Channels;
 
 namespace OpenClaw.Gateway.Composition;
 
 internal static class ChannelServicesExtensions
 {
-    public static IServiceCollection AddOpenClawChannelServices(this IServiceCollection services, GatewayStartupContext startup)
+    public static IServiceCollection AddOpenClawChannelServices(
+        this IServiceCollection services,
+        GatewayStartupContext startup)
     {
         var config = startup.Config;
+
+        // Feishu: always registered (supports runtime enable via admin API without restart).
+        services.AddSingleton(config.Channels.Feishu);
+        services.AddSingleton<FeishuChannel>();
+
+        // ChannelConfigStore: persists channel configs to {StoragePath}/channels/channel-{id}.json.
+        // This directory is on the mounted data volume and survives container restarts.
+        services.AddSingleton(sp =>
+            new ChannelConfigStore(
+                config.Memory.StoragePath,
+                sp.GetRequiredService<ILogger<ChannelConfigStore>>()));
 
         if (config.Channels.WhatsApp.Enabled)
         {

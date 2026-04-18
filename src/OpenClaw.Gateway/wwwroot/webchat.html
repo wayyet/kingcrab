@@ -81,11 +81,61 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
             </button>
 
+            <!-- Channel Config button -->
+            <button id="channel-panel-btn" class="nav-btn" title="渠道配置">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></svg>
+                渠道
+            </button>
+
             <!-- MCP Servers button -->
             <button id="mcp-panel-btn" class="nav-btn" title="Manage workspace MCP servers">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
                 MCP
             </button>
+        </div>
+    </div>
+
+    <!-- Channel Config Modal -->
+    <div id="channel-overlay" class="mcp-overlay" role="dialog" aria-modal="true" aria-label="渠道配置">
+        <div class="mcp-panel">
+            <div class="mcp-panel-header">
+                <div class="mcp-panel-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></svg>
+                    渠道配置
+                </div>
+                <button id="channel-close-btn" class="mcp-close-btn" title="关闭" aria-label="关闭渠道配置">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+
+            <div class="mcp-panel-body">
+                <!-- Channel tabs -->
+                <div class="ch-tabs">
+                    <button class="ch-tab active" data-channel="feishu">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                        飞书 (Feishu)
+                    </button>
+                </div>
+
+                <!-- Feishu form -->
+                <div id="ch-feishu-form" class="mcp-form-grid">
+                    <label class="mcp-label">App ID</label>
+                    <input id="feishu-appid" class="mcp-input" type="text" placeholder="cli_xxxxxxxxxxxxxxxx" autocomplete="off">
+
+                    <label class="mcp-label">App Secret <span class="mcp-hint">(留空保持不变)</span></label>
+                    <input id="feishu-appsecret" class="mcp-input" type="password" placeholder="留空保持不变" autocomplete="new-password">
+                </div>
+
+                <div id="ch-form-error" class="mcp-form-error" style="display:none"></div>
+
+                <div class="mcp-form-actions">
+                    <button id="channel-load-btn" class="nav-btn" title="从服务器加载当前生效配置">↻ 加载</button>
+                    <button id="channel-revert-btn" class="nav-btn danger" title="清除覆盖，恢复 appsettings 默认值">恢复默认</button>
+                    <button id="channel-save-btn" class="nav-btn primary" title="保存配置并重新连接渠道">保存并重连</button>
+                </div>
+            </div>
+
+            <div id="ch-panel-status" class="mcp-panel-status" style="display:none"></div>
         </div>
     </div>
 

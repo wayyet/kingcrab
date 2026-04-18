@@ -25,9 +25,9 @@
 
         const OIDC_CONFIG = {
             enabled: true,
-            authority: 'http://test-passport.zyagi.cn:1080/realms/ai4cbrain',
+            authority: 'https://auth.verdure-hiro.cn/realms/maker-community',
             //authority: 'http://localhost:8080/realms/ai4cbrain', // local-keycloak
-            clientId: 'king-crab',
+            clientId: 'kingcrab-console',
             scope: 'openid profile email'
         };
 
@@ -1682,6 +1682,156 @@
                 renderList();
                 closeForm();
                 await saveConfig();
+            });
+        })();
+        // ---
+
+        // ── Channel Config Panel ──────────────────────────────────────────────
+        (() => {
+            const overlay    = document.getElementById('channel-overlay');
+            const openBtn    = document.getElementById('channel-panel-btn');
+            const closeBtn   = document.getElementById('channel-close-btn');
+            const statusBar  = document.getElementById('ch-panel-status');
+            const formError  = document.getElementById('ch-form-error');
+            const loadBtn    = document.getElementById('channel-load-btn');
+            const revertBtn  = document.getElementById('channel-revert-btn');
+            const saveBtn    = document.getElementById('channel-save-btn');
+
+            // Feishu field refs
+            const fAppId         = document.getElementById('feishu-appid');
+            const fAppSecret     = document.getElementById('feishu-appsecret');
+
+            let activeChannel = 'feishu';
+
+            function showStatus(msg, isErr) {
+                statusBar.textContent = msg;
+                statusBar.className = 'mcp-panel-status ' + (isErr ? 'err' : 'ok');
+                statusBar.style.display = '';
+            }
+
+            function showFormError(msg) {
+                formError.textContent = msg;
+                formError.style.display = '';
+            }
+
+            function clearFormError() {
+                formError.style.display = 'none';
+            }
+
+            // Populate the Feishu form from a config object (PascalCase keys from server)
+            function populateFeishuForm(cfg) {
+                fAppId.value          = cfg.AppId ?? cfg.appId ?? '';
+                // Never pre-fill secret — leave blank so user must intentionally set it
+                fAppSecret.value      = '';
+            }
+
+            // Build config object from the Feishu form
+            function buildFeishuConfig() {
+                // Always enable when saving from this simple form; all other fields use C# defaults.
+                // Keys must be camelCase to match CoreJsonContext (CamelCase naming policy).
+                const cfg = { enabled: true };
+                const appId = fAppId.value.trim();
+                if (appId) cfg.appId = appId;
+                const appSecret = fAppSecret.value.trim();
+                if (appSecret) cfg.appSecret = appSecret;
+                return cfg;
+            }
+
+            async function loadChannelConfig() {
+                clearFormError();
+                showStatus('正在加载…', false);
+                try {
+                    const headers = await getAuthHeaders();
+                    const resp = await fetch(getBasePath() + '/admin/channels/' + activeChannel, { headers });
+                    if (!resp.ok) {
+                        showStatus('加载失败 (' + resp.status + ')', true);
+                        return;
+                    }
+                    const cfg = await resp.json();
+                    if (activeChannel === 'feishu') populateFeishuForm(cfg);
+                    showStatus('加载成功 — 当前为生效中的配置', false);
+                } catch (e) {
+                    showStatus('加载失败: ' + e.message, true);
+                }
+            }
+
+            async function saveChannelConfig() {
+                clearFormError();
+                let body;
+                if (activeChannel === 'feishu') {
+                    body = buildFeishuConfig();
+                } else {
+                    showFormError('未知渠道: ' + activeChannel);
+                    return;
+                }
+                showStatus('正在保存…', false);
+                try {
+                    const headers = Object.assign({ 'Content-Type': 'application/json' }, await getAuthHeaders());
+                    const resp = await fetch(
+                        getBasePath() + '/admin/channels/' + activeChannel + '/update',
+                        { method: 'POST', headers, body: JSON.stringify(body) }
+                    );
+                    const data = await resp.json().catch(() => null);
+                    if (!resp.ok) {
+                        const msg = data?.error ?? data?.Error ?? resp.status;
+                        showStatus('保存失败: ' + msg, true);
+                    } else {
+                        showStatus('已保存并重连渠道 ✓', false);
+                    }
+                } catch (e) {
+                    showStatus('保存失败: ' + e.message, true);
+                }
+            }
+
+            async function revertChannelConfig() {
+                if (!confirm('确定要恢复为 appsettings 默认配置吗？这将清除所有通过 API 保存的覆盖。')) return;
+                showStatus('正在恢复…', false);
+                try {
+                    const headers = await getAuthHeaders();
+                    const resp = await fetch(
+                        getBasePath() + '/admin/channels/' + activeChannel + '/override',
+                        { method: 'DELETE', headers }
+                    );
+                    const data = await resp.json().catch(() => null);
+                    if (!resp.ok) {
+                        const msg = data?.error ?? data?.Error ?? resp.status;
+                        showStatus('恢复失败: ' + msg, true);
+                    } else {
+                        showStatus('已恢复默认配置并重连渠道 ✓', false);
+                        await loadChannelConfig();
+                    }
+                } catch (e) {
+                    showStatus('恢复失败: ' + e.message, true);
+                }
+            }
+
+            openBtn.addEventListener('click', async () => {
+                statusBar.style.display = 'none';
+                clearFormError();
+                overlay.classList.add('open');
+                await loadChannelConfig();
+            });
+
+            closeBtn.addEventListener('click', () => overlay.classList.remove('open'));
+
+            overlay.addEventListener('click', e => {
+                if (e.target === overlay) overlay.classList.remove('open');
+            });
+
+            loadBtn.addEventListener('click', loadChannelConfig);
+            saveBtn.addEventListener('click', saveChannelConfig);
+            revertBtn.addEventListener('click', revertChannelConfig);
+
+            // Tab switching (extensible for future channels)
+            document.querySelectorAll('.ch-tab').forEach(tab => {
+                tab.addEventListener('click', async () => {
+                    document.querySelectorAll('.ch-tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    activeChannel = tab.dataset.channel;
+                    clearFormError();
+                    statusBar.style.display = 'none';
+                    await loadChannelConfig();
+                });
             });
         })();
         // ---

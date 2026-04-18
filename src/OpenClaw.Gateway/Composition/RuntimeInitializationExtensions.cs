@@ -290,6 +290,19 @@ internal static class RuntimeInitializationExtensions
         if (config.Channels.Signal.Enabled)
             channelAdapters["signal"] = app.Services.GetRequiredService<SignalChannel>();
 
+        // Feishu is always added to adapters (enables hot-enable via config without restart)
+        channelAdapters["feishu"] = app.Services.GetRequiredService<FeishuChannel>();
+
+        // Restore persisted channel configs from volume storage (survives container restarts).
+        // This must happen before StartAsync is called in PipelineExtensions.StartChannels.
+        var channelStore = app.Services.GetRequiredService<OpenClaw.Gateway.Channels.ChannelConfigStore>();
+        var persistedFeishu = channelStore.TryLoad("feishu", CoreJsonContext.Default.FeishuChannelConfig);
+        if (persistedFeishu is not null)
+        {
+            app.Services.GetRequiredService<FeishuChannel>().SetRuntimeConfig(persistedFeishu);
+            app.Logger.LogInformation("Restored persisted Feishu config from volume storage.");
+        }
+
         var whatsAppWorkerHost = await CreateWhatsAppChannelAsync(app, startup, services, loggerFactory, channelAdapters);
 
         if (config.Plugins.Native.Email.Enabled)
