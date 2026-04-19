@@ -524,6 +524,16 @@ public sealed class FeishuChannel : IChannelAdapter, IRestartableChannelAdapter
             }
         }
 
+        // If this message is a quoted reply (引用回复) to another message, try to download
+        // the parent message's media so the agent has access to the referenced file/image.
+        // This lets users: (1) send a file, (2) reply to it and @mention the bot.
+        if (!string.IsNullOrWhiteSpace(parentId))
+        {
+            var parentMarker = await TryDownloadParentMessageMediaAsync(parentId, ct);
+            if (parentMarker is not null)
+                text = string.IsNullOrWhiteSpace(text) ? parentMarker : $"{text}\n{parentMarker}";
+        }
+
         if (!string.IsNullOrWhiteSpace(text) && text.Length > cfg.MaxInboundChars)
             text = text[..cfg.MaxInboundChars];
 
@@ -698,6 +708,61 @@ public sealed class FeishuChannel : IChannelAdapter, IRestartableChannelAdapter
         {
             _logger.LogWarning(ex, "Feishu media download failed for {MsgType} in message {MsgId}.", msgType, msgId);
             return (null, false);
+        }
+    }
+
+    /// <summary>
+    /// Fetches a parent/quoted message by ID and downloads its media attachment.
+    /// Only acts on media types (file/image/audio/video/media/post).
+    /// Returns "[FILE_PATH:…]" or "[IMAGE_PATH:…]" markers, or null if no downloadable media.
+    /// </summary>
+    private async Task<string?> TryDownloadParentMessageMediaAsync(string parentMsgId, CancellationToken ct)
+    {
+        try
+        {
+            var url = $"{FeishuBase}/im/v1/messages/{Uri.EscapeDataString(parentMsgId)}";
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _appAccessToken);
+
+            using var resp = await _http.SendAsync(req, ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Feishu fetch parent message {ParentId} HTTP {Status}.", parentMsgId, (int)resp.StatusCode);
+                return null;
+            }
+
+            var json = await resp.Content.ReadAsStringAsync(ct);
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (!root.TryGetProperty("data", out var data)) return null;
+            if (!data.TryGetProperty("items", out var items) || items.ValueKind != JsonValueKind.Array) return null;
+
+            // Response is an array; we want the first (and only) message item.
+            JsonElement? firstItem = null;
+            foreach (var item in items.EnumerateArray()) { firstItem = item; break; }
+            if (firstItem is null) return null;
+
+            var first = firstItem.Value;
+            var parentMsgType = first.TryGetProperty("msg_type", out var mt) ? mt.GetString() : null;
+            if (string.IsNullOrEmpty(parentMsgType)) return null;
+
+            // Only download if the parent is a media message (ignore text-only parents).
+            if (parentMsgType is not ("file" or "image" or "audio" or "video" or "media" or "post"))
+                return null;
+
+            if (!first.TryGetProperty("body", out var body)) return null;
+            var contentJson = body.TryGetProperty("content", out var contentProp) ? contentProp.GetString() : null;
+            if (string.IsNullOrWhiteSpace(contentJson)) return null;
+
+            _logger.LogInformation("Feishu parent message {ParentId} is {MsgType}; downloading media.", parentMsgId, parentMsgType);
+            var (marker, _) = await TryDownloadInboundMediaAsync(parentMsgType, contentJson, parentMsgId, ct);
+            return marker;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Feishu parent message {ParentId} media download failed.", parentMsgId);
+            return null;
         }
     }
 
