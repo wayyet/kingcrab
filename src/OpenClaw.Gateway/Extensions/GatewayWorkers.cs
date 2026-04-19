@@ -203,6 +203,8 @@ internal static class GatewayWorkers
                             var bridgedTypingStarted = false;
                             long initialInputTokens = 0;
                             long initialOutputTokens = 0;
+                            var cronRunOutcome = "failed";
+                            string? cronRunPreview = null;
                             var conversationRecipientId = ResolveConversationRecipientId(msg);
                             using var processingCts = CreateProcessingCts(msg.RequestCancellation, lifetime.ApplicationStopping);
                             var processingCt = processingCts?.Token ?? lifetime.ApplicationStopping;
@@ -412,6 +414,10 @@ internal static class GatewayWorkers
                                 : await sessionManager.GetOrCreateAsync(msg.ChannelId, conversationRecipientId, lifetime.ApplicationStopping);
                             if (session is null)
                                 throw new InvalidOperationException("Session manager returned null session.");
+
+                            // Apply cron job model override before route resolution (route can further override)
+                            if (!string.IsNullOrWhiteSpace(msg.ModelOverride))
+                                session.ModelOverride = msg.ModelOverride;
 
                             // Apply route overrides to session
                             if (resolvedRoute is not null)
@@ -890,6 +896,12 @@ internal static class GatewayWorkers
                                         ReplyToMessageId = msg.MessageId
                                     }, processingCt);
                                 }
+
+                                if (!string.IsNullOrWhiteSpace(msg.CronJobName))
+                                {
+                                    cronRunOutcome = "completed";
+                                    cronRunPreview = responseText.Length > 200 ? responseText[..200] : responseText;
+                                }
                             }
                         }
                         catch (OperationCanceledException) when (lifetime.ApplicationStopping.IsCancellationRequested)
@@ -965,6 +977,43 @@ internal static class GatewayWorkers
 
                             cronScheduler?.MarkJobCompleted(msg.CronJobName);
                             automationService?.MarkRunCompleted(msg.CronJobName);
+
+                            // Record run history for dynamic automations
+                            if (automationService is not null && !string.IsNullOrWhiteSpace(msg.CronJobName)
+                                && !heartbeatService.IsManagedHeartbeatJob(msg.CronJobName))
+                            {
+                                try
+                                {
+                                    var inputDelta = session is null ? 0 : session.TotalInputTokens - initialInputTokens;
+                                    var outputDelta = session is null ? 0 : session.TotalOutputTokens - initialOutputTokens;
+                                    await automationService.AppendRunHistoryAsync(msg.CronJobName, new RunHistoryEntry
+                                    {
+                                        RanAtUtc = DateTimeOffset.UtcNow,
+                                        Outcome = cronRunOutcome,
+                                        InputTokens = inputDelta,
+                                        OutputTokens = outputDelta,
+                                        MessagePreview = cronRunPreview
+                                    }, CancellationToken.None);
+                                }
+                                catch (Exception ex)
+                                {
+                                    logger.LogWarning(ex, "Failed to record run history for cron job '{JobName}'.", msg.CronJobName);
+                                }
+                            }
+
+                            // Delete one-shot jobs that requested cleanup after running
+                            if (msg.DeleteAfterRun && automationService is not null && !string.IsNullOrWhiteSpace(msg.CronJobName))
+                            {
+                                try
+                                {
+                                    await automationService.DeleteAsync(msg.CronJobName, CancellationToken.None);
+                                    logger.LogInformation("One-shot cron job '{JobName}' deleted after run.", msg.CronJobName);
+                                }
+                                catch (Exception ex)
+                                {
+                                    logger.LogWarning(ex, "Failed to delete one-shot cron job '{JobName}' after run.", msg.CronJobName);
+                                }
+                            }
 
                             if (session is not null)
                                 abortRegistry?.Unregister(session.Id);

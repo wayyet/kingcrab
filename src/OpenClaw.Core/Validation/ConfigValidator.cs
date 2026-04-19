@@ -1,3 +1,4 @@
+using Cronos;
 using OpenClaw.Core.Security;
 using OpenClaw.Core.Models;
 using OpenClaw.Core.Plugins;
@@ -450,72 +451,15 @@ public static class ConfigValidator
         if (string.IsNullOrWhiteSpace(expression))
             return false;
 
-        expression = NormalizeCronExpression(expression);
-
-        var parts = expression.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length != 5)
-            return false;
-
-        return IsValidCronField(parts[0], 0, 59) &&
-               IsValidCronField(parts[1], 0, 23) &&
-               IsValidCronField(parts[2], 1, 31) &&
-               IsValidCronField(parts[3], 1, 12) &&
-               IsValidCronField(parts[4], 0, 6);
-    }
-
-    private static string NormalizeCronExpression(string expression)
-        => expression.Trim().ToLowerInvariant() switch
+        try
         {
-            "@hourly" => "0 * * * *",
-            "@daily" => "0 0 * * *",
-            "@weekly" => "0 0 * * 0",
-            "@monthly" => "0 0 1 * *",
-            _ => expression
-        };
-
-    private static bool IsValidCronField(string field, int min, int max)
-    {
-        if (string.IsNullOrWhiteSpace(field))
-            return false;
-
-        if (field == "*")
+            CronExpression.Parse(expression, CronFormat.Standard);
             return true;
-
-        if (field == "L")
-            return min == 1;
-
-        if (int.TryParse(field, out var exact))
-            return exact >= min && exact <= max;
-
-        if (field.Contains(','))
-        {
-            var options = field.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            return options.Length > 0 && options.All(option => IsValidCronField(option, min, max));
         }
-
-        if (field.Contains('/'))
+        catch (CronFormatException)
         {
-            var stepParts = field.Split('/');
-            if (stepParts.Length != 2 || !int.TryParse(stepParts[1], out var step) || step <= 0)
-                return false;
-
-            return stepParts[0] == "*" || IsValidCronField(stepParts[0], min, max);
+            return false;
         }
-
-        if (field.Contains('-'))
-        {
-            var rangeParts = field.Split('-');
-            if (rangeParts.Length != 2 ||
-                !int.TryParse(rangeParts[0], out var start) ||
-                !int.TryParse(rangeParts[1], out var end))
-            {
-                return false;
-            }
-
-            return start >= min && start <= max && end >= min && end <= max;
-        }
-
-        return false;
     }
 
     private static void ValidateDmPolicy(string field, string? value, ICollection<string> errors)

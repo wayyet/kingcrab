@@ -139,6 +139,31 @@ internal sealed class GatewayAutomationService
     public ValueTask SaveRunStateAsync(AutomationRunState runState, CancellationToken ct)
         => _store.SaveRunStateAsync(runState, ct);
 
+    public async ValueTask AppendRunHistoryAsync(string automationId, RunHistoryEntry entry, CancellationToken ct)
+    {
+        const int MaxHistory = 20;
+        var existing = await _store.GetRunStateAsync(automationId, ct);
+        var history = existing?.RecentRuns ?? [];
+        var updated = new List<RunHistoryEntry>(history.Count + 1) { entry };
+        foreach (var h in history.Take(MaxHistory - 1))
+            updated.Add(h);
+
+        var newState = new AutomationRunState
+        {
+            AutomationId = automationId,
+            Outcome = entry.Outcome,
+            LastRunAtUtc = entry.RanAtUtc,
+            LastDeliveredAtUtc = existing?.LastDeliveredAtUtc,
+            DeliverySuppressed = existing?.DeliverySuppressed ?? false,
+            InputTokens = entry.InputTokens,
+            OutputTokens = entry.OutputTokens,
+            SessionId = existing?.SessionId,
+            MessagePreview = entry.MessagePreview,
+            RecentRuns = updated
+        };
+        await _store.SaveRunStateAsync(newState, ct);
+    }
+
     public async ValueTask<RunNowResult> RunNowAsync(string automationId, MessagePipeline pipeline, CancellationToken ct)
     {
         var automation = await GetAsync(automationId, ct);
@@ -165,7 +190,8 @@ internal sealed class GatewayAutomationService
                 ChannelId = automation.DeliveryChannelId,
                 SenderId = automation.DeliveryRecipientId ?? sessionId,
                 Subject = automation.DeliverySubject,
-                Text = automation.Prompt
+                Text = automation.Prompt,
+                ModelOverride = string.IsNullOrWhiteSpace(automation.ModelId) ? null : automation.ModelId
             };
 
             if (!pipeline.InboundWriter.TryWrite(inbound))
@@ -261,8 +287,20 @@ internal sealed class GatewayAutomationService
             issues.Add(new AutomationValidationIssue { Code = "name_required", Message = "Automation name is required." });
         if (string.IsNullOrWhiteSpace(normalized.Prompt))
             issues.Add(new AutomationValidationIssue { Code = "prompt_required", Message = "Automation prompt is required." });
-        if (string.IsNullOrWhiteSpace(normalized.Schedule))
-            issues.Add(new AutomationValidationIssue { Code = "schedule_required", Message = "Automation schedule is required." });
+        // One-shot jobs (RunAt set) don't need a cron schedule — skip schedule validation for them.
+        if (!normalized.RunAt.HasValue)
+        {
+            if (string.IsNullOrWhiteSpace(normalized.Schedule))
+                issues.Add(new AutomationValidationIssue { Code = "schedule_required", Message = "Automation schedule is required." });
+            else if (!CronScheduler.IsValidExpression(normalized.Schedule))
+                issues.Add(new AutomationValidationIssue
+                {
+                    Code = "invalid_schedule",
+                    Message = $"'{normalized.Schedule}' is not a valid cron expression. " +
+                              "Use standard 5-field format (e.g. '*/5 * * * *' for every 5 minutes, '0 9 * * 1-5' for weekdays at 09:00) " +
+                              "or an alias such as @hourly, @daily, @weekly, @monthly."
+                });
+        }
 
         return new AutomationPreview
         {
@@ -292,6 +330,7 @@ internal sealed class GatewayAutomationService
             jobs.Add(new CronJobConfig
             {
                 Name = automation.Id,
+                DisplayName = automation.Name,
                 CronExpression = automation.Schedule,
                 Prompt = automation.Prompt,
                 RunOnStartup = automation.RunOnStartup,
@@ -299,22 +338,49 @@ internal sealed class GatewayAutomationService
                 ChannelId = automation.DeliveryChannelId,
                 RecipientId = automation.DeliveryRecipientId,
                 Subject = automation.DeliverySubject,
-                Timezone = automation.Timezone
+                Timezone = automation.Timezone,
+                ModelId = automation.ModelId,
+                RunAt = automation.RunAt,
+                DeleteAfterRun = automation.DeleteAfterRun
             });
         }
 
         return jobs;
     }
 
+    /// <summary>
+    /// Tries to coerce a schedule string to a valid 5-field Cronos expression.
+    /// Handles the common LLM mistake of supplying a 6-field Quartz/Spring expression by
+    /// stripping the leading seconds field.
+    /// </summary>
+    private static string NormalizeSchedule(string schedule)
+    {
+        var trimmed = schedule.Trim();
+        if (CronScheduler.IsValidExpression(trimmed))
+            return trimmed;
+
+        // Many LLMs emit Quartz/Spring 6-field expressions (seconds first).
+        // Try dropping the first token to get a standard 5-field expression.
+        var parts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 6)
+        {
+            var fiveField = string.Join(' ', parts.Skip(1));
+            if (CronScheduler.IsValidExpression(fiveField))
+                return fiveField;
+        }
+        return trimmed; // return as-is; validation will catch it later
+    }
+
     private static AutomationDefinition Normalize(AutomationDefinition automation)
     {
         var now = DateTimeOffset.UtcNow;
+        var rawSchedule = string.IsNullOrWhiteSpace(automation.Schedule) ? "@hourly" : automation.Schedule.Trim();
         return new AutomationDefinition
         {
             Id = string.IsNullOrWhiteSpace(automation.Id) ? $"automation-{Guid.NewGuid():N}"[..20] : automation.Id.Trim(),
             Name = automation.Name.Trim(),
             Enabled = automation.Enabled,
-            Schedule = string.IsNullOrWhiteSpace(automation.Schedule) ? "@hourly" : automation.Schedule.Trim(),
+            Schedule = NormalizeSchedule(rawSchedule),
             Timezone = string.IsNullOrWhiteSpace(automation.Timezone) ? null : automation.Timezone.Trim(),
             Prompt = automation.Prompt ?? "",
             ModelId = string.IsNullOrWhiteSpace(automation.ModelId) ? null : automation.ModelId.Trim(),
@@ -328,7 +394,9 @@ internal sealed class GatewayAutomationService
             Source = string.IsNullOrWhiteSpace(automation.Source) ? "managed" : automation.Source.Trim(),
             TemplateKey = string.IsNullOrWhiteSpace(automation.TemplateKey) ? null : automation.TemplateKey.Trim(),
             CreatedAtUtc = automation.CreatedAtUtc == default ? now : automation.CreatedAtUtc,
-            UpdatedAtUtc = now
+            UpdatedAtUtc = now,
+            RunAt = automation.RunAt,
+            DeleteAfterRun = automation.DeleteAfterRun
         };
     }
 

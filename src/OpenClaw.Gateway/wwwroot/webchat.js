@@ -25,7 +25,7 @@
 
         const OIDC_CONFIG = {
             enabled: true,
-            authority: 'https://auth.verdure-hiro.cn/realms/maker-community',
+            authority: 'http://test-passport.zyagi.cn:1080/realms/ai4cbrain',
             //authority: 'http://localhost:8080/realms/ai4cbrain', // local-keycloak
             clientId: 'kingcrab-console',
             scope: 'openid profile email'

@@ -338,6 +338,8 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(AutomationDefinition))]
 [JsonSerializable(typeof(List<AutomationDefinition>))]
 [JsonSerializable(typeof(AutomationRunState))]
+[JsonSerializable(typeof(RunHistoryEntry))]
+[JsonSerializable(typeof(List<RunHistoryEntry>))]
 [JsonSerializable(typeof(AutomationTemplate))]
 [JsonSerializable(typeof(List<AutomationTemplate>))]
 [JsonSerializable(typeof(AutomationValidationIssue))]
