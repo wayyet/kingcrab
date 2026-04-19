@@ -499,6 +499,31 @@ public sealed class FeishuChannel : IChannelAdapter, IRestartableChannelAdapter
         if (string.IsNullOrWhiteSpace(text) && mediaType is null)
             return;
 
+        // Download media (image/file/audio/video/post-images) from Feishu REST API and save
+        // to a local temp file so the agent can pass it to vision models / read-file tools.
+        // On success the [IMAGE_PATH:…] / [FILE_PATH:…] marker is embedded in the message text;
+        // mediaType and mediaUrl are cleared so GatewayWorkers won't emit a second
+        // (non-accessible) [IMAGE_URL:feishu-resource://…] marker.
+        var isPostMsg = string.Equals(msgType, "post", StringComparison.Ordinal);
+        if ((mediaType is not null || isPostMsg)
+            && !string.IsNullOrWhiteSpace(contentJson)
+            && !string.IsNullOrWhiteSpace(msgId))
+        {
+            var (pathMarker, isImage) = await TryDownloadInboundMediaAsync(
+                msgType ?? string.Empty, contentJson, msgId, ct);
+
+            if (pathMarker is not null)
+            {
+                // Images (standalone): replace the "[image]" placeholder with the path marker.
+                // Post / files / audio / video: keep the human-readable label, append marker(s).
+                text = (isImage && !isPostMsg)
+                    ? pathMarker
+                    : (string.IsNullOrWhiteSpace(text) ? pathMarker : $"{text}\n{pathMarker}");
+                mediaType = null;
+                mediaUrl = null;
+            }
+        }
+
         if (!string.IsNullOrWhiteSpace(text) && text.Length > cfg.MaxInboundChars)
             text = text[..cfg.MaxInboundChars];
 
@@ -577,7 +602,8 @@ public sealed class FeishuChannel : IChannelAdapter, IRestartableChannelAdapter
 
                 "post" => (
                     root.TryGetProperty("zh_cn", out var zh) ? ExtractPostText(zh) :
-                    root.TryGetProperty("en_us", out var en) ? ExtractPostText(en) : "[post]",
+                    root.TryGetProperty("en_us", out var en) ? ExtractPostText(en) :
+                    ExtractPostText(root),  // flat structure: title/content at root level
                     null, null, null),
 
                 _ => (contentJson, null, null, null)
@@ -594,6 +620,210 @@ public sealed class FeishuChannel : IChannelAdapter, IRestartableChannelAdapter
         if (string.IsNullOrWhiteSpace(fileKey) || string.IsNullOrWhiteSpace(msgId))
             return null;
         return $"feishu-resource://{msgId}/{fileKey}?type={resourceType}";
+    }
+
+    /// <summary>
+    /// Downloads an image or file from Feishu REST API and saves it to a local temp file.
+    /// Returns a tuple of (pathMarker, isImage):
+    ///   - pathMarker is "[IMAGE_PATH:/tmp/...]" for images or "[FILE_PATH:/tmp/...]" for files.
+    ///   - isImage indicates whether the download was an image (for caller to decide text layout).
+    /// Returns (null, false) if the download fails or the message type is unsupported.
+    /// </summary>
+    private async Task<(string? pathMarker, bool isImage)> TryDownloadInboundMediaAsync(
+        string msgType,
+        string contentJson,
+        string msgId,
+        CancellationToken ct)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(contentJson);
+            var root = doc.RootElement;
+
+            string? mediaKey;
+            string apiType;
+            bool isImage;
+            string? fileName = null;
+
+            switch (msgType)
+            {
+                case "image":
+                    mediaKey = root.TryGetProperty("image_key", out var ik) ? ik.GetString() : null;
+                    apiType = "image";
+                    isImage = true;
+                    break;
+
+                case "file":
+                    mediaKey = root.TryGetProperty("file_key", out var fk) ? fk.GetString() : null;
+                    fileName = root.TryGetProperty("file_name", out var fn) ? fn.GetString() : null;
+                    apiType = "file";
+                    isImage = false;
+                    break;
+
+                case "audio":
+                    mediaKey = root.TryGetProperty("file_key", out var ak) ? ak.GetString() : null;
+                    apiType = "file";
+                    isImage = false;
+                    break;
+
+                case "video":
+                case "media":
+                    mediaKey = root.TryGetProperty("file_key", out var vk) ? vk.GetString() : null;
+                    fileName = root.TryGetProperty("file_name", out var vfn) ? vfn.GetString() : null;
+                    apiType = "file";
+                    isImage = false;
+                    break;
+
+                case "post":
+                {
+                    // Rich-text post: extract every img tag's image_key and download each.
+                    var markers = await DownloadPostImagesAsync(root, msgId, ct);
+                    return (markers.Length > 0 ? markers : null, false);
+                }
+
+                default:
+                    return (null, false);
+            }
+
+            if (string.IsNullOrWhiteSpace(mediaKey))
+                return (null, false);
+
+            var tempPath = await DownloadResourceToTempFileAsync(msgId, mediaKey!, apiType, isImage, fileName, msgType, ct);
+            if (tempPath is null) return (null, false);
+
+            var marker = isImage ? $"[IMAGE_PATH:{tempPath}]" : $"[FILE_PATH:{tempPath}]";
+            return (marker, isImage);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Feishu media download failed for {MsgType} in message {MsgId}.", msgType, msgId);
+            return (null, false);
+        }
+    }
+
+    /// <summary>
+    /// Extracts all img tags from a post content element (handles both flat and zh_cn/en_us
+    /// wrapped structures), downloads each image, and returns newline-joined [IMAGE_PATH:…] markers.
+    /// </summary>
+    private async Task<string> DownloadPostImagesAsync(JsonElement root, string msgId, CancellationToken ct)
+    {
+        // Support both flat structure {title, content:[…]} and wrapped {zh_cn:{title, content:[…]}}
+        var postElem = root.TryGetProperty("zh_cn", out var zh) ? zh :
+                       root.TryGetProperty("en_us", out var en) ? en : root;
+
+        if (!postElem.TryGetProperty("content", out var content) ||
+            content.ValueKind != JsonValueKind.Array)
+            return string.Empty;
+
+        var sb = new StringBuilder();
+        foreach (var para in content.EnumerateArray())
+        {
+            if (para.ValueKind != JsonValueKind.Array) continue;
+            foreach (var item in para.EnumerateArray())
+            {
+                if (!item.TryGetProperty("tag", out var tag)) continue;
+                if (!string.Equals(tag.GetString(), "img", StringComparison.Ordinal)) continue;
+                if (!item.TryGetProperty("image_key", out var imgKeyProp)) continue;
+                var imgKey = imgKeyProp.GetString();
+                if (string.IsNullOrWhiteSpace(imgKey)) continue;
+
+                var tempPath = await DownloadResourceToTempFileAsync(
+                    msgId, imgKey, "image", isImage: true, fileName: null, msgType: "post", ct);
+                if (tempPath is not null)
+                {
+                    if (sb.Length > 0) sb.Append('\n');
+                    sb.Append($"[IMAGE_PATH:{tempPath}]");
+                }
+            }
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Performs the actual HTTP download of a Feishu message resource (image or file) and
+    /// saves the bytes to a temp file under %TEMP%/openclaw_feishu/.
+    /// Returns the local file path on success, or null on failure.
+    /// </summary>
+    private async Task<string?> DownloadResourceToTempFileAsync(
+        string msgId, string mediaKey, string apiType, bool isImage,
+        string? fileName, string msgType, CancellationToken ct)
+    {
+        var url = $"{FeishuBase}/im/v1/messages/{Uri.EscapeDataString(msgId)}/resources/{Uri.EscapeDataString(mediaKey)}?type={apiType}";
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _appAccessToken);
+
+        using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+
+        if (!resp.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("Feishu media download HTTP {Status} for {MsgType} message={MsgId} key={Key}.",
+                (int)resp.StatusCode, msgType, msgId, mediaKey);
+            return null;
+        }
+
+        // Feishu returns JSON (not binary) on permission errors even with 2xx status.
+        var contentType = resp.Content.Headers.ContentType?.MediaType ?? string.Empty;
+        if (contentType.Contains("application/json", StringComparison.OrdinalIgnoreCase))
+        {
+            var errorBody = await resp.Content.ReadAsStringAsync(ct);
+            _logger.LogWarning("Feishu media download returned error JSON for {MsgType} message={MsgId}: {Body}",
+                msgType, msgId, errorBody);
+            return null;
+        }
+
+        var bytes = await resp.Content.ReadAsByteArrayAsync(ct);
+        if (bytes.Length == 0)
+        {
+            _logger.LogWarning("Feishu media download returned empty body for {MsgType} message={MsgId}.", msgType, msgId);
+            return null;
+        }
+
+        var ext = isImage
+            ? GuessImageExtension(contentType)
+            : (fileName is not null
+                ? Path.GetExtension(fileName)
+                : GuessFileExtension(contentType, msgType));
+
+        if (string.IsNullOrEmpty(ext))
+            ext = isImage ? ".jpg" : ".bin";
+
+        var tempDir = Path.Combine(Path.GetTempPath(), "openclaw_feishu");
+        Directory.CreateDirectory(tempDir);
+        var tempFile = Path.Combine(tempDir, $"{Guid.NewGuid():N}{ext}");
+
+        await File.WriteAllBytesAsync(tempFile, bytes, ct);
+        _logger.LogInformation("Feishu {MsgType} saved: {Bytes} bytes → {TempFile}.", msgType, bytes.Length, tempFile);
+        return tempFile;
+    }
+
+    private static string GuessImageExtension(string contentType) =>
+        contentType.ToLowerInvariant() switch
+        {
+            "image/jpeg" or "image/jpg" => ".jpg",
+            "image/gif"                 => ".gif",
+            "image/webp"                => ".webp",
+            "image/bmp"                 => ".bmp",
+            _                           => ".png",
+        };
+
+    private static string GuessFileExtension(string contentType, string msgType)
+    {
+        if (msgType == "audio") return ".opus";
+        if (msgType is "video" or "media") return ".mp4";
+        return contentType.ToLowerInvariant() switch
+        {
+            "application/pdf"      => ".pdf",
+            "audio/opus"           => ".opus",
+            "audio/ogg"            => ".ogg",
+            "audio/mpeg"           => ".mp3",
+            "video/mp4"            => ".mp4",
+            "application/msword"   => ".doc",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => ".docx",
+            "application/vnd.ms-excel" => ".xls",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"       => ".xlsx",
+            _                      => ".bin",
+        };
     }
 
     private static string ExtractPostText(JsonElement postElem)
@@ -615,11 +845,24 @@ public sealed class FeishuChannel : IChannelAdapter, IRestartableChannelAdapter
                 if (para.ValueKind != JsonValueKind.Array) continue;
                 foreach (var item in para.EnumerateArray())
                 {
-                    if (item.TryGetProperty("tag", out var tag) &&
-                        string.Equals(tag.GetString(), "text", StringComparison.Ordinal) &&
+                    if (!item.TryGetProperty("tag", out var tag)) continue;
+                    var tagName = tag.GetString();
+
+                    if (string.Equals(tagName, "text", StringComparison.Ordinal) &&
                         item.TryGetProperty("text", out var text))
                     {
                         sb.Append(text.GetString());
+                    }
+                    else if (string.Equals(tagName, "img", StringComparison.Ordinal))
+                    {
+                        // placeholder so downstream knows an image exists;
+                        // actual pixel data is downloaded by TryDownloadInboundMediaAsync.
+                        sb.Append("[图片]");
+                    }
+                    else if (string.Equals(tagName, "at", StringComparison.Ordinal) &&
+                             item.TryGetProperty("user_name", out var uname))
+                    {
+                        sb.Append($"@{uname.GetString()}");
                     }
                 }
                 sb.AppendLine();
