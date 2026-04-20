@@ -128,8 +128,11 @@
                     <label class="mcp-label">App ID</label>
                     <input id="feishu-appid" class="mcp-input" type="text" placeholder="cli_xxxxxxxxxxxxxxxx" autocomplete="off">
 
-                    <label class="mcp-label">App Secret <span class="mcp-hint">(留空保持不变)</span></label>
-                    <input id="feishu-appsecret" class="mcp-input" type="password" placeholder="留空保持不变" autocomplete="new-password">
+                    <label class="mcp-label">App Secret <span class="mcp-hint">(直接值，优先于 Ref)</span></label>
+                    <input id="feishu-appsecret" class="mcp-input" type="password" placeholder="留空则使用 AppSecretRef" autocomplete="new-password">
+
+                    <label class="mcp-label">App Secret Ref <span class="mcp-hint">(env:VAR_NAME 或 raw:value)</span></label>
+                    <input id="feishu-appsecret-ref" class="mcp-input" type="text" placeholder="env:FEISHU_APP_SECRET" autocomplete="off">
                 </div>
 
                 <div id="ch-form-error" class="mcp-form-error" style="display:none"></div>
