@@ -190,7 +190,8 @@ public sealed class McpServerToolRegistry : IDisposable
         if (prefix is null)
             prefix = $"{SanitizePrefixPart(serverId)}.";
 
-        return string.IsNullOrEmpty(prefix) ? remoteName : prefix + remoteName;
+        var sanitizedRemoteName = SanitizeLlmToolNamePart(remoteName);
+        return string.IsNullOrEmpty(prefix) ? sanitizedRemoteName : prefix + sanitizedRemoteName;
     }
 
     private static string SanitizePrefixPart(string value)
@@ -201,14 +202,41 @@ public sealed class McpServerToolRegistry : IDisposable
         var sb = new StringBuilder(value.Length);
         foreach (var ch in value)
         {
-            if (char.IsLetterOrDigit(ch) || ch is '_' or '-' or '.')
+            if (IsLlmToolNameChar(ch))
                 sb.Append(char.ToLowerInvariant(ch));
+            else if (ch > 0x7F)
+                sb.Append($"_u{(int)ch:x4}");
             else
                 sb.Append('_');
         }
 
         return sb.Length == 0 ? "mcp" : sb.ToString();
     }
+
+    /// <summary>
+    /// Sanitizes a string so every character satisfies the LLM tool-name pattern <c>^[a-zA-Z0-9_.\-]+$</c>.
+    /// Non-conforming characters (e.g. CJK, spaces) are replaced with <c>_uXXXX</c> (lowercase hex code point).
+    /// </summary>
+    private static string SanitizeLlmToolNamePart(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return value;
+
+        var sb = new StringBuilder(value.Length);
+        foreach (var ch in value)
+        {
+            if (IsLlmToolNameChar(ch))
+                sb.Append(ch);
+            else
+                sb.Append($"_u{(int)ch:x4}");
+        }
+
+        return sb.Length == 0 ? "_" : sb.ToString();
+    }
+
+    private static bool IsLlmToolNameChar(char ch)
+        => (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')
+           || ch is '_' or '-' or '.';
 
     /// <summary>
     /// Hot-reloads workspace MCP servers from <paramref name="newServers"/>.
