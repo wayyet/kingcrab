@@ -92,6 +92,12 @@
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
                 MCP
             </button>
+
+            <!-- Cron/Automation button -->
+            <button id="cron-panel-btn" class="nav-btn" title="定时任务管理">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                定时任务
+            </button>
         </div>
     </div>
 
@@ -217,6 +223,123 @@
             </div>
 
             <div id="mcp-panel-status" class="mcp-panel-status" style="display:none"></div>
+        </div>
+    </div>
+
+    <!-- Cron / Automation Management Modal -->
+    <div id="cron-overlay" class="mcp-overlay" role="dialog" aria-modal="true" aria-label="定时任务管理">
+        <div class="mcp-panel cron-panel">
+            <div class="mcp-panel-header">
+                <div class="mcp-panel-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    定时任务
+                </div>
+                <div style="display:flex;gap:6px;align-items:center">
+                    <button id="cron-refresh-btn" class="nav-btn" title="刷新列表">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3"/></svg>
+                        刷新
+                    </button>
+                    <button id="cron-add-btn" class="nav-btn primary" title="新建定时任务">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        新建
+                    </button>
+                    <button id="cron-close-btn" class="mcp-close-btn" title="关闭" aria-label="关闭定时任务面板">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                </div>
+            </div>
+
+            <div class="mcp-panel-body">
+                <!-- Job list -->
+                <div id="cron-job-list" class="mcp-server-list"></div>
+
+                <!-- Add/Edit form -->
+                <div id="cron-form-section" class="mcp-form-section" style="display:none">
+                    <div class="mcp-form-title" id="cron-form-title">新建定时任务</div>
+                    <div class="mcp-form-grid">
+                        <label class="mcp-label">名称</label>
+                        <input id="cron-f-name" class="mcp-input" type="text" placeholder="每日早报" autocomplete="off">
+
+                        <label class="mcp-label mcp-label-top">提示词</label>
+                        <textarea id="cron-f-prompt" class="mcp-input" rows="4" placeholder="请发送今日早报、天气和重要日程提醒…"></textarea>
+
+                        <label class="mcp-label">执行计划 <span class="mcp-hint">cron 表达式或 @daily/@hourly 等</span></label>
+                        <div class="cron-schedule-wrap">
+                            <div class="cron-freq-tabs">
+                                <button type="button" class="cron-freq-tab active" data-preset="daily">每天</button>
+                                <button type="button" class="cron-freq-tab" data-preset="interval">按间隔</button>
+                                <button type="button" class="cron-freq-tab" data-preset="custom">自定义</button>
+                            </div>
+                            <div id="cron-preset-daily" class="cron-preset-panel">
+                                <div class="cron-time-row">
+                                    <label class="mcp-label">时间</label>
+                                    <input id="cron-daily-time" type="time" class="mcp-input cron-time-input" value="09:00">
+                                    <label class="mcp-label" style="margin-left:12px">仅工作日</label>
+                                    <label class="mcp-toggle"><input id="cron-daily-weekday" type="checkbox"><span class="mcp-toggle-track"></span></label>
+                                </div>
+                            </div>
+                            <div id="cron-preset-interval" class="cron-preset-panel" style="display:none">
+                                <div class="cron-time-row">
+                                    <label class="mcp-label">每隔</label>
+                                    <input id="cron-interval-val" type="number" class="mcp-input" style="width:70px" value="1" min="1">
+                                    <select id="cron-interval-unit" class="mcp-input" style="width:80px">
+                                        <option value="min">分钟</option>
+                                        <option value="hour" selected>小时</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div id="cron-preset-custom" class="cron-preset-panel" style="display:none">
+                                <input id="cron-f-schedule-raw" class="mcp-input" type="text" placeholder="0 9 * * 1-5" autocomplete="off" style="width:100%">
+                                <div class="mcp-hint" style="margin-top:4px">5 字段 cron 表达式，或 @daily/@hourly/@weekly/@monthly</div>
+                            </div>
+                        </div>
+
+                        <label class="mcp-label">时区 <span class="mcp-hint">可选</span></label>
+                        <input id="cron-f-timezone" class="mcp-input" type="text" placeholder="Asia/Shanghai" autocomplete="off">
+
+                        <label class="mcp-label">模型 <span class="mcp-hint">留空使用默认</span></label>
+                        <input id="cron-f-model" class="mcp-input" type="text" placeholder="" autocomplete="off">
+
+                        <label class="mcp-label">推送渠道 <span class="mcp-hint">留空默认 cron（写文件）</span></label>
+                        <input id="cron-f-channel" class="mcp-input" type="text" placeholder="feishu / websocket / email…" autocomplete="off">
+
+                        <label class="mcp-label">推送对象 ID <span class="mcp-hint">留空使用当前用户</span></label>
+                        <input id="cron-f-recipient" class="mcp-input" type="text" placeholder="飞书 open_id: ou_xxx" autocomplete="off">
+
+                        <label class="mcp-label">启用</label>
+                        <label class="mcp-toggle">
+                            <input id="cron-f-enabled" type="checkbox" checked>
+                            <span class="mcp-toggle-track"></span>
+                        </label>
+                    </div>
+                    <div id="cron-form-error" class="mcp-form-error" style="display:none"></div>
+                    <div class="mcp-form-actions">
+                        <button id="cron-form-cancel-btn" class="nav-btn">取消</button>
+                        <button id="cron-form-save-btn" class="nav-btn primary">保存</button>
+                    </div>
+                </div>
+
+                <!-- History sub-panel (shown inline below a job card) -->
+                <div id="cron-history-section" style="display:none">
+                    <div class="mcp-form-title" id="cron-history-title">执行历史</div>
+                    <div id="cron-history-list"></div>
+                    <div class="mcp-form-actions">
+                        <button id="cron-session-view-btn" class="nav-btn" style="display:none">查看完整会话</button>
+                        <button id="cron-history-close-btn" class="nav-btn">关闭</button>
+                    </div>
+                </div>
+
+                <!-- Session full view sub-panel -->
+                <div id="cron-session-section" style="display:none">
+                    <div class="mcp-form-title" id="cron-session-title">完整会话记录</div>
+                    <div id="cron-session-list"></div>
+                    <div class="mcp-form-actions">
+                        <button id="cron-session-close-btn" class="nav-btn">返回历史</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="cron-panel-status" class="mcp-panel-status" style="display:none"></div>
         </div>
     </div>
 

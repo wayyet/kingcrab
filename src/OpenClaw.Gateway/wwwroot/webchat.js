@@ -1835,3 +1835,636 @@
             });
         })();
         // ---
+
+        // ── Cron / Automation Management Panel ───────────────────────────────
+        (() => {
+            const overlay       = document.getElementById('cron-overlay');
+            const openBtn       = document.getElementById('cron-panel-btn');
+            const closeBtn      = document.getElementById('cron-close-btn');
+            const refreshBtn    = document.getElementById('cron-refresh-btn');
+            const addBtn        = document.getElementById('cron-add-btn');
+            const jobList       = document.getElementById('cron-job-list');
+            const formSection   = document.getElementById('cron-form-section');
+            const formTitle     = document.getElementById('cron-form-title');
+            const formError     = document.getElementById('cron-form-error');
+            const cancelBtn     = document.getElementById('cron-form-cancel-btn');
+            const saveBtn       = document.getElementById('cron-form-save-btn');
+            const statusBar     = document.getElementById('cron-panel-status');
+            const histSection   = document.getElementById('cron-history-section');
+            const histTitle     = document.getElementById('cron-history-title');
+            const histList      = document.getElementById('cron-history-list');
+            const histCloseBtn  = document.getElementById('cron-history-close-btn');
+            const sessViewBtn   = document.getElementById('cron-session-view-btn');
+            const sessSection   = document.getElementById('cron-session-section');
+            const sessTitle     = document.getElementById('cron-session-title');
+            const sessList      = document.getElementById('cron-session-list');
+            const sessCloseBtn  = document.getElementById('cron-session-close-btn');
+
+            let currentHistJob = null;
+
+            const fName         = document.getElementById('cron-f-name');
+            const fPrompt       = document.getElementById('cron-f-prompt');
+            const fTimezone     = document.getElementById('cron-f-timezone');
+            const fModel        = document.getElementById('cron-f-model');
+            const fChannel      = document.getElementById('cron-f-channel');
+            const fRecipient    = document.getElementById('cron-f-recipient');
+            const fEnabled      = document.getElementById('cron-f-enabled');
+            const fScheduleRaw  = document.getElementById('cron-f-schedule-raw');
+            const dailyTime     = document.getElementById('cron-daily-time');
+            const dailyWeekday  = document.getElementById('cron-daily-weekday');
+            const intervalVal   = document.getElementById('cron-interval-val');
+            const intervalUnit  = document.getElementById('cron-interval-unit');
+
+            let editingId  = null;  // null = new, string = id being edited
+            let currentPreset = 'daily';
+
+            // ── Frequency tab switching ────────────────────────────────────
+            document.querySelectorAll('.cron-freq-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    document.querySelectorAll('.cron-freq-tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    currentPreset = tab.dataset.preset;
+                    document.getElementById('cron-preset-daily').style.display    = currentPreset === 'daily'    ? '' : 'none';
+                    document.getElementById('cron-preset-interval').style.display = currentPreset === 'interval' ? '' : 'none';
+                    document.getElementById('cron-preset-custom').style.display   = currentPreset === 'custom'   ? '' : 'none';
+                });
+            });
+
+            // ── Status bar ────────────────────────────────────────────────
+            function showStatus(msg, isErr) {
+                statusBar.textContent = msg;
+                statusBar.className = 'mcp-panel-status ' + (isErr ? 'err' : 'ok');
+                statusBar.style.display = '';
+                clearTimeout(showStatus._t);
+                if (!isErr) showStatus._t = setTimeout(() => { statusBar.style.display = 'none'; }, 3500);
+            }
+
+            // ── Build schedule cron expression from preset UI ──────────────
+            function buildSchedule() {
+                if (currentPreset === 'custom') {
+                    return fScheduleRaw.value.trim();
+                }
+                if (currentPreset === 'daily') {
+                    const parts = (dailyTime.value || '09:00').split(':');
+                    const h = parseInt(parts[0], 10) || 9;
+                    const m = parseInt(parts[1], 10) || 0;
+                    const days = dailyWeekday.checked ? '1-5' : '*';
+                    return `${m} ${h} * * ${days}`;
+                }
+                if (currentPreset === 'interval') {
+                    const v = parseInt(intervalVal.value, 10) || 1;
+                    const unit = intervalUnit.value;
+                    if (unit === 'min') return `*/${v} * * * *`;
+                    return `0 */${v} * * *`;
+                }
+                return '';
+            }
+
+            // ── Parse cron expression back into preset UI (best-effort) ───
+            function applyScheduleToPreset(schedule) {
+                if (!schedule) return;
+                // Try to detect daily pattern: "M H * * *" or "M H * * 1-5"
+                const dailyMatch = schedule.match(/^(\d+)\s+(\d+)\s+\*\s+\*\s+([\d\-,]+|\*)$/);
+                if (dailyMatch) {
+                    const m = parseInt(dailyMatch[1], 10);
+                    const h = parseInt(dailyMatch[2], 10);
+                    const d = dailyMatch[3];
+                    dailyTime.value = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+                    dailyWeekday.checked = (d === '1-5');
+                    setPresetTab('daily');
+                    return;
+                }
+                // Interval in minutes: "*/N * * * *"
+                const minMatch = schedule.match(/^\*\/(\d+)\s+\*\s+\*\s+\*\s+\*$/);
+                if (minMatch) {
+                    intervalVal.value = minMatch[1];
+                    intervalUnit.value = 'min';
+                    setPresetTab('interval');
+                    return;
+                }
+                // Interval in hours: "0 */N * * *"
+                const hrMatch = schedule.match(/^0\s+\*\/(\d+)\s+\*\s+\*\s+\*$/);
+                if (hrMatch) {
+                    intervalVal.value = hrMatch[1];
+                    intervalUnit.value = 'hour';
+                    setPresetTab('interval');
+                    return;
+                }
+                // Fallback: show raw
+                fScheduleRaw.value = schedule;
+                setPresetTab('custom');
+            }
+
+            function setPresetTab(preset) {
+                currentPreset = preset;
+                document.querySelectorAll('.cron-freq-tab').forEach(t => {
+                    t.classList.toggle('active', t.dataset.preset === preset);
+                });
+                document.getElementById('cron-preset-daily').style.display    = preset === 'daily'    ? '' : 'none';
+                document.getElementById('cron-preset-interval').style.display = preset === 'interval' ? '' : 'none';
+                document.getElementById('cron-preset-custom').style.display   = preset === 'custom'   ? '' : 'none';
+            }
+
+            // ── Relative time helper ───────────────────────────────────────
+            function relTime(iso) {
+                if (!iso) return '—';
+                const ms = Date.now() - new Date(iso).getTime();
+                const sec = Math.floor(ms / 1000);
+                if (sec < 60) return '刚刚';
+                const min = Math.floor(sec / 60);
+                if (min < 60) return `${min} 分钟前`;
+                const hr = Math.floor(min / 60);
+                if (hr < 24) return `${hr} 小时前`;
+                return new Date(iso).toLocaleString('zh-CN');
+            }
+
+            // ── Source badge label ─────────────────────────────────────────
+            function sourceLabel(source) {
+                if (!source) return '未知';
+                if (source === 'legacy-cron') return '内置';
+                if (source === 'agent') return 'Agent';
+                if (source === 'webchat') return 'Web';
+                return source;
+            }
+            function sourceCls(source) {
+                if (source === 'legacy-cron') return 'source-legacy';
+                if (source === 'agent') return 'source-agent';
+                return 'source-webchat';
+            }
+
+            // ── Build a job card element ───────────────────────────────────
+            function buildCard(job) {
+                const isStatic = job.source === 'legacy-cron';
+
+                const card = document.createElement('div');
+                card.className = 'cron-job-card' + (job.enabled === false ? ' disabled' : '');
+                card.dataset.id = job.id;
+
+                // Status dot
+                const dot = document.createElement('div');
+                dot.className = 'cron-job-status';
+
+                // Info
+                const info = document.createElement('div');
+                info.className = 'cron-job-info';
+
+                const nameEl = document.createElement('div');
+                nameEl.className = 'cron-job-name';
+                nameEl.textContent = job.name || job.id;
+
+                const metaEl = document.createElement('div');
+                metaEl.className = 'cron-job-meta';
+                metaEl.textContent = job.schedule || '';
+
+                info.appendChild(nameEl);
+                info.appendChild(metaEl);
+
+                // Source badge
+                const badge = document.createElement('span');
+                badge.className = `cron-job-badge ${sourceCls(job.source)}`;
+                badge.textContent = sourceLabel(job.source);
+
+                // Actions
+                const actions = document.createElement('div');
+                actions.className = 'cron-job-actions';
+
+                // Run now
+                const runBtn = document.createElement('button');
+                runBtn.className = 'mcp-icon-btn';
+                runBtn.title = '立即执行';
+                runBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
+                runBtn.addEventListener('click', () => runJob(job.id, nameEl));
+
+                // History
+                const histBtn = document.createElement('button');
+                histBtn.className = 'mcp-icon-btn';
+                histBtn.title = '执行历史';
+                histBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
+                histBtn.addEventListener('click', () => loadHistory(job));
+
+                actions.appendChild(runBtn);
+                actions.appendChild(histBtn);
+
+                if (!isStatic) {
+                    // Edit
+                    const editBtn = document.createElement('button');
+                    editBtn.className = 'mcp-icon-btn';
+                    editBtn.title = '编辑';
+                    editBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+                    editBtn.addEventListener('click', () => openForm(job));
+
+                    // Delete
+                    const delBtn = document.createElement('button');
+                    delBtn.className = 'mcp-icon-btn danger';
+                    delBtn.title = '删除';
+                    delBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
+                    delBtn.addEventListener('click', () => deleteJob(job.id, job.name || job.id));
+
+                    actions.appendChild(editBtn);
+                    actions.appendChild(delBtn);
+                }
+
+                card.append(dot, info, badge, actions);
+                return card;
+            }
+
+            // ── Render job list ────────────────────────────────────────────
+            function renderJobs(items) {
+                jobList.innerHTML = '';
+                if (!items || items.length === 0) {
+                    const empty = document.createElement('div');
+                    empty.className = 'mcp-server-empty';
+                    empty.textContent = '暂无定时任务。';
+                    jobList.appendChild(empty);
+                    return;
+                }
+                // Static/legacy first, then managed/webchat/agent
+                const sorted = [...items].sort((a, b) => {
+                    const aStatic = a.source === 'legacy-cron' ? 0 : 1;
+                    const bStatic = b.source === 'legacy-cron' ? 0 : 1;
+                    return aStatic - bStatic || (a.name || a.id).localeCompare(b.name || b.id, 'zh-CN');
+                });
+                sorted.forEach(job => jobList.appendChild(buildCard(job)));
+            }
+
+            // ── Load job list from server ──────────────────────────────────
+            async function loadJobs() {
+                try {
+                    const headers = await getAuthHeaders();
+                    const resp = await fetch(getBasePath() + '/admin/automations', { headers });
+                    if (!resp.ok) {
+                        showStatus('加载失败 (' + resp.status + ')', true);
+                        return;
+                    }
+                    const data = await resp.json();
+                    renderJobs(data.items || []);
+                } catch (e) {
+                    showStatus('加载失败: ' + e.message, true);
+                }
+            }
+
+            // ── Load history for a specific job ───────────────────────────
+            async function loadHistory(job) {
+                const id = job.id;
+                const name = job.name || job.id;
+                currentHistJob = job;
+                histTitle.textContent = `${name} · 执行历史`;
+                histList.innerHTML = '<div style="opacity:0.5;font-size:0.8rem;padding:8px">加载中…</div>';
+                formSection.style.display = 'none';
+                sessSection.style.display = 'none';
+                histSection.style.display = '';
+                sessViewBtn.style.display = 'none';
+
+                try {
+                    const headers = await getAuthHeaders();
+                    const resp = await fetch(getBasePath() + '/admin/automations/' + encodeURIComponent(id), { headers });
+                    if (!resp.ok) {
+                        histList.innerHTML = '<div style="color:#ef4444;font-size:0.8rem;padding:8px">加载失败 (' + resp.status + ')</div>';
+                        return;
+                    }
+                    const data = await resp.json();
+                    renderHistory(data.runState);
+                } catch (e) {
+                    histList.innerHTML = `<div style="color:#ef4444;font-size:0.8rem;padding:8px">加载失败: ${e.message}</div>`;
+                }
+            }
+
+            function renderHistory(runState) {
+                histList.innerHTML = '';
+                // Show "查看完整会话" button if there's a session to view
+                if (currentHistJob) {
+                    sessViewBtn.style.display = '';
+                }
+                if (!runState) {
+                    histList.innerHTML = '<div style="opacity:0.5;font-size:0.8rem;padding:8px">无历史记录。</div>';
+                    return;
+                }
+
+                // Last run summary
+                if (runState.lastRunAtUtc) {
+                    const summary = document.createElement('div');
+                    summary.style.cssText = 'font-size:0.78rem;opacity:0.65;margin-bottom:10px;padding:0 2px';
+                    const outcomeLabel = runState.outcome === 'success' ? '✅ 成功'
+                        : runState.outcome === 'failure' ? '❌ 失败'
+                        : runState.outcome || '—';
+                    summary.textContent = `上次执行: ${relTime(runState.lastRunAtUtc)} · ${outcomeLabel}`;
+                    if (runState.messagePreview) {
+                        const prev = document.createElement('div');
+                        prev.style.cssText = 'opacity:0.5;margin-top:2px;font-size:0.73rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+                        prev.textContent = runState.messagePreview;
+                        summary.appendChild(prev);
+                    }
+                    histList.appendChild(summary);
+                }
+
+                const runs = runState.recentRuns || [];
+                if (runs.length === 0) {
+                    const empty = document.createElement('div');
+                    empty.style.cssText = 'opacity:0.5;font-size:0.8rem;padding:8px 2px';
+                    empty.textContent = '暂无详细执行记录。';
+                    histList.appendChild(empty);
+                    return;
+                }
+
+                runs.forEach(run => {
+                    const row = document.createElement('div');
+                    row.className = 'cron-history-row';
+                    row.style.cursor = 'pointer';
+
+                    const dotEl = document.createElement('div');
+                    dotEl.className = 'cron-history-dot ' + (run.outcome === 'success' ? 'ok' : run.outcome === 'failure' ? 'error' : '');
+
+                    const meta = document.createElement('div');
+                    meta.className = 'cron-history-meta';
+                    const tokens = (run.inputTokens || run.outputTokens)
+                        ? ` · ${(run.inputTokens || 0) + (run.outputTokens || 0)} tokens`
+                        : '';
+                    meta.textContent = `${relTime(run.ranAtUtc)}${tokens}`;
+
+                    const prev = document.createElement('div');
+                    prev.className = 'cron-history-preview';
+                    prev.textContent = run.messagePreview || '—';
+                    prev.title = run.messagePreview || '';
+
+                    // expandable detail panel
+                    const detail = document.createElement('div');
+                    detail.className = 'cron-history-detail';
+                    detail.style.display = 'none';
+
+                    const outcomeLabel = run.outcome === 'success' ? '✅ 成功'
+                        : run.outcome === 'failure' ? '❌ 失败'
+                        : run.outcome || '—';
+                    const ranAt = run.ranAtUtc ? new Date(run.ranAtUtc).toLocaleString() : '—';
+                    detail.innerHTML =
+                        `<div class="cron-history-detail-row"><span>执行时间</span><span>${ranAt}</span></div>` +
+                        `<div class="cron-history-detail-row"><span>结果</span><span>${outcomeLabel}</span></div>` +
+                        `<div class="cron-history-detail-row"><span>输入 tokens</span><span>${run.inputTokens ?? 0}</span></div>` +
+                        `<div class="cron-history-detail-row"><span>输出 tokens</span><span>${run.outputTokens ?? 0}</span></div>` +
+                        (run.messagePreview
+                            ? `<div class="cron-history-detail-preview">${run.messagePreview.replace(/</g, '&lt;')}</div>`
+                            : '');
+
+                    row.addEventListener('click', () => {
+                        const isOpen = detail.style.display !== 'none';
+                        detail.style.display = isOpen ? 'none' : 'block';
+                        row.classList.toggle('cron-history-row-open', !isOpen);
+                    });
+
+                    row.append(dotEl, meta, prev);
+                    histList.appendChild(row);
+                    histList.appendChild(detail);
+                });
+            }
+
+            // ── Open add/edit form ─────────────────────────────────────────
+            function openForm(job) {
+                editingId = job ? job.id : null;
+                formTitle.textContent = job ? '编辑定时任务' : '新建定时任务';
+                formError.style.display = 'none';
+                histSection.style.display = 'none';
+
+                if (job) {
+                    fName.value     = job.name || '';
+                    fPrompt.value   = job.prompt || '';
+                    fTimezone.value = job.timezone || '';
+                    fModel.value    = job.modelId || '';
+                    fChannel.value  = job.deliveryChannelId || '';
+                    fRecipient.value = job.deliveryRecipientId || '';
+                    fEnabled.checked = job.enabled !== false;
+                    applyScheduleToPreset(job.schedule || '');
+                } else {
+                    fName.value     = '';
+                    fPrompt.value   = '';
+                    fTimezone.value = 'Asia/Shanghai';
+                    fModel.value    = '';
+                    fChannel.value  = '';
+                    fRecipient.value = '';
+                    fEnabled.checked = true;
+                    dailyTime.value = '09:00';
+                    dailyWeekday.checked = false;
+                    intervalVal.value = '1';
+                    intervalUnit.value = 'hour';
+                    fScheduleRaw.value = '';
+                    setPresetTab('daily');
+                }
+
+                formSection.style.display = '';
+                addBtn.style.display = 'none';
+                fName.focus();
+            }
+
+            function closeForm() {
+                formSection.style.display = 'none';
+                histSection.style.display = 'none';
+                addBtn.style.display = '';
+                editingId = null;
+            }
+
+            // ── Save (create or update) ────────────────────────────────────
+            async function saveJob() {
+                const name = fName.value.trim();
+                const schedule = buildSchedule();
+                const prompt = fPrompt.value.trim();
+
+                if (!name) {
+                    formError.textContent = '请填写任务名称。';
+                    formError.style.display = '';
+                    return;
+                }
+                if (!schedule) {
+                    formError.textContent = '请设置执行计划。';
+                    formError.style.display = '';
+                    return;
+                }
+                if (!prompt) {
+                    formError.textContent = '请填写提示词。';
+                    formError.style.display = '';
+                    return;
+                }
+                formError.style.display = 'none';
+
+                const payload = {
+                    id: editingId || '',
+                    name,
+                    schedule,
+                    prompt,
+                    timezone: fTimezone.value.trim() || null,
+                    modelId: fModel.value.trim() || null,
+                    deliveryChannelId: fChannel.value.trim() || null,
+                    deliveryRecipientId: fRecipient.value.trim() || null,
+                    enabled: fEnabled.checked,
+                    source: editingId ? undefined : 'webchat'
+                };
+
+                try {
+                    const headers = Object.assign({ 'Content-Type': 'application/json' }, await getAuthHeaders());
+                    let resp;
+                    if (editingId) {
+                        resp = await fetch(getBasePath() + '/admin/automations/' + encodeURIComponent(editingId), {
+                            method: 'PUT',
+                            headers,
+                            body: JSON.stringify(payload)
+                        });
+                    } else {
+                        resp = await fetch(getBasePath() + '/admin/automations', {
+                            method: 'POST',
+                            headers,
+                            body: JSON.stringify(payload)
+                        });
+                    }
+                    if (!resp.ok) {
+                        const err = await resp.json().catch(() => ({ error: '保存失败 (' + resp.status + ')' }));
+                        formError.textContent = err.error || '保存失败 (' + resp.status + ')';
+                        formError.style.display = '';
+                        return;
+                    }
+                    closeForm();
+                    showStatus('保存成功！', false);
+                    await loadJobs();
+                } catch (e) {
+                    formError.textContent = '保存失败: ' + e.message;
+                    formError.style.display = '';
+                }
+            }
+
+            // ── Delete a job ──────────────────────────────────────────────
+            async function deleteJob(id, name) {
+                if (!confirm(`确定删除定时任务 "${name}"？`)) return;
+                try {
+                    const headers = Object.assign({ 'Content-Type': 'application/json' }, await getAuthHeaders());
+                    const resp = await fetch(getBasePath() + '/admin/automations/' + encodeURIComponent(id), {
+                        method: 'DELETE',
+                        headers
+                    });
+                    if (!resp.ok) {
+                        const err = await resp.json().catch(() => ({ error: '删除失败 (' + resp.status + ')' }));
+                        showStatus(err.error || '删除失败 (' + resp.status + ')', true);
+                        return;
+                    }
+                    showStatus('已删除。', false);
+                    await loadJobs();
+                } catch (e) {
+                    showStatus('删除失败: ' + e.message, true);
+                }
+            }
+
+            // ── Load full session conversation ─────────────────────────────
+            async function loadSession() {
+                if (!currentHistJob) return;
+                const sessionId = currentHistJob.sessionId || ('automation:' + currentHistJob.id);
+                const label = currentHistJob.name || currentHistJob.id;
+                sessTitle.textContent = `${label} · 完整会话`;
+                sessList.innerHTML = '<div style="opacity:0.5;font-size:0.8rem;padding:8px">加载中…</div>';
+                histSection.style.display = 'none';
+                sessSection.style.display = '';
+
+                try {
+                    const headers = await getAuthHeaders();
+                    const resp = await fetch(getBasePath() + '/admin/sessions/' + encodeURIComponent(sessionId), { headers });
+                    if (resp.status === 404) {
+                        sessList.innerHTML = '<div style="opacity:0.5;font-size:0.8rem;padding:8px">暂无会话记录（该任务尚未执行过）。</div>';
+                        return;
+                    }
+                    if (!resp.ok) {
+                        sessList.innerHTML = `<div style="color:#ef4444;font-size:0.8rem;padding:8px">加载失败 (${resp.status})</div>`;
+                        return;
+                    }
+                    const data = await resp.json();
+                    renderSession(data.session?.history || []);
+                } catch (e) {
+                    sessList.innerHTML = `<div style="color:#ef4444;font-size:0.8rem;padding:8px">加载失败: ${e.message}</div>`;
+                }
+            }
+
+            function renderSession(history) {
+                sessList.innerHTML = '';
+                if (!history || history.length === 0) {
+                    sessList.innerHTML = '<div style="opacity:0.5;font-size:0.8rem;padding:8px">暂无对话记录。</div>';
+                    return;
+                }
+                // Filter out system-only turns (tool-only with no content, etc.)
+                history.forEach(turn => {
+                    if (!turn.content && (!turn.toolCalls || turn.toolCalls.length === 0)) return;
+                    const wrap = document.createElement('div');
+                    wrap.className = 'cron-sess-turn cron-sess-turn-' + (turn.role === 'user' ? 'user' : 'assistant');
+
+                    const header = document.createElement('div');
+                    header.className = 'cron-sess-turn-header';
+                    const roleLabel = turn.role === 'user' ? '指令' : 'AI 回复';
+                    const ts = turn.timestamp ? new Date(turn.timestamp).toLocaleString('zh-CN') : '';
+                    header.textContent = roleLabel + (ts ? '  ' + ts : '');
+
+                    const body = document.createElement('div');
+                    body.className = 'cron-sess-turn-body';
+                    body.textContent = turn.content || '';
+
+                    wrap.appendChild(header);
+                    wrap.appendChild(body);
+
+                    if (turn.toolCalls && turn.toolCalls.length > 0) {
+                        turn.toolCalls.forEach(tc => {
+                            const tcEl = document.createElement('div');
+                            tcEl.className = 'cron-sess-tool-call';
+                            tcEl.textContent = `🔧 ${tc.toolName}`;
+                            tcEl.title = tc.arguments || '';
+                            wrap.appendChild(tcEl);
+                        });
+                    }
+
+                    sessList.appendChild(wrap);
+                });
+                // Scroll to bottom
+                sessList.scrollTop = sessList.scrollHeight;
+            }
+
+            // ── Run now ───────────────────────────────────────────────────
+            async function runJob(id, nameEl) {
+                try {
+                    const headers = Object.assign({ 'Content-Type': 'application/json' }, await getAuthHeaders());
+                    const resp = await fetch(getBasePath() + '/admin/automations/' + encodeURIComponent(id) + '/run', {
+                        method: 'POST',
+                        headers
+                    });
+                    if (!resp.ok) {
+                        const err = await resp.json().catch(() => ({ error: '执行失败 (' + resp.status + ')' }));
+                        showStatus(err.error || '执行失败 (' + resp.status + ')', true);
+                        return;
+                    }
+                    showStatus('已触发立即执行！', false);
+                } catch (e) {
+                    showStatus('执行失败: ' + e.message, true);
+                }
+            }
+
+            // ── Event wiring ──────────────────────────────────────────────
+            openBtn.addEventListener('click', async () => {
+                overlay.classList.add('open');
+                closeForm();
+                statusBar.style.display = 'none';
+                await loadJobs();
+            });
+
+            closeBtn.addEventListener('click', () => {
+                overlay.classList.remove('open');
+                closeForm();
+            });
+
+            overlay.addEventListener('click', e => {
+                if (e.target === overlay) {
+                    overlay.classList.remove('open');
+                    closeForm();
+                }
+            });
+
+            refreshBtn.addEventListener('click', loadJobs);
+            addBtn.addEventListener('click', () => openForm(null));
+            cancelBtn.addEventListener('click', closeForm);
+            histCloseBtn.addEventListener('click', closeForm);
+            sessViewBtn.addEventListener('click', loadSession);
+            sessCloseBtn.addEventListener('click', () => {
+                sessSection.style.display = 'none';
+                histSection.style.display = '';
+            });
+            saveBtn.addEventListener('click', saveJob);
+        })();
+        // ---

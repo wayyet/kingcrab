@@ -681,7 +681,7 @@ internal static class GatewayWorkers
                                 AgentStreamEvent? doneEvent = null;
                                 var streamHistoryCountBefore = session.History.Count;
                                 await foreach (var evt in agentRuntime.RunStreamingAsync(
-                                    session, messageText, executionCt, approvalCallback: ApprovalCallback))
+                                    session, messageText, executionCt, approvalCallback: ApprovalCallback, isSystemEvent: msg.IsSystem))
                                 {
                                     if (string.Equals(evt.EnvelopeType, "assistant_done", StringComparison.Ordinal))
                                     {
@@ -798,7 +798,7 @@ internal static class GatewayWorkers
                                 }
 
                                 var historyCountBefore = session.History.Count;
-                                var responseText = await agentRuntime.RunAsync(session, messageText, executionCt, approvalCallback: ApprovalCallback);
+                                var responseText = await agentRuntime.RunAsync(session, messageText, executionCt, approvalCallback: ApprovalCallback, isSystemEvent: msg.IsSystem);
 
                                 // Upload files from write_file tool results and build asset list BEFORE persisting,
                                 // so FILE_URL markers are injected into history for replay.

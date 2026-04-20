@@ -617,6 +617,15 @@ internal static class AdminEndpoints
             if (automation is null)
                 return Results.BadRequest(new MutationResponse { Success = false, Error = "Automation payload is required." });
 
+            // Load existing record so we can preserve delivery config if caller omits it
+            var existing = await automationService.GetAsync(id, ctx.RequestAborted);
+
+            // Preserve delivery channel/recipient from existing record if not provided in the payload
+            var resolvedChannelId = string.IsNullOrWhiteSpace(automation.DeliveryChannelId)
+                ? existing?.DeliveryChannelId ?? "cron"
+                : automation.DeliveryChannelId;
+            var resolvedRecipientId = automation.DeliveryRecipientId ?? existing?.DeliveryRecipientId;
+
             var saved = await automationService.SaveAsync(new AutomationDefinition
             {
                 Id = id,
@@ -627,15 +636,15 @@ internal static class AdminEndpoints
                 Prompt = automation.Prompt,
                 ModelId = automation.ModelId,
                 RunOnStartup = automation.RunOnStartup,
-                SessionId = automation.SessionId,
-                DeliveryChannelId = automation.DeliveryChannelId,
-                DeliveryRecipientId = automation.DeliveryRecipientId,
-                DeliverySubject = automation.DeliverySubject,
+                SessionId = automation.SessionId ?? existing?.SessionId,
+                DeliveryChannelId = resolvedChannelId,
+                DeliveryRecipientId = resolvedRecipientId,
+                DeliverySubject = automation.DeliverySubject ?? existing?.DeliverySubject,
                 Tags = automation.Tags,
                 IsDraft = automation.IsDraft,
                 Source = automation.Source,
-                TemplateKey = automation.TemplateKey,
-                CreatedAtUtc = automation.CreatedAtUtc,
+                TemplateKey = automation.TemplateKey ?? existing?.TemplateKey,
+                CreatedAtUtc = existing?.CreatedAtUtc ?? automation.CreatedAtUtc,
                 UpdatedAtUtc = automation.UpdatedAtUtc
             }, ctx.RequestAborted);
 
@@ -659,6 +668,64 @@ internal static class AdminEndpoints
                     RunState = await automationService.GetRunStateAsync(saved.Id, ctx.RequestAborted)
                 },
                 CoreJsonContext.Default.IntegrationAutomationDetailResponse);
+        });
+
+        app.MapPost("/admin/automations", async (HttpContext ctx) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: true, endpointScope: "admin.automations.mutate");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+
+            var requestPayload = await ReadJsonBodyAsync(ctx, CoreJsonContext.Default.AutomationDefinition);
+            if (requestPayload.Failure is not null)
+                return requestPayload.Failure;
+
+            var automation = requestPayload.Value;
+            if (automation is null)
+                return Results.BadRequest(new MutationResponse { Success = false, Error = "Automation payload is required." });
+
+            var saved = await automationService.SaveAsync(new AutomationDefinition
+            {
+                Id = "",  // empty → server generates new ID
+                Name = automation.Name,
+                Enabled = automation.Enabled,
+                Schedule = automation.Schedule,
+                Timezone = automation.Timezone,
+                Prompt = automation.Prompt,
+                ModelId = automation.ModelId,
+                RunOnStartup = automation.RunOnStartup,
+                SessionId = automation.SessionId,
+                DeliveryChannelId = automation.DeliveryChannelId,
+                DeliveryRecipientId = automation.DeliveryRecipientId,
+                DeliverySubject = automation.DeliverySubject,
+                Tags = automation.Tags,
+                IsDraft = automation.IsDraft,
+                Source = string.IsNullOrWhiteSpace(automation.Source) ? "webchat" : automation.Source,
+                TemplateKey = automation.TemplateKey
+            }, ctx.RequestAborted);
+
+            return Results.Json(
+                new IntegrationAutomationDetailResponse
+                {
+                    Automation = saved,
+                    RunState = await automationService.GetRunStateAsync(saved.Id, ctx.RequestAborted)
+                },
+                CoreJsonContext.Default.IntegrationAutomationDetailResponse,
+                statusCode: StatusCodes.Status201Created);
+        });
+
+        app.MapDelete("/admin/automations/{id}", async (HttpContext ctx, string id) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: true, endpointScope: "admin.automations.mutate");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+
+            var automation = await automationService.GetAsync(id, ctx.RequestAborted);
+            if (automation is null)
+                return Results.NotFound(new MutationResponse { Success = false, Error = "Automation not found." });
+
+            await automationService.DeleteAsync(id, ctx.RequestAborted);
+            return Results.Json(new MutationResponse { Success = true }, CoreJsonContext.Default.MutationResponse);
         });
 
         app.MapPost("/admin/automations/{id}/run", async (HttpContext ctx, string id) =>
