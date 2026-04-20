@@ -59,7 +59,7 @@ public sealed class SettingsStore
         };
 
         var json = JsonSerializer.Serialize(toSave, JsonOptions);
-        var tmp = SettingsPath + ".tmp";
+        var tmp = $"{SettingsPath}.tmp";
         File.WriteAllText(tmp, json);
         File.Move(tmp, SettingsPath, overwrite: true);
 

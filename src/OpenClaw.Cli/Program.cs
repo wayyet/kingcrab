@@ -1,6 +1,7 @@
-using OpenClaw.Core.Models;
 using System.Globalization;
-using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using OpenClaw.Core.Models;
 
 namespace OpenClaw.Cli;
 
@@ -9,14 +10,10 @@ internal static class Program
     private const string DefaultBaseUrl = "http://127.0.0.1:18789";
     private const string EnvBaseUrl = "OPENCLAW_BASE_URL";
     private const string EnvAuthToken = "OPENCLAW_AUTH_TOKEN";
+    private const string DefaultSetupConfigPath = "~/.openclaw/config/openclaw.settings.json";
 
     public static async Task<int> Main(string[] args)
     {
-        // 设置控制台输出编码为UTF-8
-        Console.OutputEncoding = Encoding.UTF8;
-        // 输入也支持UTF-8
-        Console.InputEncoding = Encoding.UTF8;
-
         if (args.Length == 0 || args[0] is "-h" or "--help" or "help")
         {
             PrintHelp();
@@ -32,8 +29,17 @@ internal static class Program
             {
                 "run" => await RunAsync(rest),
                 "chat" => await ChatAsync(rest),
+                "live" => await LiveAsync(rest),
+                "tui" => await TuiAsync(rest),
+                "setup" => await SetupAsync(rest),
+                "migrate" => await MigrateAsync(rest),
                 "heartbeat" => await HeartbeatAsync(rest),
+                "models" => await ModelsAsync(rest),
+                "eval" => await EvalAsync(rest),
+                "accounts" => await AccountsAsync(rest),
+                "backends" => await BackendsAsync(rest),
                 "admin" => await AdminAsync(rest),
+                "plugins" => await PluginCommands.RunAsync(rest),
                 "clawhub" => await ClawHubCommand.RunAsync(rest),
                 "version" or "--version" or "-v" => PrintVersion(),
                 _ => UnknownCommand(command)
@@ -73,7 +79,15 @@ internal static class Program
             Usage:
               openclaw run [options] <prompt>
               openclaw chat [options]
+              openclaw live [options]
+              openclaw tui [options]
+              openclaw setup [options]
+              openclaw migrate [options]
               openclaw heartbeat <wizard|preview|status> [options]
+              openclaw models <list|doctor> [options]
+              openclaw eval <run|compare> [options]
+              openclaw accounts <list|add|remove|probe> [options]
+              openclaw backends <list|probe|run|session send> [options]
               openclaw admin <posture|incident export|approvals simulate> [options]
               openclaw clawhub [wrapper options] [--] <clawhub args...>
 
@@ -82,6 +96,7 @@ internal static class Program
               --token <token>    Auth token (deprecated: prefer OPENCLAW_AUTH_TOKEN)
               --model <model>    Model override (optional)
               --system <text>    System prompt (optional)
+              --preset <id>      Tool preset / platform policy bundle (optional)
 
             run options:
               --file <path>      Attach file contents (repeatable)
@@ -99,11 +114,30 @@ internal static class Program
               OPENCLAW_AUTH_TOKEN=... openclaw run "summarize this README" --file ./README.md
               cat error.log | openclaw run "what went wrong?"
               openclaw chat --system "Be concise."
+              openclaw live --model gemini-2.0-flash-live-001 --system "Be concise."
+              openclaw tui
+              openclaw setup --workspace ./workspace
+              openclaw migrate --apply
               openclaw heartbeat status
+              openclaw models list
+              openclaw models doctor
+              openclaw eval run --profile gemma4-prod
+              openclaw eval compare --profiles gemma4-prod,frontier-tools
+              openclaw accounts list
+              openclaw accounts add codex --display-name "Local Codex" --secret-ref env:OPENAI_API_KEY
+              openclaw backends list
+              openclaw backends run codex-cli --workspace . --prompt "summarize this repository"
               openclaw heartbeat wizard
               openclaw admin posture
               openclaw admin approvals simulate --tool shell --args "{\"command\":\"pwd\"}"
               openclaw admin incident export
+
+            Plugin management:
+              openclaw plugins install <package-name>    Install from npm/ClawHub
+              openclaw plugins install ./local-plugin     Install from local path
+              openclaw plugins remove <plugin-name>       Remove a plugin
+              openclaw plugins list                       List installed plugins
+              openclaw plugins search <query>             Search npm for plugins
 
             ClawHub wrapper:
               # Forward --help to ClawHub itself:
@@ -145,6 +179,122 @@ internal static class Program
             """);
     }
 
+    private static void PrintModelsHelp()
+    {
+        Console.WriteLine(
+            """
+            openclaw models
+
+            Usage:
+              openclaw models list [--url <url>] [--token <token>]
+              openclaw models doctor [--url <url>] [--token <token>]
+            """);
+    }
+
+    private static void PrintEvalHelp()
+    {
+        Console.WriteLine(
+            """
+            openclaw eval
+
+            Usage:
+              openclaw eval run [--profile <id>] [--scenario <id>]... [--url <url>] [--token <token>]
+              openclaw eval compare --profiles <id,id,...> [--scenario <id>]... [--url <url>] [--token <token>]
+            """);
+    }
+
+    private static void PrintAccountsHelp()
+    {
+        Console.WriteLine(
+            """
+            openclaw accounts
+
+            Usage:
+              openclaw accounts list [--url <url>] [--token <token>]
+              openclaw accounts add <provider> [--display-name <name>] (--secret-ref <ref> | --secret <secret> | --token-file <path>)
+                                     [--scope <scope>]... [--expires-at <iso8601>] [--metadata <key=value>]... [--url <url>] [--token <token>]
+              openclaw accounts remove <id> [--url <url>] [--token <token>]
+              openclaw accounts probe <provider|id> [--backend <id>] [--url <url>] [--token <token>]
+            """);
+    }
+
+    private static void PrintBackendsHelp()
+    {
+        Console.WriteLine(
+            """
+            openclaw backends
+
+            Usage:
+              openclaw backends list [--url <url>] [--token <token>]
+              openclaw backends probe <id> [--workspace <path>] [--url <url>] [--token <token>]
+              openclaw backends run <id> --workspace <path> --prompt <text> [--model <id>] [--read-only <true|false>] [--url <url>] [--token <token>]
+              openclaw backends session send <id> <sessionId> --text <text> [--url <url>] [--token <token>]
+            """);
+    }
+
+    private static void PrintSetupHelp()
+    {
+        Console.WriteLine(
+            """
+            openclaw setup
+
+            Usage:
+              openclaw setup [--config <path>] [--workspace <path>] [--provider <id>] [--model <id>] [--api-key <secret-or-envref>]
+                              [--bind <address>] [--port <n>] [--auth-token <token>]
+                              [--docker-image <image>] [--opensandbox-endpoint <url>] [--ssh-host <host>] [--ssh-user <user>] [--ssh-key <path>]
+
+            Notes:
+              - Writes an external JSON config file for the gateway.
+              - Validates workspace and optional execution backend prerequisites.
+              - Prints the exact gateway launch command using the generated config.
+            """);
+    }
+
+    private static void PrintMigrateHelp()
+    {
+        Console.WriteLine(
+            """
+            openclaw migrate
+
+            Usage:
+              openclaw migrate [--apply] [--url <url>] [--token <token>]
+
+            Notes:
+              - Without --apply, this previews legacy cron/heartbeat migrations.
+              - With --apply, canonical automation definitions are written through the admin API.
+            """);
+    }
+
+    private static void PrintTuiHelp()
+    {
+        Console.WriteLine(
+            """
+            openclaw tui
+
+            Usage:
+              openclaw tui [--url <url>] [--token <token>]
+
+            Notes:
+              - Launches the Spectre.Console terminal UI for runtime status, sessions, search,
+                automations, profiles, learning proposals, approvals, direct chat, and live sessions.
+            """);
+    }
+
+    private static void PrintLiveHelp()
+    {
+        Console.WriteLine(
+            """
+            openclaw live
+
+            Usage:
+              openclaw live [--url <url>] [--token <token>] [--provider <id>] [--model <id>] [--system <text>] [--voice <name>] [--modality <TEXT|AUDIO>]...
+
+            Notes:
+              - Opens a Gemini Live websocket session through the gateway.
+              - Interactive commands: /interrupt, /audio-file <path> [mime], /exit
+            """);
+    }
+
     private static async Task<int> RunAsync(string[] args)
     {
         var parsed = CliArgs.Parse(args);
@@ -158,6 +308,7 @@ internal static class Program
         var token = ResolveAuthToken(parsed, Console.Error);
         var model = parsed.GetOption("--model");
         var system = parsed.GetOption("--system");
+        var preset = parsed.GetOption("--preset");
 
         var stream = !parsed.HasFlag("--no-stream");
         var temperature = ParseFloat(parsed.GetOption("--temperature"));
@@ -192,13 +343,13 @@ internal static class Program
 
         if (stream)
         {
-            var full = await client.StreamChatCompletionAsync(request, s => Console.Write(s), CancellationToken.None);
+            var full = await client.StreamChatCompletionAsync(request, s => Console.Write(s), CancellationToken.None, preset);
             if (!string.IsNullOrEmpty(full) && !full.EndsWith('\n'))
                 Console.WriteLine();
             return 0;
         }
 
-        var response = await client.ChatCompletionAsync(request, CancellationToken.None);
+        var response = await client.ChatCompletionAsync(request, CancellationToken.None, preset);
         var text = response.Choices[0].Message.Content;
         Console.WriteLine(text);
         return 0;
@@ -217,6 +368,7 @@ internal static class Program
         var token = ResolveAuthToken(parsed, Console.Error);
         var model = parsed.GetOption("--model");
         var system = parsed.GetOption("--system");
+        var preset = parsed.GetOption("--preset");
 
         var temperature = ParseFloat(parsed.GetOption("--temperature"));
         var maxTokens = ParseInt(parsed.GetOption("--max-tokens"));
@@ -259,12 +411,198 @@ internal static class Program
                 Messages = messages
             };
 
-            var assistantText = await client.StreamChatCompletionAsync(request, s => Console.Write(s), CancellationToken.None);
+            var assistantText = await client.StreamChatCompletionAsync(request, s => Console.Write(s), CancellationToken.None, preset);
             if (!assistantText.EndsWith('\n'))
                 Console.WriteLine();
             conversation.Add(new OpenAiMessage { Role = "assistant", Content = assistantText });
         }
 
+        return 0;
+    }
+
+    private static async Task<int> LiveAsync(string[] args)
+    {
+        var parsed = CliArgs.Parse(args);
+        if (parsed.ShowHelp)
+        {
+            PrintLiveHelp();
+            return 0;
+        }
+
+        var baseUrl = parsed.GetOption("--url") ?? Environment.GetEnvironmentVariable(EnvBaseUrl) ?? DefaultBaseUrl;
+        var token = ResolveAuthToken(parsed, Console.Error);
+        var provider = parsed.GetOption("--provider");
+        var model = parsed.GetOption("--model");
+        var system = parsed.GetOption("--system");
+        var voice = parsed.GetOption("--voice");
+        var modalities = parsed.Options.TryGetValue("--modality", out var values)
+            ? values.Select(static item => item.ToUpperInvariant()).Distinct(StringComparer.OrdinalIgnoreCase).ToArray()
+            : ["TEXT"];
+
+        await RunLiveConsoleAsync(baseUrl, token, provider, model, system, voice, modalities);
+        return 0;
+    }
+
+    private static async Task<int> TuiAsync(string[] args)
+    {
+        var parsed = CliArgs.Parse(args);
+        if (parsed.ShowHelp)
+        {
+            PrintTuiHelp();
+            return 0;
+        }
+
+        var baseUrl = parsed.GetOption("--url") ?? Environment.GetEnvironmentVariable(EnvBaseUrl) ?? DefaultBaseUrl;
+        var token = ResolveAuthToken(parsed, Console.Error);
+        var preset = parsed.GetOption("--preset");
+        try
+        {
+            return await OpenClaw.Tui.TerminalUi.RunAsync(baseUrl, token, preset, CancellationToken.None);
+        }
+        catch (TypeLoadException)
+        {
+            Console.Error.WriteLine("The TUI is not available in this build. Use the non-AOT build or the admin web UI.");
+            return 1;
+        }
+        catch (MissingMethodException)
+        {
+            Console.Error.WriteLine("The TUI is not available in this build. Use the non-AOT build or the admin web UI.");
+            return 1;
+        }
+    }
+
+    private static async Task<int> SetupAsync(string[] args)
+    {
+        var parsed = CliArgs.Parse(args);
+        if (parsed.ShowHelp)
+        {
+            PrintSetupHelp();
+            return 0;
+        }
+
+        var configPath = ExpandPath(parsed.GetOption("--config") ?? DefaultSetupConfigPath);
+        var workspace = Path.GetFullPath(ExpandPath(parsed.GetOption("--workspace") ?? Path.Combine(Directory.GetCurrentDirectory(), "workspace")));
+        Directory.CreateDirectory(workspace);
+
+        var config = new GatewayConfig
+        {
+            BindAddress = parsed.GetOption("--bind") ?? "127.0.0.1",
+            Port = ParseInt(parsed.GetOption("--port")) ?? 18789,
+            AuthToken = parsed.GetOption("--auth-token")
+                ?? Environment.GetEnvironmentVariable(EnvAuthToken)
+                ?? $"oc_{Guid.NewGuid():N}",
+            Llm = new LlmProviderConfig
+            {
+                Provider = parsed.GetOption("--provider") ?? "openai",
+                Model = parsed.GetOption("--model") ?? new GatewayConfig().Llm.Model,
+                ApiKey = parsed.GetOption("--api-key") ?? "env:MODEL_PROVIDER_KEY"
+            },
+            Tooling = new ToolingConfig
+            {
+                WorkspaceRoot = workspace
+            }
+        };
+
+        var warnings = new List<string>();
+        if (parsed.GetOption("--docker-image") is { Length: > 0 } dockerImage)
+        {
+            config.Execution.Profiles["docker"] = new ExecutionBackendProfileConfig
+            {
+                Type = ExecutionBackendType.Docker,
+                Image = dockerImage,
+                WorkingDirectory = workspace
+            };
+            config.Execution.Tools["shell"] = new ExecutionToolRouteConfig { Backend = "docker", FallbackBackend = "local", RequireWorkspace = true };
+            warnings.AddRange(CheckCommandAvailability("docker", "--version", "Docker backend requested but docker was not found on PATH."));
+        }
+
+        if (parsed.GetOption("--opensandbox-endpoint") is { Length: > 0 } openSandboxEndpoint)
+        {
+            if (!Uri.TryCreate(openSandboxEndpoint, UriKind.Absolute, out _))
+                throw new ArgumentException($"Invalid OpenSandbox endpoint: {openSandboxEndpoint}");
+
+            config.Sandbox.Provider = SandboxProviderNames.OpenSandbox;
+            config.Sandbox.Endpoint = openSandboxEndpoint;
+            config.Execution.Profiles["opensandbox"] = new ExecutionBackendProfileConfig
+            {
+                Type = ExecutionBackendType.OpenSandbox,
+                Endpoint = openSandboxEndpoint
+            };
+        }
+
+        if (parsed.GetOption("--ssh-host") is { Length: > 0 } sshHost)
+        {
+            var sshUser = parsed.GetOption("--ssh-user");
+            if (string.IsNullOrWhiteSpace(sshUser))
+                throw new ArgumentException("--ssh-user is required when --ssh-host is set.");
+
+            config.Execution.Profiles["ssh"] = new ExecutionBackendProfileConfig
+            {
+                Type = ExecutionBackendType.Ssh,
+                Host = sshHost,
+                Username = sshUser,
+                PrivateKeyPath = parsed.GetOption("--ssh-key"),
+                WorkingDirectory = workspace
+            };
+            warnings.AddRange(CheckCommandAvailability("ssh", "-V", "SSH backend requested but ssh was not found on PATH."));
+        }
+
+        var openClawNode = JsonNode.Parse(JsonSerializer.Serialize(config, CoreJsonContext.Default.GatewayConfig))
+            ?? throw new InvalidOperationException("Failed to serialize gateway config.");
+        var root = new JsonObject
+        {
+            ["OpenClaw"] = openClawNode
+        };
+
+        var directory = Path.GetDirectoryName(configPath);
+        if (!string.IsNullOrWhiteSpace(directory))
+            Directory.CreateDirectory(directory);
+
+        await File.WriteAllTextAsync(
+            configPath,
+            root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }),
+            CancellationToken.None);
+
+        Console.WriteLine($"Wrote config: {configPath}");
+        Console.WriteLine($"Workspace: {workspace}");
+        Console.WriteLine($"Provider/model: {config.Llm.Provider}/{config.Llm.Model}");
+        Console.WriteLine($"Auth token: {config.AuthToken}");
+        if (warnings.Count > 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine("Validation warnings:");
+            foreach (var warning in warnings)
+                Console.WriteLine($"- {warning}");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("Launch:");
+        Console.WriteLine($"dotnet run --project src/OpenClaw.Gateway -- --config {QuoteIfNeeded(configPath)}");
+        return 0;
+    }
+
+    private static async Task<int> MigrateAsync(string[] args)
+    {
+        var parsed = CliArgs.Parse(args);
+        if (parsed.ShowHelp)
+        {
+            PrintMigrateHelp();
+            return 0;
+        }
+
+        var baseUrl = parsed.GetOption("--url") ?? Environment.GetEnvironmentVariable(EnvBaseUrl) ?? DefaultBaseUrl;
+        var token = ResolveAuthToken(parsed, Console.Error);
+        var apply = parsed.HasFlag("--apply");
+
+        using var client = new OpenClaw.Client.OpenClawHttpClient(baseUrl, token);
+        var migrated = await client.MigrateAutomationsAsync(apply, CancellationToken.None);
+
+        Console.WriteLine(apply
+            ? "Applied legacy automation migration."
+            : "Previewed legacy automation migration.");
+        Console.WriteLine($"Automations: {migrated.Items.Count}");
+        foreach (var item in migrated.Items)
+            Console.WriteLine($"- {item.Id} | {item.Name} | {item.Schedule} | enabled={item.Enabled.ToString().ToLowerInvariant()} draft={item.IsDraft.ToString().ToLowerInvariant()}");
         return 0;
     }
 
@@ -365,11 +703,438 @@ internal static class Program
         return 2;
     }
 
+    private static async Task<int> ModelsAsync(string[] args)
+    {
+        if (args.Length == 0 || args[0] is "-h" or "--help" or "help")
+        {
+            PrintModelsHelp();
+            return 0;
+        }
+
+        var subcommand = args[0].Trim().ToLowerInvariant();
+        var parsed = CliArgs.Parse(args.Skip(1).ToArray());
+        var baseUrl = parsed.GetOption("--url") ?? Environment.GetEnvironmentVariable(EnvBaseUrl) ?? DefaultBaseUrl;
+        var token = ResolveAuthToken(parsed, Console.Error);
+        using var client = new OpenClawHttpClient(baseUrl, token);
+
+        if (subcommand == "list")
+        {
+            var response = await client.GetModelProfilesAsync(CancellationToken.None);
+            Console.WriteLine($"default_profile={response.DefaultProfileId ?? "none"}");
+            foreach (var profile in response.Profiles)
+            {
+                Console.WriteLine($"- {profile.Id} | {profile.ProviderId}/{profile.ModelId} | default={profile.IsDefault.ToString().ToLowerInvariant()} | tags={string.Join(",", profile.Tags)}");
+                if (profile.ValidationIssues.Length > 0)
+                    Console.WriteLine($"  issues: {string.Join("; ", profile.ValidationIssues)}");
+            }
+
+            return 0;
+        }
+
+        if (subcommand == "doctor")
+        {
+            var response = await client.GetModelSelectionDoctorAsync(CancellationToken.None);
+            Console.WriteLine($"default_profile={response.DefaultProfileId ?? "none"}");
+            foreach (var error in response.Errors)
+                Console.WriteLine($"ERROR: {error}");
+            foreach (var warning in response.Warnings)
+                Console.WriteLine($"WARN: {warning}");
+            foreach (var profile in response.Profiles)
+                Console.WriteLine($"- {profile.Id} | available={profile.IsAvailable.ToString().ToLowerInvariant()} | {profile.ProviderId}/{profile.ModelId}");
+            return response.Errors.Count > 0 ? 1 : 0;
+        }
+
+        PrintModelsHelp();
+        return 2;
+    }
+
+    private static async Task<int> EvalAsync(string[] args)
+    {
+        if (args.Length == 0 || args[0] is "-h" or "--help" or "help")
+        {
+            PrintEvalHelp();
+            return 0;
+        }
+
+        var subcommand = args[0].Trim().ToLowerInvariant();
+        var parsed = CliArgs.Parse(args.Skip(1).ToArray());
+        var baseUrl = parsed.GetOption("--url") ?? Environment.GetEnvironmentVariable(EnvBaseUrl) ?? DefaultBaseUrl;
+        var token = ResolveAuthToken(parsed, Console.Error);
+        using var client = new OpenClawHttpClient(baseUrl, token);
+
+        if (subcommand is "run" or "compare")
+        {
+            var profiles = new List<string>();
+            if (parsed.GetOption("--profile") is { Length: > 0 } singleProfile)
+                profiles.Add(singleProfile);
+            if (parsed.GetOption("--profiles") is { Length: > 0 } multiProfiles)
+                profiles.AddRange(multiProfiles.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+
+            var scenarios = parsed.Options.TryGetValue("--scenario", out var scenarioValues)
+                ? scenarioValues.ToArray()
+                : [];
+            var report = await client.RunModelEvaluationAsync(new ModelEvaluationRequest
+            {
+                ProfileIds = profiles.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+                ScenarioIds = scenarios,
+                IncludeMarkdown = true
+            }, CancellationToken.None);
+
+            Console.WriteLine($"run_id={report.RunId}");
+            Console.WriteLine($"json={report.JsonPath}");
+            if (!string.IsNullOrWhiteSpace(report.MarkdownPath))
+                Console.WriteLine($"markdown={report.MarkdownPath}");
+            foreach (var profile in report.Profiles)
+            {
+                Console.WriteLine($"[{profile.ProfileId}] {profile.ProviderId}/{profile.ModelId}");
+                foreach (var scenario in profile.Scenarios)
+                    Console.WriteLine($"- {scenario.ScenarioId}: {scenario.Status} ({scenario.LatencyMs} ms) {scenario.Summary ?? scenario.Error ?? ""}".TrimEnd());
+            }
+
+            return 0;
+        }
+
+        PrintEvalHelp();
+        return 2;
+    }
+
+    private static async Task<int> AccountsAsync(string[] args)
+    {
+        if (args.Length == 0 || args[0] is "-h" or "--help" or "help")
+        {
+            PrintAccountsHelp();
+            return 0;
+        }
+
+        var subcommand = args[0].Trim().ToLowerInvariant();
+        var parsed = CliArgs.Parse(args.Skip(1).ToArray());
+        var baseUrl = parsed.GetOption("--url") ?? Environment.GetEnvironmentVariable(EnvBaseUrl) ?? DefaultBaseUrl;
+        var token = ResolveAuthToken(parsed, Console.Error);
+        using var client = new OpenClawHttpClient(baseUrl, token);
+
+        switch (subcommand)
+        {
+            case "list":
+            {
+                var accounts = await client.GetIntegrationAccountsAsync(CancellationToken.None);
+                foreach (var item in accounts.Items.OrderBy(static item => item.Provider, StringComparer.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine($"{item.Id} | provider={item.Provider} | kind={item.SecretKind} | active={ToBoolWord(item.IsActive)} | display={item.DisplayName ?? "n/a"}");
+                    if (item.ExpiresAt is { } expiresAt)
+                        Console.WriteLine($"  expires={expiresAt:O}");
+                }
+
+                return 0;
+            }
+
+            case "add":
+            {
+                var provider = parsed.Positionals.Count > 0 ? parsed.Positionals[0] : null;
+                if (string.IsNullOrWhiteSpace(provider))
+                {
+                    Console.Error.WriteLine("Provider is required.");
+                    return 2;
+                }
+
+                var scopes = parsed.Options.TryGetValue("--scope", out var scopeValues)
+                    ? scopeValues.ToArray()
+                    : [];
+                var metadata = ParseMetadata(parsed.Options.TryGetValue("--metadata", out var metadataValues) ? metadataValues : null);
+                var expiresAt = ParseDateTimeOffset(parsed.GetOption("--expires-at"));
+                var created = await client.CreateIntegrationAccountAsync(new ConnectedAccountCreateRequest
+                {
+                    Provider = provider,
+                    DisplayName = parsed.GetOption("--display-name"),
+                    SecretRef = parsed.GetOption("--secret-ref"),
+                    Secret = parsed.GetOption("--secret"),
+                    TokenFilePath = parsed.GetOption("--token-file"),
+                    Scopes = scopes,
+                    ExpiresAt = expiresAt,
+                    Metadata = metadata
+                }, CancellationToken.None);
+
+                Console.WriteLine($"created account: {created.Account!.Id}");
+                Console.WriteLine($"provider={created.Account.Provider} kind={created.Account.SecretKind} display={created.Account.DisplayName ?? "n/a"}");
+                return 0;
+            }
+
+            case "remove":
+            {
+                var id = parsed.Positionals.Count > 0 ? parsed.Positionals[0] : null;
+                if (string.IsNullOrWhiteSpace(id))
+                {
+                    Console.Error.WriteLine("Account id is required.");
+                    return 2;
+                }
+
+                var result = await client.DeleteIntegrationAccountAsync(id, CancellationToken.None);
+                Console.WriteLine(result.Message ?? "Account deleted.");
+                return result.Success ? 0 : 1;
+            }
+
+            case "probe":
+            {
+                var target = parsed.Positionals.Count > 0 ? parsed.Positionals[0] : null;
+                if (string.IsNullOrWhiteSpace(target))
+                {
+                    Console.Error.WriteLine("Provider or account id is required.");
+                    return 2;
+                }
+
+                var backendId = parsed.GetOption("--backend");
+                if (target.StartsWith("acct_", StringComparison.Ordinal))
+                {
+                    var response = await client.TestAccountResolutionAsync(new BackendCredentialResolutionRequest
+                    {
+                        BackendId = backendId,
+                        CredentialSource = new ConnectedAccountSecretRef
+                        {
+                            ConnectedAccountId = target
+                        }
+                    }, CancellationToken.None);
+
+                    if (!response.Success || response.Credential is null)
+                    {
+                        Console.Error.WriteLine(response.Error ?? "Credential resolution failed.");
+                        return 1;
+                    }
+
+                    Console.WriteLine($"resolved provider={response.Credential.Provider} source={response.Credential.SourceKind} account={response.Credential.AccountId}");
+                    if (!string.IsNullOrWhiteSpace(response.Credential.TokenFilePath))
+                        Console.WriteLine($"token_file={response.Credential.TokenFilePath}");
+                    if (response.Credential.Scopes.Length > 0)
+                        Console.WriteLine($"scopes={string.Join(",", response.Credential.Scopes)}");
+                    return 0;
+                }
+
+                if (string.IsNullOrWhiteSpace(backendId))
+                {
+                    Console.Error.WriteLine("When probing by provider, --backend is required in v1.");
+                    return 2;
+                }
+
+                var probe = await client.ProbeIntegrationBackendAsync(backendId, new BackendProbeRequest(), CancellationToken.None);
+                Console.WriteLine($"backend={probe.BackendId} success={ToBoolWord(probe.Success)} exit_code={probe.ExitCode?.ToString(CultureInfo.InvariantCulture) ?? "n/a"}");
+                Console.WriteLine(probe.Message ?? "");
+                return probe.Success ? 0 : 1;
+            }
+        }
+
+        PrintAccountsHelp();
+        return 2;
+    }
+
+    private static async Task<int> BackendsAsync(string[] args)
+    {
+        if (args.Length == 0 || args[0] is "-h" or "--help" or "help")
+        {
+            PrintBackendsHelp();
+            return 0;
+        }
+
+        var subcommand = args[0].Trim().ToLowerInvariant();
+        if (subcommand == "session" && args.Length > 1 && string.Equals(args[1], "send", StringComparison.OrdinalIgnoreCase))
+        {
+            var parsed = CliArgs.Parse(args.Skip(2).ToArray());
+            var backendId = parsed.Positionals.Count > 0 ? parsed.Positionals[0] : null;
+            var sessionId = parsed.Positionals.Count > 1 ? parsed.Positionals[1] : null;
+            if (string.IsNullOrWhiteSpace(backendId) || string.IsNullOrWhiteSpace(sessionId))
+            {
+                Console.Error.WriteLine("Backend id and session id are required.");
+                return 2;
+            }
+
+            var text = parsed.GetOption("--text");
+            if (string.IsNullOrWhiteSpace(text))
+                text = await ReadAllStdinAsync();
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                Console.Error.WriteLine("--text or stdin is required.");
+                return 2;
+            }
+
+            var baseUrl = parsed.GetOption("--url") ?? Environment.GetEnvironmentVariable(EnvBaseUrl) ?? DefaultBaseUrl;
+            var token = ResolveAuthToken(parsed, Console.Error);
+            using var client = new OpenClawHttpClient(baseUrl, token);
+            var before = await client.GetBackendSessionAsync(backendId, sessionId, CancellationToken.None);
+            var afterSequence = before.Session?.LastEventSequence ?? 0;
+            await client.SendBackendInputAsync(backendId, sessionId, new BackendInput { Text = text }, CancellationToken.None);
+            return await PollBackendSessionAsync(client, backendId, sessionId, afterSequence, idleLimit: 4);
+        }
+
+        var parsedRoot = CliArgs.Parse(args.Skip(1).ToArray());
+        var baseUrlRoot = parsedRoot.GetOption("--url") ?? Environment.GetEnvironmentVariable(EnvBaseUrl) ?? DefaultBaseUrl;
+        var tokenRoot = ResolveAuthToken(parsedRoot, Console.Error);
+        using var rootClient = new OpenClawHttpClient(baseUrlRoot, tokenRoot);
+
+        switch (subcommand)
+        {
+            case "list":
+            {
+                var backends = await rootClient.GetIntegrationBackendsAsync(CancellationToken.None);
+                foreach (var item in backends.Items)
+                {
+                    Console.WriteLine($"{item.BackendId} | provider={item.Provider} | enabled={ToBoolWord(item.Enabled)} | model={item.DefaultModel ?? "n/a"} | executable={item.ExecutablePath ?? "n/a"}");
+                    Console.WriteLine($"  readonly_default={ToBoolWord(item.AccessPolicy.ReadOnlyByDefault)} write_enabled={ToBoolWord(item.AccessPolicy.WriteEnabled)} require_workspace={ToBoolWord(item.AccessPolicy.RequireWorkspace)}");
+                }
+
+                return 0;
+            }
+
+            case "probe":
+            {
+                var backendId = parsedRoot.Positionals.Count > 0 ? parsedRoot.Positionals[0] : null;
+                if (string.IsNullOrWhiteSpace(backendId))
+                {
+                    Console.Error.WriteLine("Backend id is required.");
+                    return 2;
+                }
+
+                var result = await rootClient.ProbeIntegrationBackendAsync(backendId, new BackendProbeRequest
+                {
+                    WorkspacePath = parsedRoot.GetOption("--workspace")
+                }, CancellationToken.None);
+
+                Console.WriteLine($"backend={result.BackendId} success={ToBoolWord(result.Success)} exit_code={result.ExitCode?.ToString(CultureInfo.InvariantCulture) ?? "n/a"} structured_output={ToBoolWord(result.StructuredOutputSupported)}");
+                if (!string.IsNullOrWhiteSpace(result.Message))
+                    Console.WriteLine(result.Message);
+                if (!string.IsNullOrWhiteSpace(result.Stdout))
+                    Console.WriteLine(result.Stdout.TrimEnd());
+                if (!string.IsNullOrWhiteSpace(result.Stderr))
+                    Console.Error.WriteLine(result.Stderr.TrimEnd());
+                return result.Success ? 0 : 1;
+            }
+
+            case "run":
+            {
+                var backendId = parsedRoot.Positionals.Count > 0 ? parsedRoot.Positionals[0] : null;
+                if (string.IsNullOrWhiteSpace(backendId))
+                {
+                    Console.Error.WriteLine("Backend id is required.");
+                    return 2;
+                }
+
+                var prompt = parsedRoot.GetOption("--prompt");
+                if (string.IsNullOrWhiteSpace(prompt))
+                    prompt = await ReadAllStdinAsync();
+                if (string.IsNullOrWhiteSpace(prompt))
+                {
+                    Console.Error.WriteLine("--prompt or stdin is required.");
+                    return 2;
+                }
+
+                var started = await rootClient.StartBackendSessionAsync(backendId, new StartBackendSessionRequest
+                {
+                    BackendId = backendId,
+                    WorkspacePath = parsedRoot.GetOption("--workspace"),
+                    Prompt = prompt,
+                    Model = parsedRoot.GetOption("--model"),
+                    ReadOnly = ParseBool(parsedRoot.GetOption("--read-only"))
+                }, CancellationToken.None);
+
+                if (started.Session is null)
+                {
+                    Console.Error.WriteLine("Backend session failed to start.");
+                    return 1;
+                }
+
+                Console.WriteLine($"session={started.Session.SessionId}");
+                return await PollBackendSessionAsync(rootClient, backendId, started.Session.SessionId, 0, idleLimit: 6);
+            }
+        }
+
+        PrintBackendsHelp();
+        return 2;
+    }
+
     private static async Task<int> HeartbeatStatusAsync(OpenClawHttpClient client)
     {
         var status = await client.GetHeartbeatStatusAsync(CancellationToken.None);
         WriteHeartbeatStatus(status);
         return 0;
+    }
+
+    private static async Task<int> PollBackendSessionAsync(
+        OpenClawHttpClient client,
+        string backendId,
+        string sessionId,
+        long afterSequence,
+        int idleLimit)
+    {
+        var idleCount = 0;
+        while (true)
+        {
+            var events = await client.GetBackendEventsAsync(backendId, sessionId, afterSequence, 200, CancellationToken.None);
+            foreach (var item in events.Items)
+                WriteBackendEvent(item);
+
+            if (events.Items.Count > 0)
+            {
+                afterSequence = events.NextSequence;
+                idleCount = 0;
+            }
+            else
+            {
+                idleCount++;
+            }
+
+            var session = await client.GetBackendSessionAsync(backendId, sessionId, CancellationToken.None);
+            var state = session.Session?.State ?? BackendSessionState.Failed;
+            if (state is BackendSessionState.Completed)
+                return session.Session?.ExitCode is null or 0 ? 0 : 1;
+            if (state is BackendSessionState.Failed or BackendSessionState.Cancelled)
+                return 1;
+            if (idleCount >= idleLimit)
+            {
+                Console.WriteLine($"session_state={state}");
+                return 0;
+            }
+
+            await Task.Delay(500);
+        }
+    }
+
+    private static void WriteBackendEvent(BackendEvent evt)
+    {
+        switch (evt)
+        {
+            case BackendAssistantMessageEvent assistant:
+                Console.WriteLine(assistant.Text);
+                break;
+            case BackendStdoutOutputEvent stdout:
+                Console.WriteLine(stdout.Text);
+                break;
+            case BackendStderrOutputEvent stderr:
+                Console.Error.WriteLine(stderr.Text);
+                break;
+            case BackendShellCommandProposedEvent proposed:
+                Console.WriteLine($"$ {proposed.Command}");
+                break;
+            case BackendShellCommandExecutedEvent executed:
+                Console.WriteLine($"executed: {executed.Command} (exit={executed.ExitCode?.ToString(CultureInfo.InvariantCulture) ?? "n/a"})");
+                break;
+            case BackendToolCallRequestedEvent tool:
+                Console.WriteLine($"tool: {tool.ToolName}");
+                break;
+            case BackendPatchProposedEvent patch:
+                Console.WriteLine($"patch proposed: {patch.Path ?? "(unknown)"}");
+                break;
+            case BackendPatchAppliedEvent applied:
+                Console.WriteLine($"patch applied: {applied.Path ?? applied.Summary ?? "(unknown)"}");
+                break;
+            case BackendFileReadEvent fileRead:
+                Console.WriteLine($"read: {fileRead.Path}");
+                break;
+            case BackendFileWriteEvent fileWrite:
+                Console.WriteLine($"write: {fileWrite.Path}");
+                break;
+            case BackendErrorEvent error:
+                Console.Error.WriteLine($"error: {error.Message}");
+                break;
+            case BackendSessionCompletedEvent completed:
+                Console.WriteLine($"session completed: exit={completed.ExitCode?.ToString(CultureInfo.InvariantCulture) ?? "n/a"} reason={completed.Reason ?? "n/a"}");
+                break;
+        }
     }
 
     private static async Task<int> HeartbeatPreviewAsync(OpenClawHttpClient client)
@@ -477,6 +1242,112 @@ internal static class Program
 
         Console.Error.WriteLine($"Unknown command: {command}");
         return false;
+    }
+
+    private static async Task RunLiveConsoleAsync(
+        string baseUrl,
+        string? token,
+        string? provider,
+        string? model,
+        string? system,
+        string? voice,
+        IReadOnlyList<string> modalities)
+    {
+        await using var client = new OpenClaw.Client.OpenClawLiveClient();
+        client.OnEnvelopeReceived += envelope =>
+        {
+            switch (envelope.Type)
+            {
+                case "opened":
+                    Console.Error.WriteLine($"[opened] {envelope.Text}");
+                    break;
+                case "text":
+                    Console.Write(envelope.Text);
+                    break;
+                case "turn_complete":
+                    Console.WriteLine();
+                    break;
+                case "audio":
+                    Console.Error.WriteLine($"[audio] mime={envelope.MimeType} bytes={(envelope.Base64Data?.Length ?? 0)}");
+                    break;
+                case "input_transcription":
+                    Console.Error.WriteLine($"[input] {envelope.Text}");
+                    break;
+                case "output_transcription":
+                    Console.Error.WriteLine($"[output] {envelope.Text}");
+                    break;
+                case "interrupted":
+                    Console.Error.WriteLine("[interrupted]");
+                    break;
+                case "error":
+                    Console.Error.WriteLine($"[error] {envelope.Error}");
+                    break;
+            }
+        };
+        client.OnError += message => Console.Error.WriteLine($"[client-error] {message}");
+
+        await client.ConnectAsync(
+            OpenClaw.Client.OpenClawLiveClient.BuildWebSocketUri(baseUrl),
+            token,
+            new LiveSessionOpenRequest
+            {
+                Provider = provider,
+                Model = model,
+                SystemInstruction = system,
+                VoiceName = voice,
+                ResponseModalities = modalities.ToArray()
+            },
+            CancellationToken.None);
+
+        Console.Error.WriteLine("openclaw live — commands: /interrupt, /audio-file <path> [mime], /exit");
+
+        while (true)
+        {
+            Console.Write("live> ");
+            var line = Console.ReadLine();
+            if (line is null)
+                break;
+
+            line = line.Trim();
+            if (line.Length == 0)
+                continue;
+
+            if (string.Equals(line, "/exit", StringComparison.OrdinalIgnoreCase))
+                break;
+
+            if (string.Equals(line, "/interrupt", StringComparison.OrdinalIgnoreCase))
+            {
+                await client.InterruptAsync(CancellationToken.None);
+                continue;
+            }
+
+            if (line.StartsWith("/audio-file ", StringComparison.OrdinalIgnoreCase))
+            {
+                var tail = line["/audio-file ".Length..].Trim();
+                if (tail.Length == 0)
+                {
+                    Console.Error.WriteLine("Usage: /audio-file <path> [mime]");
+                    continue;
+                }
+
+                var parts = tail.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                var path = Path.GetFullPath(parts[0]);
+                if (!File.Exists(path))
+                {
+                    Console.Error.WriteLine($"File not found: {path}");
+                    continue;
+                }
+
+                var mime = parts.Length > 1 ? parts[1] : "audio/pcm";
+                var base64 = Convert.ToBase64String(await File.ReadAllBytesAsync(path, CancellationToken.None));
+                await client.SendAudioAsync(base64, mime, turnComplete: true, CancellationToken.None);
+                continue;
+            }
+
+            await client.SendTextAsync(line, turnComplete: true, CancellationToken.None);
+        }
+
+        await client.CloseSessionAsync(CancellationToken.None);
     }
 
     private static IReadOnlyList<HeartbeatTaskDto> PromptTasks(HeartbeatPreviewResponse current)
@@ -762,5 +1633,74 @@ internal static class Program
         };
     }
 
+    private static DateTimeOffset? ParseDateTimeOffset(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return null;
+
+        if (!DateTimeOffset.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AllowWhiteSpaces, out var value))
+            throw new ArgumentException($"Invalid datetime: {raw}");
+
+        return value;
+    }
+
+    private static Dictionary<string, string> ParseMetadata(IReadOnlyList<string>? pairs)
+    {
+        var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (pairs is null)
+            return metadata;
+
+        foreach (var pair in pairs)
+        {
+            var separator = pair.IndexOf('=', StringComparison.Ordinal);
+            if (separator <= 0 || separator == pair.Length - 1)
+                throw new ArgumentException($"Invalid metadata entry: {pair}");
+
+            metadata[pair[..separator].Trim()] = pair[(separator + 1)..].Trim();
+        }
+
+        return metadata;
+    }
+
     private static string ToBoolWord(bool value) => value ? "true" : "false";
+
+    private static IEnumerable<string> CheckCommandAvailability(string command, string arg, string failureMessage)
+    {
+        try
+        {
+            using var process = new System.Diagnostics.Process
+            {
+                StartInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = command,
+                    Arguments = arg,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                }
+            };
+            process.Start();
+            process.WaitForExit(3000);
+            return process.ExitCode == 0 ? [] : [failureMessage];
+        }
+        catch
+        {
+            return [failureMessage];
+        }
+    }
+
+    private static string ExpandPath(string path)
+    {
+        var expanded = Environment.ExpandEnvironmentVariables(path);
+        if (!expanded.StartsWith('~'))
+            return expanded;
+
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            expanded[1..].TrimStart('/').TrimStart('\\'));
+    }
+
+    private static string QuoteIfNeeded(string path)
+        => path.Contains(' ', StringComparison.Ordinal) ? $"\"{path}\"" : path;
 }

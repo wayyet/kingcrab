@@ -6,6 +6,7 @@ param(
     [string]$SourceUrl = "",
     [switch]$Push,
     [switch]$Load,
+    [switch]$NoPull,
     [string]$Configuration = "Release"
 )
 
@@ -59,6 +60,10 @@ $arguments = @(
     "--label", "org.opencontainers.image.revision=$gitCommit",
     "--tag", $fullImage
 )
+
+if ($NoPull) {
+    $arguments += "--pull=false"
+}
 
 if (-not [string]::IsNullOrWhiteSpace($SourceUrl)) {
     $arguments += @("--label", "org.opencontainers.image.source=$SourceUrl")

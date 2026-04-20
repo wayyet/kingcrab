@@ -14,10 +14,12 @@ COPY src/OpenClaw.Channels/OpenClaw.Channels.csproj src/OpenClaw.Channels/
 COPY src/OpenClaw.PluginKit/OpenClaw.PluginKit.csproj src/OpenClaw.PluginKit/
 COPY src/OpenClawNet.Sandbox.OpenSandbox/OpenClawNet.Sandbox.OpenSandbox.csproj src/OpenClawNet.Sandbox.OpenSandbox/
 COPY src/OpenClaw.Gateway/OpenClaw.Gateway.csproj src/OpenClaw.Gateway/
+COPY Kingcrab.ServiceDefaults/Kingcrab.ServiceDefaults.csproj Kingcrab.ServiceDefaults/
 
 RUN dotnet restore src/OpenClaw.Gateway/OpenClaw.Gateway.csproj
 
 COPY src/ src/
+COPY Kingcrab.ServiceDefaults/ Kingcrab.ServiceDefaults/
 
 RUN dotnet publish src/OpenClaw.Gateway/OpenClaw.Gateway.csproj \
     -c ${CONFIGURATION} \
@@ -42,6 +44,8 @@ RUN apt-get update \
         jq \
         procps \
         python3 \
+        python3-pip \
+        python3-venv \
         poppler-utils \
         libnss3 \
         libatk1.0-0 \
@@ -62,7 +66,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends nodejs \
     && npm install -g playwright \
     && npm cache clean --force \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh
 
 WORKDIR /app
 
@@ -100,7 +105,7 @@ ENV ASPNETCORE_URLS=http://0.0.0.0:18789 \
 
 EXPOSE 18789
 
-USER 10001:10001
+USER root
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=5 \
     CMD ["/app/OpenClaw.Gateway", "--health-check"]

@@ -34,11 +34,11 @@
     <DefineConstants>$(DefineConstants);OPENCLAW_ENABLE_MAF_EXPERIMENT</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Anthropic" Version="12.11.0" />
+    <PackageReference Include="Anthropic" Version="12.16.0" />
     <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
     <PackageReference Include="GeminiDotnet.Extensions.AI" Version="0.23.0" />
-    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.5" />
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.5" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.6" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.6" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="1.2.0" />		
 	<PackageReference Include="Microsoft.Agents.AI.DevUI" Version="1.0.0-preview.260330.1" />
     <PackageReference Include="Microsoft.Agents.AI.Hosting" Version="1.0.0-preview.260330.1" />

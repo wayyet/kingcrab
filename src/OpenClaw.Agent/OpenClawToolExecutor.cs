@@ -22,8 +22,9 @@ public sealed class ToolExecutionResult
 
 public sealed class OpenClawToolExecutor
 {
-    private readonly Dictionary<string, ITool> _toolsByName;
+    private Dictionary<string, ITool> _toolsByName;
     private readonly AITool[] _toolDeclarations;
+    private readonly object _toolsMutationLock = new();
     private readonly int _toolTimeoutSeconds;
     private readonly bool _requireToolApproval;
     private readonly HashSet<string> _approvalRequiredTools;
@@ -84,6 +85,21 @@ public sealed class OpenClawToolExecutor
         return _toolDeclarations
             .Where(item => IsToolAllowedForSession(session, item.Name, preset))
             .ToArray();
+    }
+
+    /// <summary>
+    /// Atomically replaces the workspace MCP tools in the dispatch table.
+    /// Called during hot-reload; safe to call while requests are in-flight.
+    /// </summary>
+    public void ReplaceMcpTools(IReadOnlyList<ITool> toAdd, IReadOnlyList<string> toRemove)
+    {
+        lock (_toolsMutationLock)
+        {
+            foreach (var name in toRemove)
+                _toolsByName.Remove(name);
+            foreach (var tool in toAdd)
+                _toolsByName[tool.Name] = tool;
+        }
     }
 
     public bool SupportsStreaming(string toolName)

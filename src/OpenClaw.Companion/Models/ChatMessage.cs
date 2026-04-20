@@ -15,6 +15,7 @@ public sealed record ChatMessage
 
     public string RoleLabel => Role switch
     {
+        ChatRole.System => "System",
         ChatRole.User => "You",
         ChatRole.Assistant => "OpenClaw",
         _ => "System"

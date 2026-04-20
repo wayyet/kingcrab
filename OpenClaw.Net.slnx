@@ -16,6 +16,7 @@
     <Project Path="src/OpenClaw.SandboxDemo/OpenClaw.SandboxDemo.csproj">
       <Build Solution="Debug|*" Project="false" />
     </Project>
+    <Project Path="src/OpenClaw.Tui/OpenClaw.Tui.csproj" />
     <Project Path="src/OpenClawNet.Sandbox.OpenSandbox/OpenClawNet.Sandbox.OpenSandbox.csproj" />
   </Folder>
   <Folder Name="/tests/">

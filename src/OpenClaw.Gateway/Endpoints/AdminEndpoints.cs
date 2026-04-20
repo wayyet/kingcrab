@@ -969,6 +969,38 @@ internal static class AdminEndpoints
                 : Results.Json(diff, CoreJsonContext.Default.SessionDiffResponse);
         });
 
+        app.MapPost("/admin/sessions/{id}/abort", (HttpContext ctx, string id) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: true, endpointScope: "admin.session.abort");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+            var auth = authResult.Authorization!;
+
+            var aborted = runtime.AbortRegistry.TryAbort(id);
+            RecordOperatorAudit(ctx, operations, auth, "session_abort", id,
+                aborted ? $"Aborted in-flight execution for session '{id}'." : $"No active execution found for session '{id}'.",
+                success: aborted, before: null, after: null);
+            return Results.Json(
+                new OperationStatusResponse
+                {
+                    Success = aborted,
+                    Message = aborted ? "Session execution cancelled." : null,
+                    Error = aborted ? null : "No active execution found for the given session id."
+                },
+                CoreJsonContext.Default.OperationStatusResponse,
+                statusCode: aborted ? StatusCodes.Status200OK : StatusCodes.Status404NotFound);
+        });
+
+        app.MapGet("/admin/sessions/active", (HttpContext ctx) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: false, endpointScope: "admin.sessions.active");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+
+            var ids = runtime.AbortRegistry.ActiveSessionIds.ToList();
+            return Results.Json(ids, CoreJsonContext.Default.ListString);
+        });
+
         app.MapPost("/admin/sessions/{id}/metadata", async (HttpContext ctx, string id) =>
         {
             var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: true, endpointScope: "admin.session.metadata");
@@ -1584,6 +1616,136 @@ internal static class AdminEndpoints
             var response = BuildWhatsAppSetupResponse(startup, runtime, adminSettings, pluginAdminSettings, message: "WhatsApp channel restarted.");
             return Results.Json(response, CoreJsonContext.Default.WhatsAppSetupResponse);
         });
+
+        // ── Workspace MCP config ────────────────────────────────────────────────
+        // GET  /admin/workspace/mcp  →  returns { builtin: {...}, user: {...} }
+        //   builtin = appsettings Plugins.Mcp with Headers stripped (tokens hidden)
+        //   user    = .kingcrab/mcp.json (or empty template)
+        // PUT  /admin/workspace/mcp  →  atomically writes .kingcrab/mcp.json
+
+        app.MapGet("/admin/workspace/mcp", async (HttpContext ctx) =>
+        {
+            var auth = EndpointHelpers.AuthorizeOperatorRequest(ctx, startup, browserSessions, requireCsrf: false);
+            if (!auth.IsAuthorized)
+                return Results.Unauthorized();
+
+            // Built-in servers from appsettings — strip Headers so tokens are never sent to the browser
+            var builtinCfg = startup.Config.Plugins.Mcp;
+            var builtinServers = builtinCfg.Servers
+                .ToDictionary(
+                    kv => kv.Key,
+                    kv => (object)new
+                    {
+                        kv.Value.Enabled,
+                        kv.Value.Name,
+                        kv.Value.Transport,
+                        kv.Value.Url,
+                        kv.Value.ToolNamePrefix,
+                        kv.Value.StartupTimeoutSeconds,
+                        kv.Value.RequestTimeoutSeconds,
+                        HasToken = kv.Value.Headers.ContainsKey("Authorization")
+                    },
+                    StringComparer.Ordinal);
+
+            var builtinPayload = new { builtinCfg.Enabled, Servers = builtinServers };
+
+            // User workspace servers from .kingcrab/mcp.json
+            object userPayload;
+            var workspacePath = startup.WorkspacePath;
+            if (string.IsNullOrEmpty(workspacePath))
+            {
+                userPayload = new { Enabled = true, Servers = new Dictionary<string, object>() };
+            }
+            else
+            {
+                var filePath = Path.Combine(workspacePath, ".kingcrab", "mcp.json");
+                if (!File.Exists(filePath))
+                {
+                    userPayload = new { Enabled = true, Servers = new Dictionary<string, object>() };
+                }
+                else
+                {
+                    try
+                    {
+                        var raw = await File.ReadAllTextAsync(filePath, ctx.RequestAborted);
+                        using var doc = JsonDocument.Parse(raw);
+                        userPayload = doc.RootElement.Clone();
+                    }
+                    catch (IOException ex)
+                    {
+                        app.Services.GetRequiredService<ILoggerFactory>()
+                            .CreateLogger("WorkspaceMcp")
+                            .LogWarning(ex, "Failed to read workspace MCP config from {Path}", filePath);
+                        return Results.StatusCode(StatusCodes.Status500InternalServerError);
+                    }
+                }
+            }
+
+            return Results.Json(new { builtin = builtinPayload, user = userPayload });
+        });
+
+        app.MapPut("/admin/workspace/mcp", async (HttpContext ctx) =>
+        {
+            var auth = EndpointHelpers.AuthorizeOperatorRequest(ctx, startup, browserSessions, requireCsrf: false);
+            if (!auth.IsAuthorized)
+                return Results.Unauthorized();
+
+            var workspacePath = startup.WorkspacePath;
+            if (string.IsNullOrEmpty(workspacePath))
+                return Results.Json(new { success = false, error = "No workspace path configured." },
+                    statusCode: StatusCodes.Status409Conflict);
+
+            if (ctx.Request.ContentLength is > MaxAdminJsonBodyBytes)
+                return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+
+            string body;
+            try
+            {
+                using var reader = new StreamReader(ctx.Request.Body);
+                body = await reader.ReadToEndAsync(ctx.RequestAborted);
+            }
+            catch (IOException ex)
+            {
+                app.Services.GetRequiredService<ILoggerFactory>()
+                    .CreateLogger("WorkspaceMcp")
+                    .LogWarning(ex, "Failed to read workspace MCP request body");
+                return Results.StatusCode(StatusCodes.Status500InternalServerError);
+            }
+
+            // Validate it's well-formed JSON that matches our config shape
+            try
+            {
+                var parsed = JsonSerializer.Deserialize<McpPluginsConfig>(body,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                if (parsed is null)
+                    return Results.Json(new { success = false, error = "Invalid MCP config." },
+                        statusCode: StatusCodes.Status400BadRequest);
+            }
+            catch (JsonException ex)
+            {
+                return Results.Json(new { success = false, error = $"JSON parse error: {ex.Message}" },
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            var dir = Path.Combine(workspacePath, ".kingcrab");
+            var filePath = Path.Combine(dir, "mcp.json");
+            try
+            {
+                Directory.CreateDirectory(dir);
+                // Atomic write via temp file + rename
+                var tmp = filePath + ".tmp";
+                await File.WriteAllTextAsync(tmp, body, ctx.RequestAborted);
+                File.Move(tmp, filePath, overwrite: true);
+                return Results.Json(new { success = true });
+            }
+            catch (IOException ex)
+            {
+                app.Services.GetRequiredService<ILoggerFactory>()
+                    .CreateLogger("WorkspaceMcp")
+                    .LogWarning(ex, "Failed to write workspace MCP config to {Path}", filePath);
+                return Results.StatusCode(StatusCodes.Status500InternalServerError);
+            }
+        });
     }
 
     private static async Task<JsonBodyReadResult<T>> ReadJsonBodyAsync<T>(HttpContext ctx, JsonTypeInfo<T> typeInfo)
@@ -1770,6 +1932,7 @@ internal static class AdminEndpoints
             warnings.Add(pluginTarget.Warning);
         if (readiness is not null)
             warnings.AddRange(readiness.Warnings);
+        warnings.Add("WhatsApp secrets are redacted on read. Leave secret values blank to preserve them, or clear both the value and its corresponding *Ref field to remove them.");
 
         var restartSupported = runtime.ChannelAdapters.TryGetValue("whatsapp", out var adapter)
             && adapter is IRestartableChannelAdapter;
@@ -1784,17 +1947,21 @@ internal static class AdminEndpoints
             DmPolicy = snapshot.WhatsAppDmPolicy,
             WebhookPath = snapshot.WhatsAppWebhookPath,
             WebhookPublicBaseUrl = snapshot.WhatsAppWebhookPublicBaseUrl,
-            WebhookVerifyToken = snapshot.WhatsAppWebhookVerifyToken,
+            WebhookVerifyToken = "",
+            WebhookVerifyTokenConfigured = HasConfiguredSecretValue(snapshot.WhatsAppWebhookVerifyToken, snapshot.WhatsAppWebhookVerifyTokenRef),
             WebhookVerifyTokenRef = snapshot.WhatsAppWebhookVerifyTokenRef,
             ValidateSignature = snapshot.WhatsAppValidateSignature,
-            WebhookAppSecret = snapshot.WhatsAppWebhookAppSecret,
+            WebhookAppSecret = null,
+            WebhookAppSecretConfigured = HasConfiguredSecretValue(snapshot.WhatsAppWebhookAppSecret, snapshot.WhatsAppWebhookAppSecretRef),
             WebhookAppSecretRef = snapshot.WhatsAppWebhookAppSecretRef,
-            CloudApiToken = snapshot.WhatsAppCloudApiToken,
+            CloudApiToken = null,
+            CloudApiTokenConfigured = HasConfiguredSecretValue(snapshot.WhatsAppCloudApiToken, snapshot.WhatsAppCloudApiTokenRef),
             CloudApiTokenRef = snapshot.WhatsAppCloudApiTokenRef,
             PhoneNumberId = snapshot.WhatsAppPhoneNumberId,
             BusinessAccountId = snapshot.WhatsAppBusinessAccountId,
             BridgeUrl = snapshot.WhatsAppBridgeUrl,
-            BridgeToken = snapshot.WhatsAppBridgeToken,
+            BridgeToken = null,
+            BridgeTokenConfigured = HasConfiguredSecretValue(snapshot.WhatsAppBridgeToken, snapshot.WhatsAppBridgeTokenRef),
             BridgeTokenRef = snapshot.WhatsAppBridgeTokenRef,
             BridgeSuppressSendExceptions = snapshot.WhatsAppBridgeSuppressSendExceptions,
             FirstPartyWorker = snapshot.WhatsAppFirstPartyWorker,
@@ -1962,7 +2129,7 @@ internal static class AdminEndpoints
            {
              "type": "object",
              "properties": {
-               "driver": { "type": "string", "enum": ["baileys_csharp", "simulated"] },
+               "driver": { "type": "string", "enum": ["baileys", "baileys_csharp", "whatsmeow", "simulated"] },
                "executablePath": { "type": "string" },
                "workingDirectory": { "type": "string" },
                "storagePath": { "type": "string" },
@@ -2259,6 +2426,63 @@ internal static class AdminEndpoints
            || key.Contains("password", StringComparison.OrdinalIgnoreCase)
            || key.Contains("authorization", StringComparison.OrdinalIgnoreCase)
            || key.Contains("apikey", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasConfiguredSecretValue(string? value, string? valueRef)
+        => !string.IsNullOrWhiteSpace(SecretResolver.Resolve(valueRef) ?? value);
+
+    internal static async Task StreamChannelAuthEventsAsync(
+        HttpContext ctx,
+        ChannelAuthEventStore authEventStore,
+        string channelId,
+        string? accountId)
+    {
+        ctx.Response.ContentType = "text/event-stream";
+        ctx.Response.Headers.CacheControl = "no-cache";
+        ctx.Response.Headers.Connection = "keep-alive";
+
+        using var subscription = authEventStore.Subscribe();
+        var ct = ctx.RequestAborted;
+
+        try
+        {
+            await WriteSseCommentAsync(ctx, "stream-open", ct);
+
+            var currentItems = accountId is not null
+                ? authEventStore.GetLatest(channelId, accountId) is { } currentEvt ? [currentEvt] : []
+                : authEventStore.GetAll(channelId);
+            foreach (var current in currentItems)
+            {
+                await WriteChannelAuthEventAsync(ctx, current, ct);
+            }
+
+            await foreach (var evt in subscription.Reader.ReadAllAsync(ct))
+            {
+                if (!string.Equals(evt.ChannelId, channelId, StringComparison.Ordinal))
+                    continue;
+                if (accountId is not null && !string.Equals(evt.AccountId, accountId, StringComparison.Ordinal))
+                    continue;
+
+                await WriteChannelAuthEventAsync(ctx, evt, ct);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // RequestAborted is the normal shutdown path for disconnected SSE clients.
+        }
+    }
+
+    private static async Task WriteChannelAuthEventAsync(HttpContext ctx, BridgeChannelAuthEvent evt, CancellationToken cancellationToken)
+    {
+        var json = JsonSerializer.Serialize(MapChannelAuthStatusItem(evt), CoreJsonContext.Default.ChannelAuthStatusItem);
+        await ctx.Response.WriteAsync($"data: {json}\n\n", cancellationToken);
+        await ctx.Response.Body.FlushAsync(cancellationToken);
+    }
+
+    private static async Task WriteSseCommentAsync(HttpContext ctx, string comment, CancellationToken cancellationToken)
+    {
+        await ctx.Response.WriteAsync($": {comment}\n\n", cancellationToken);
+        await ctx.Response.Body.FlushAsync(cancellationToken);
+    }
 
     private readonly record struct JsonBodyReadResult<T>(
         T? Value,

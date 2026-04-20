@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text;
 using OpenClaw.Core.Skills;
 
@@ -84,5 +85,44 @@ internal static class AgentSystemPromptBuilder
         AppendOptionalPromptFile(ref basePrompt, "Agent Personality (SOUL.md)", soulFile, PromptFileMaxChars);
 
         return basePrompt;
+    }
+
+    /// <summary>Dynamic suffix injected per-turn so the timestamp is always current.</summary>
+    public static string BuildDynamicSuffix()
+    {
+        var timezone = AgentPromptDateTime.ResolveTimezone();
+        var currentTime = AgentPromptDateTime.FormatCurrentTime(timezone);
+        var timeSection = $"\n\n## Current Date & Time\nTime zone: {timezone}\nCurrent time: {currentTime}";
+        return timeSection + BuildRuntimeSection();
+    }
+
+    private static string BuildRuntimeSection()
+    {
+        var parts = new[]
+        {
+            $"host={Environment.MachineName}",
+            $"os={NormalizeOsPlatform()} ({RuntimeInformation.OSArchitecture})",
+            $"dotnet={Environment.Version}",
+            $"shell={ResolveShell()}",
+        };
+
+        return "\n\n## Runtime\n" + string.Join(" | ", parts);
+    }
+
+    private static string NormalizeOsPlatform()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return "windows";
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux)) return "linux";
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) return "darwin";
+        return RuntimeInformation.OSDescription.Split(' ')[0].ToLowerInvariant();
+    }
+
+    private static string ResolveShell()
+    {
+        var shell = Environment.GetEnvironmentVariable("SHELL");
+        if (!string.IsNullOrWhiteSpace(shell)) return Path.GetFileName(shell);
+        var comspec = Environment.GetEnvironmentVariable("ComSpec");
+        if (!string.IsNullOrWhiteSpace(comspec)) return Path.GetFileName(comspec);
+        return RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "cmd" : "sh";
     }
 }

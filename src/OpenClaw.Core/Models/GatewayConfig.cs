@@ -20,6 +20,7 @@ public sealed class GatewayConfig
     public ToolingConfig Tooling { get; set; } = new();
     public SandboxConfig Sandbox { get; set; } = new();
     public ExecutionConfig Execution { get; set; } = new();
+    public CodingBackendsConfig CodingBackends { get; set; } = new();
     public MultimodalConfig Multimodal { get; set; } = new();
     public ChannelsConfig Channels { get; set; } = new();
     public PluginsConfig Plugins { get; set; } = new();
@@ -352,6 +353,7 @@ public sealed class ToolingConfig
     public int ToolApprovalTimeoutSeconds { get; set; } = 300;
 
     public bool EnableBrowserTool { get; set; } = true;
+    public bool EnableXSearch { get; set; } = true;
     public bool AllowBrowserEvaluate { get; set; } = true;
     public bool BrowserHeadless { get; set; } = true;
     public int BrowserTimeoutSeconds { get; set; } = 30;
@@ -371,6 +373,7 @@ public sealed class ChannelsConfig
     public SlackChannelConfig Slack { get; set; } = new();
     public DiscordChannelConfig Discord { get; set; } = new();
     public SignalChannelConfig Signal { get; set; } = new();
+    public FeishuChannelConfig Feishu { get; set; } = new();
 }
 
 public sealed class WhatsAppChannelConfig
@@ -422,10 +425,10 @@ public sealed class WhatsAppChannelConfig
 public sealed class WhatsAppFirstPartyWorkerConfig
 {
     /// <summary>
-    /// Worker transport engine. "baileys_csharp" is the intended production engine;
+    /// Worker transport engine. "baileys" and "whatsmeow" launch the bundled external workers;
     /// "simulated" is available for tests and dry-run validation.
     /// </summary>
-    public string Driver { get; set; } = "baileys_csharp";
+    public string Driver { get; set; } = "baileys";
 
     /// <summary>
     /// Optional explicit path to the worker executable or DLL. When empty, the gateway tries
@@ -610,6 +613,52 @@ public sealed class SignalChannelConfig
     public int MaxInboundChars { get; set; } = 4096;
     public bool NoContentLogging { get; set; } = false;
     public bool TrustAllKeys { get; set; } = true;
+}
+
+/// <summary>
+/// Configuration for the Feishu (Lark) channel.
+/// Uses WebSocket long connection; no public webhook endpoint needed — suitable for intranet/sandbox deployments.
+/// Supports config hot-reload: change values in appsettings and the channel reconnects automatically.
+/// </summary>
+public sealed class FeishuChannelConfig
+{
+    public bool Enabled { get; set; } = false;
+
+    /// <summary>Feishu App ID (direct value). Takes precedence over AppIdRef when set.</summary>
+    public string? AppId { get; set; }
+
+    /// <summary>Secret reference for App ID (e.g. "env:FEISHU_APP_ID"). Used when AppId is null.</summary>
+    public string AppIdRef { get; set; } = "env:FEISHU_APP_ID";
+
+    /// <summary>Feishu App Secret (direct value). Avoid in production; prefer AppSecretRef.</summary>
+    public string? AppSecret { get; set; }
+
+    /// <summary>Secret reference for App Secret (e.g. "env:FEISHU_APP_SECRET").</summary>
+    public string AppSecretRef { get; set; } = "env:FEISHU_APP_SECRET";
+
+    /// <summary>Group chat policy: "open" allows all groups, "allowlist" restricts to AllowedGroupIds, "disabled" drops group messages.</summary>
+    public string GroupPolicy { get; set; } = "open"; // open, allowlist, disabled
+
+    /// <summary>Allowed sender open_ids. Empty = allow all (subject to DmPolicy/GroupPolicy).</summary>
+    public string[] AllowedFromUserIds { get; set; } = [];
+
+    /// <summary>Allowed group chat_ids (oc_xxx). Only used when GroupPolicy is "allowlist".</summary>
+    public string[] AllowedGroupIds { get; set; } = [];
+
+    public int MaxInboundChars { get; set; } = 4096;
+
+    /// <summary>
+    /// When true, the bot only responds to group messages where it is explicitly @mentioned.
+    /// Recommended when multiple bots share the same group.
+    /// Default is false (respond to all group messages allowed by GroupPolicy).
+    /// </summary>
+    public bool RequireMentionInGroup { get; set; } = false;
+
+    /// <summary>
+    /// When true, inbound media file keys are included as feishu-resource:// URLs in MediaUrl.
+    /// The pipeline can pass these to tools that understand the scheme.
+    /// </summary>
+    public bool ExposeInboundMediaUrls { get; set; } = true;
 }
 
 public sealed class CronConfig

@@ -1,4 +1,5 @@
 using OpenClaw.Agent;
+using OpenClaw.Gateway.A2A;
 using OpenClaw.Gateway.Bootstrap;
 using OpenClaw.Gateway.Composition;
 using OpenClaw.Gateway.Endpoints;
@@ -25,19 +26,24 @@ if (bootstrap.ShouldExit)
 var startup = bootstrap.Startup
     ?? throw new InvalidOperationException("Bootstrap completed without a startup context.");
 builder.Services.AddOpenApi("openclaw-integration");
-builder.AddOpenClawObservability();
+// builder.AddOpenClawObservability();
 builder.Services.AddOpenClawCoreServices(startup);
 builder.Services.AddOpenClawChannelServices(startup);
+builder.Services.AddOpenClawBackendServices(startup);
 builder.Services.AddOpenClawToolServices(startup);
 builder.Services.AddOpenClawSecurityServices(startup);
 builder.Services.AddOpenClawMcpServices(startup);
 builder.Services.ApplyOpenClawRuntimeProfile(startup);
 builder.Services.AddMicrosoftAgentFramework(builder.Configuration);
+builder.Services.AddOpenClawA2AServices();
 if (builder.Environment.IsDevelopment())
     builder.Services.AddOpenClawDevUI(startup.Config);
 #if OPENCLAW_ENABLE_OPENSANDBOX
 builder.Services.AddOpenSandboxIntegration(builder.Configuration);
 #endif
+
+// Add service defaults & Aspire components.
+builder.AddServiceDefaults();
 
 var app = builder.Build();
 var runtime = await app.InitializeOpenClawRuntimeAsync(startup);
@@ -64,11 +70,13 @@ app.Use(async (ctx, next) =>
 if (!string.IsNullOrEmpty(startup.Config.Security.OidcAuthority))
     app.UseAuthentication();
 app.UseOpenClawMcpAuth(startup, runtime);
+app.UseOpenClawA2AAuth(startup, runtime);
 
 app.UseOpenClawPipeline(startup, runtime);
 app.MapOpenApi("/openapi/{documentName}.json");
 app.MapOpenClawEndpoints(startup, runtime);
 app.MapMcp("/mcp");
+app.MapOpenClawA2AEndpoints(startup, runtime);
 
 if (app.Environment.IsDevelopment())
     app.MapOpenClawDevUI();

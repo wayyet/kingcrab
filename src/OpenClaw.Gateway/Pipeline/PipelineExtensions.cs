@@ -67,7 +67,7 @@ internal static class PipelineExtensions
                 if (runtime.AllowedOriginsSet.Contains(originStr))
                 {
                     ctx.Response.Headers["Access-Control-Allow-Origin"] = originStr;
-                    ctx.Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
+                    ctx.Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS";
                     ctx.Response.Headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type";
                     ctx.Response.Headers["Access-Control-Max-Age"] = "3600";
                     ctx.Response.Headers.Vary = "Origin";
@@ -87,7 +87,12 @@ internal static class PipelineExtensions
     private static void StartWorkers(WebApplication app, GatewayStartupContext startup, GatewayAppRuntime runtime)
     {
         var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Gateway");
-        var workerCount = Math.Max(1, Math.Min(Environment.ProcessorCount, 4));
+        // Minimum 2 workers is required: when one worker is blocked awaiting an LLM/tool
+        // response, a second worker must be available to dequeue and handle a /stop abort
+        // command immediately. With only 1 worker the /stop message would sit in the queue
+        // until the in-flight execution finishes, arriving too late to cancel anything.
+        // This matters in Docker containers where Environment.ProcessorCount is often 1.
+        var workerCount = Math.Max(2, Math.Min(Environment.ProcessorCount, 4));
 
         GatewayWorkers.Start(
             app.Lifetime,
@@ -113,7 +118,9 @@ internal static class PipelineExtensions
             runtime.RuntimeMetrics,
             app.Services.GetService<LearningService>(),
             app.Services.GetService<GatewayAutomationService>(),
-            app.Services.GetService<ContractGovernanceService>());
+            app.Services.GetService<ContractGovernanceService>(),
+            app.Services.GetService<MediaCacheStore>(),
+            runtime.AbortRegistry);
     }
 
     private static void StartChannels(WebApplication app, GatewayAppRuntime runtime)

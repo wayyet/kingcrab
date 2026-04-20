@@ -6,19 +6,13 @@ using OpenClaw.Core.Models;
 
 namespace OpenClaw.Client;
 
-public sealed class OpenClawLiveClient : IAsyncDisposable
+public sealed class OpenClawLiveClient(int maxMessageBytes = 512 * 1024) : IAsyncDisposable
 {
-    private readonly int _maxMessageBytes;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
-    private readonly object _stateLock = new();
+    private readonly Lock _stateLock = new();
     private WebSocket? _ws;
     private CancellationTokenSource? _rxCts;
     private Task? _rxLoop;
-
-    public OpenClawLiveClient(int maxMessageBytes = 512 * 1024)
-    {
-        _maxMessageBytes = maxMessageBytes;
-    }
 
     public bool IsConnected
     {
@@ -128,7 +122,8 @@ public sealed class OpenClawLiveClient : IAsyncDisposable
         CancellationTokenSource? rxCts;
         Task? rxLoop;
 
-        await _sendLock.WaitAsync(ct);
+        // 使用 ConfigureAwait(false) 避免捕获上下文
+        await _sendLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             lock (_stateLock)
@@ -186,10 +181,11 @@ public sealed class OpenClawLiveClient : IAsyncDisposable
     {
         var payload = JsonSerializer.Serialize(envelope, CoreJsonContext.Default.LiveClientEnvelope);
         var bytes = Encoding.UTF8.GetBytes(payload);
-        if (bytes.Length > _maxMessageBytes)
+        if (bytes.Length > maxMessageBytes)
             throw new InvalidOperationException("Message too large.");
 
-        await _sendLock.WaitAsync(ct);
+        // 使用 ConfigureAwait(false) 避免捕获上下文
+        await _sendLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             WebSocket? ws;
@@ -227,7 +223,7 @@ public sealed class OpenClawLiveClient : IAsyncDisposable
                     if (result.MessageType == WebSocketMessageType.Close)
                         return;
 
-                    if (writer.WrittenCount + result.Count > _maxMessageBytes)
+                    if (writer.WrittenCount + result.Count > maxMessageBytes)
                         throw new InvalidOperationException("Inbound live message too large.");
 
                     writer.Write(buffer.AsSpan(0, result.Count));

@@ -45,7 +45,8 @@ public sealed class MafAgentRuntime : IAgentRuntime
     private readonly Action<Session, string>? _appendContractSnapshot;
     private readonly string? _memoryRecallPrefix;
     private readonly object _skillGate = new();
-    private readonly IList<AITool> _mafTools;
+    private readonly object _mafToolsLock = new();
+    private IList<AITool> _mafTools;
     private string _systemPrompt = string.Empty;
     private string[] _loadedSkillNames = [];
     private int _systemPromptLength;
@@ -124,6 +125,31 @@ public sealed class MafAgentRuntime : IAgentRuntime
     }
 
     public IReadOnlyList<AITool> LoadedTools => _mafTools is IReadOnlyList<AITool> r ? r : [.. _mafTools];
+
+    public Task ApplyMcpToolChangesAsync(
+        IReadOnlyList<ITool> toAdd,
+        IReadOnlyList<string> toRemove,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        // Update the executor dispatch table first (fast, non-blocking)
+        _toolExecutor.ReplaceMcpTools(toAdd, toRemove);
+
+        // Atomically swap the LLM-visible tool list
+        lock (_mafToolsLock)
+        {
+            var removedSet = new HashSet<string>(toRemove, StringComparer.Ordinal);
+            var updated = _mafTools
+                .Where(t => !removedSet.Contains(t.Name))
+                .ToList();
+            foreach (var tool in toAdd)
+                updated.Add(new MafToolAdapter(tool, _toolExecutor));
+            _mafTools = updated;
+        }
+
+        return Task.CompletedTask;
+    }
 
     public Task<IReadOnlyList<string>> ReloadSkillsAsync(CancellationToken ct = default)
     {
@@ -489,6 +515,8 @@ public sealed class MafAgentRuntime : IAgentRuntime
         {
             systemPrompt = _systemPrompt;
         }
+
+        systemPrompt += AgentSystemPromptBuilder.BuildDynamicSuffix();
 
         if (string.IsNullOrWhiteSpace(session.SystemPromptOverride))
             return systemPrompt;
@@ -905,14 +933,18 @@ public sealed class MafAgentRuntime : IAgentRuntime
             ?? LlmExecutionEstimateBuilder.EstimateInputTokens(messages);
         var outputTokens = execution.Response.Usage?.OutputTokenCount
             ?? LlmExecutionEstimateBuilder.EstimateTokenCount(execution.Response.Text?.Length ?? 0);
+        var cacheUsage = PromptCacheUsageExtractor.FromUsage(execution.Response.Usage);
 
-        session.TotalInputTokens += inputTokens;
-        session.TotalOutputTokens += outputTokens;
+        session.AddTokenUsage(inputTokens, outputTokens);
+        session.AddCacheUsage(cacheUsage.CacheReadTokens, cacheUsage.CacheWriteTokens);
         turnContext.RecordLlmCall(elapsed, inputTokens, outputTokens);
         _metrics.IncrementLlmCalls();
         _metrics.AddInputTokens(inputTokens);
         _metrics.AddOutputTokens(outputTokens);
+        _metrics.AddPromptCacheReads(cacheUsage.CacheReadTokens);
+        _metrics.AddPromptCacheWrites(cacheUsage.CacheWriteTokens);
         _providerUsage.AddTokens(execution.ProviderId, execution.ModelId, inputTokens, outputTokens);
+        _providerUsage.AddCacheTokens(execution.ProviderId, execution.ModelId, cacheUsage.CacheReadTokens, cacheUsage.CacheWriteTokens);
         _providerUsage.RecordTurn(
             session.Id,
             session.ChannelId,
@@ -920,6 +952,8 @@ public sealed class MafAgentRuntime : IAgentRuntime
             execution.ModelId,
             inputTokens,
             outputTokens,
+            cacheUsage.CacheReadTokens,
+            cacheUsage.CacheWriteTokens,
             LlmExecutionEstimateBuilder.BuildInputTokenEstimate(messages, inputTokens, 0));
     }
 

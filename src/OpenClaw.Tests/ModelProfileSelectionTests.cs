@@ -414,14 +414,12 @@ public sealed class ModelProfileSelectionTests
                 Model = "legacy-model"
             }
         };
-        var modelProfile = new ConfiguredModelProfileRegistry(config, NullLogger<ConfiguredModelProfileRegistry>.Instance);
-        var modelselectionPolicy = new DefaultModelSelectionPolicy(modelProfile);
-        var providerRegistry = new LlmProviderRegistry(); 
+
+        var providerRegistry = new LlmProviderRegistry();
         providerRegistry.RegisterDefault(config.Llm, new EvaluationChatClient());
         var service = new GatewayLlmExecutionService(
             config,
-            modelProfile,
-            modelselectionPolicy, 
+            providerRegistry,
             new ProviderPolicyService(storagePath, NullLogger<ProviderPolicyService>.Instance),
             new RuntimeEventStore(storagePath, NullLogger<RuntimeEventStore>.Instance),
             new RuntimeMetrics(),

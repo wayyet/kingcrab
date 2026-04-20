@@ -109,6 +109,7 @@ public sealed class BridgedChannelAdapter : IBridgedChannelControl, IRestartable
                 ChannelId = ChannelId,
                 RecipientId = message.RecipientId,
                 Text = remainingText,
+                AccountId = message.AccountId,
                 SessionId = message.SessionId,
                 ReplyToMessageId = message.ReplyToMessageId,
                 Subject = message.Subject,
@@ -121,7 +122,7 @@ public sealed class BridgedChannelAdapter : IBridgedChannelControl, IRestartable
     /// <summary>
     /// Sends a typing indicator through the bridge channel.
     /// </summary>
-    public async ValueTask SendTypingAsync(string recipientId, bool isTyping, CancellationToken ct)
+    public async ValueTask SendTypingAsync(string recipientId, bool isTyping, string? accountId, CancellationToken ct)
     {
         try
         {
@@ -131,6 +132,7 @@ public sealed class BridgedChannelAdapter : IBridgedChannelControl, IRestartable
                 {
                     ChannelId = ChannelId,
                     RecipientId = recipientId,
+                    AccountId = accountId,
                     IsTyping = isTyping,
                 },
                 CoreJsonContext.Default.BridgeChannelTypingRequest,
@@ -145,7 +147,7 @@ public sealed class BridgedChannelAdapter : IBridgedChannelControl, IRestartable
     /// <summary>
     /// Sends a read receipt for a message through the bridge channel.
     /// </summary>
-    public async ValueTask SendReadReceiptAsync(string messageId, string? remoteJid, string? participant, CancellationToken ct)
+    public async ValueTask SendReadReceiptAsync(string messageId, string? remoteJid, string? participant, string? accountId, CancellationToken ct)
     {
         try
         {
@@ -155,6 +157,7 @@ public sealed class BridgedChannelAdapter : IBridgedChannelControl, IRestartable
                 {
                     ChannelId = ChannelId,
                     MessageId = messageId,
+                    AccountId = accountId,
                     RemoteJid = remoteJid,
                     Participant = participant,
                 },
@@ -170,7 +173,7 @@ public sealed class BridgedChannelAdapter : IBridgedChannelControl, IRestartable
     /// <summary>
     /// Sends an emoji reaction to a message through the bridge channel.
     /// </summary>
-    public async ValueTask SendReactionAsync(string messageId, string emoji, string? remoteJid, string? participant, CancellationToken ct)
+    public async ValueTask SendReactionAsync(string messageId, string emoji, string? remoteJid, string? participant, string? accountId, CancellationToken ct)
     {
         try
         {
@@ -181,6 +184,7 @@ public sealed class BridgedChannelAdapter : IBridgedChannelControl, IRestartable
                     ChannelId = ChannelId,
                     MessageId = messageId,
                     Emoji = emoji,
+                    AccountId = accountId,
                     RemoteJid = remoteJid,
                     Participant = participant,
                 },
@@ -204,6 +208,7 @@ public sealed class BridgedChannelAdapter : IBridgedChannelControl, IRestartable
         var senderName = parameters.TryGetProperty("senderName", out var sn) ? sn.GetString() : null;
         var messageId = parameters.TryGetProperty("messageId", out var mid) ? mid.GetString() : null;
         var replyToMessageId = parameters.TryGetProperty("replyToMessageId", out var rtm) ? rtm.GetString() : null;
+        var accountId = parameters.TryGetProperty("accountId", out var aid) ? aid.GetString() : null;
 
         // Group fields
         var isGroup = parameters.TryGetProperty("isGroup", out var ig) && ig.GetBoolean();
@@ -298,6 +303,7 @@ public sealed class BridgedChannelAdapter : IBridgedChannelControl, IRestartable
             ChannelId = ChannelId,
             SenderId = senderId,
             Text = text,
+            AccountId = accountId,
             SessionId = sessionId,
             SenderName = senderName,
             MessageId = messageId,

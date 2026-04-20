@@ -3,7 +3,8 @@ using System.Text;
 var builder = DistributedApplication.CreateBuilder(args);
 
 // 设置控制台输出编码为UTF-8
-Console.OutputEncoding = Encoding.UTF8;
+Console.InputEncoding = Encoding.UTF8; 
+Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
 // 添加 Keycloak 资源
 var keycloak = builder.AddKeycloak("keycloak", 8080)

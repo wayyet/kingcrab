@@ -32,4 +32,10 @@ public sealed record WsServerEnvelope
     public string? ToolName { get; init; }
     public string? ArgumentsPreview { get; init; }
     public bool? Approved { get; init; }
+
+    // File attachment delivery (server -> client, type = "file_attachment")
+    public string? FileUrl { get; init; }
+    public string? FileName { get; init; }
+    public string? MimeType { get; init; }
+    public long? FileSizeBytes { get; init; }
 }

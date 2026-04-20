@@ -153,6 +153,13 @@ internal static class RuntimeInitializationExtensions
             app.Services.GetRequiredService<ILogger<SkillWatcherService>>());
         skillWatcher.Start(app.Lifetime.ApplicationStopping);
 
+        var mcpWatcher = new McpWorkspaceWatcherService(
+            services.McpRegistry,
+            agentRuntime,
+            startup.WorkspacePath,
+            app.Services.GetRequiredService<ILogger<McpWorkspaceWatcherService>>());
+        mcpWatcher.Start(app.Lifetime.ApplicationStopping);
+
         await services.AutomationService.RefreshCacheAsync(app.Lifetime.ApplicationStopping);
         var cronTask = StartCronIfEnabled(loggerFactory, services.Pipeline, services.CronJobSource, app.Lifetime.ApplicationStopping);
         StartNativeEventBridges(config, loggerFactory, services.Pipeline, app.Lifetime.ApplicationStopping);
@@ -282,6 +289,19 @@ internal static class RuntimeInitializationExtensions
 
         if (config.Channels.Signal.Enabled)
             channelAdapters["signal"] = app.Services.GetRequiredService<SignalChannel>();
+
+        // Feishu is always added to adapters (enables hot-enable via config without restart)
+        channelAdapters["feishu"] = app.Services.GetRequiredService<FeishuChannel>();
+
+        // Restore persisted channel configs from volume storage (survives container restarts).
+        // This must happen before StartAsync is called in PipelineExtensions.StartChannels.
+        var channelStore = app.Services.GetRequiredService<OpenClaw.Gateway.Channels.ChannelConfigStore>();
+        var persistedFeishu = channelStore.TryLoad("feishu", CoreJsonContext.Default.FeishuChannelConfig);
+        if (persistedFeishu is not null)
+        {
+            app.Services.GetRequiredService<FeishuChannel>().SetRuntimeConfig(persistedFeishu);
+            app.Logger.LogInformation("Restored persisted Feishu config from volume storage.");
+        }
 
         var whatsAppWorkerHost = await CreateWhatsAppChannelAsync(app, startup, services, loggerFactory, channelAdapters);
 
@@ -472,6 +492,7 @@ internal static class RuntimeInitializationExtensions
             NativeRegistry = services.NativeRegistry,
             SessionLocks = services.SessionManager.SessionLocks,
             LockLastUsed = services.SessionManager.LockLastUsed,
+            AbortRegistry = new SessionAbortRegistry(),
             AllowedOriginsSet = config.Security.AllowedOrigins.Length > 0
                 ? config.Security.AllowedOrigins.ToFrozenSet(StringComparer.Ordinal)
                 : null,
@@ -501,6 +522,7 @@ internal static class RuntimeInitializationExtensions
             new ShellTool(config.Tooling),
             new FileReadTool(config.Tooling),
             new FileWriteTool(config.Tooling),
+            new PublishFileTool(config.Tooling),
             new ProcessTool(services.ProcessService, config.Tooling),
             new MemoryNoteTool(services.MemoryStore),
             new MemorySearchTool((IMemoryNoteSearch)services.MemoryStore),
@@ -530,7 +552,6 @@ internal static class RuntimeInitializationExtensions
 
             // Communication & data tools
             new MessageTool(services.Pipeline),
-            new XSearchTool(),
             new MemoryGetTool(services.MemoryStore),
             new ProfileWriteTool(services.UserProfileStore),
             new SessionsYieldTool(services.SessionManager, services.Pipeline, services.MemoryStore),
@@ -538,6 +559,9 @@ internal static class RuntimeInitializationExtensions
 
         if (config.Tooling.EnableBrowserTool)
             tools.Add(new BrowserTool(config.Tooling, services.RuntimeMetrics));
+
+        if (config.Tooling.EnableXSearch)
+            tools.Add(new XSearchTool());
 
         if (string.Equals(Environment.GetEnvironmentVariable("OPENCLAW_ENABLE_STREAMING_SMOKE_TOOL"), "1", StringComparison.Ordinal))
             tools.Add(new StreamingSmokeEchoTool());
