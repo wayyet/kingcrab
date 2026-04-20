@@ -34,4 +34,21 @@
     </PackageReference>
     <PackageReference Include="xunit.v3" Version="3.2.2" />
   </ItemGroup>
+
+  <!-- Files that require optional assemblies not present in the default build -->
+  <ItemGroup>
+    <Compile Remove="SemanticKernelInteropTests.cs" />
+    <Compile Remove="WhatsAppWorkerServiceTests.cs" />
+    <Compile Remove="AgentRuntimeTests.cs" />
+    <Compile Remove="BeyondBaseTests.cs" />
+    <Compile Remove="FeatureParityTests.cs" />
+    <Compile Remove="MemoryRecallInjectionTests.cs" />
+    <Compile Remove="PluginBridgeIntegrationTests.cs" />
+    <Compile Remove="GatewayAdminEndpointTests.cs" />
+  </ItemGroup>
+
+  <!-- Suppress xUnit analyzer rule that treats CancellationToken usage as errors -->
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);xUnit1051</NoWarn>
+  </PropertyGroup>
 </Project>

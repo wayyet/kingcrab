@@ -27,6 +27,12 @@ public sealed class AutomationDefinition
     public string? TemplateKey { get; init; }
     public DateTimeOffset CreatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
+
+    /// <summary>One-shot: run at this specific UTC time instead of a cron expression.</summary>
+    public DateTimeOffset? RunAt { get; init; }
+
+    /// <summary>When true, the automation is deleted after it runs successfully (used with RunAt).</summary>
+    public bool DeleteAfterRun { get; init; }
 }
 
 public sealed class AutomationRunState
@@ -39,6 +45,16 @@ public sealed class AutomationRunState
     public long InputTokens { get; init; }
     public long OutputTokens { get; init; }
     public string? SessionId { get; init; }
+    public string? MessagePreview { get; init; }
+    public IReadOnlyList<RunHistoryEntry> RecentRuns { get; init; } = [];
+}
+
+public sealed class RunHistoryEntry
+{
+    public DateTimeOffset RanAtUtc { get; init; }
+    public string Outcome { get; init; } = "";
+    public long InputTokens { get; init; }
+    public long OutputTokens { get; init; }
     public string? MessagePreview { get; init; }
 }
 

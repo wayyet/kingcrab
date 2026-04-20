@@ -175,7 +175,8 @@ public sealed class MafAgentRuntime : IAgentRuntime
         string userMessage,
         CancellationToken ct,
         ToolApprovalCallback? approvalCallback = null,
-        System.Text.Json.JsonElement? responseSchema = null)
+        System.Text.Json.JsonElement? responseSchema = null,
+        bool isSystemEvent = false)
     {
         using var activity = _telemetry.StartRunActivity("Agent.Maf.RunAsync", session, _runtimeState);
         var turnCtx = new TurnContext
@@ -186,10 +187,11 @@ public sealed class MafAgentRuntime : IAgentRuntime
 
         _metrics.IncrementRequests();
         _logger?.LogInformation(
-            "[{CorrelationId}] MAF turn start session={SessionId} channel={ChannelId}",
+            "[{CorrelationId}] MAF turn start session={SessionId} channel={ChannelId} isSystemEvent={IsSystemEvent}",
             turnCtx.CorrelationId,
             session.Id,
-            session.ChannelId);
+            session.ChannelId,
+            isSystemEvent);
 
         if (TryRejectContractBudget(session, out var contractBudgetMessage))
         {
@@ -204,11 +206,17 @@ public sealed class MafAgentRuntime : IAgentRuntime
             return "You've reached the token limit for this session. Please start a new conversation.";
         }
 
-        ChatClientAgent agent = CreateAgent(session);
+        // For system events (e.g. cron jobs), inject the event as a system-level
+        // instruction rather than a user turn so the assistant appears to proactively
+        // send the message with no visible user prompt in session history.
+        ChatClientAgent agent = isSystemEvent
+            ? CreateAgentWithSystemEvent(session, userMessage)
+            : CreateAgent(session);
         AgentSession mafSession = await _sessionStateStore.LoadAsync(agent, session, ct);
         var toolInvocations = new List<ToolInvocation>();
 
-        session.History.Add(new ChatTurn { Role = "user", Content = userMessage });
+        if (!isSystemEvent)
+            session.History.Add(new ChatTurn { Role = "user", Content = userMessage });
 
         if (_enableCompaction)
             await CompactHistoryAsync(session, ct);
@@ -216,7 +224,15 @@ public sealed class MafAgentRuntime : IAgentRuntime
             TrimHistory(session);
 
         var messages = BuildMessages(session);
+        // For system events the recall query uses the event text but the query is not
+        // surfaced as a user turn in the message list.
         await TryInjectRecallAsync(messages, userMessage, ct);
+
+        // System events need a minimal synthetic user trigger because most LLM providers
+        // require the messages list to end with a user turn.  This trigger is never
+        // persisted to history.
+        if (isSystemEvent)
+            messages.Add(new ChatMessage(ChatRole.User, "[scheduled task trigger]"));
 
         try
         {
@@ -291,7 +307,8 @@ public sealed class MafAgentRuntime : IAgentRuntime
         Session session,
         string userMessage,
         [EnumeratorCancellation] CancellationToken ct,
-        ToolApprovalCallback? approvalCallback = null)
+        ToolApprovalCallback? approvalCallback = null,
+        bool isSystemEvent = false)
     {
         if (!_options.EnableStreaming)
             throw new NotSupportedException("MAF streaming is disabled for this experiment runtime.");
@@ -305,10 +322,11 @@ public sealed class MafAgentRuntime : IAgentRuntime
 
         _metrics.IncrementRequests();
         _logger?.LogInformation(
-            "[{CorrelationId}] MAF streaming turn start session={SessionId} channel={ChannelId}",
+            "[{CorrelationId}] MAF streaming turn start session={SessionId} channel={ChannelId} isSystemEvent={IsSystemEvent}",
             turnCtx.CorrelationId,
             session.Id,
-            session.ChannelId);
+            session.ChannelId,
+            isSystemEvent);
 
         if (TryRejectContractBudget(session, out var contractBudgetMessage))
         {
@@ -329,7 +347,9 @@ public sealed class MafAgentRuntime : IAgentRuntime
             yield break;
         }
 
-        ChatClientAgent agent = CreateAgent(session);
+        ChatClientAgent agent = isSystemEvent
+            ? CreateAgentWithSystemEvent(session, userMessage)
+            : CreateAgent(session);
         AgentSession mafSession = await _sessionStateStore.LoadAsync(agent, session, ct);
         var eventChannel = Channel.CreateBounded<AgentStreamEvent>(new BoundedChannelOptions(256)
         {
@@ -338,7 +358,8 @@ public sealed class MafAgentRuntime : IAgentRuntime
             FullMode = BoundedChannelFullMode.Wait
         });
 
-        session.History.Add(new ChatTurn { Role = "user", Content = userMessage });
+        if (!isSystemEvent)
+            session.History.Add(new ChatTurn { Role = "user", Content = userMessage });
 
         if (_enableCompaction)
             await CompactHistoryAsync(session, ct);
@@ -347,6 +368,9 @@ public sealed class MafAgentRuntime : IAgentRuntime
 
         var messages = BuildMessages(session);
         await TryInjectRecallAsync(messages, userMessage, ct);
+
+        if (isSystemEvent)
+            messages.Add(new ChatMessage(ChatRole.User, "[scheduled task trigger]"));
 
         var producer = ProduceStreamingRunAsync(
             session,
@@ -367,6 +391,18 @@ public sealed class MafAgentRuntime : IAgentRuntime
     private ChatClientAgent CreateAgent(Session session)
     {
         return _agentFactory.Create(_chatClient, GetSystemPrompt(session), _mafTools);
+    }
+
+    /// <summary>
+    /// Creates an agent whose system prompt is temporarily augmented with the cron/system
+    /// event text.  The event is injected as a system-level instruction so the LLM
+    /// generates an assistant-initiated message without a visible user turn in history.
+    /// </summary>
+    private ChatClientAgent CreateAgentWithSystemEvent(Session session, string eventText)
+    {
+        var systemPrompt = GetSystemPrompt(session)
+            + $"\n\n[Scheduled Task]\nA scheduled task has just fired. Generate a proactive assistant message based on the following task description — do NOT mention that this was scheduled or ask the user anything; just deliver the message naturally:\n{eventText.Trim()}";
+        return _agentFactory.Create(_chatClient, systemPrompt, _mafTools);
     }
 
     private async Task ProduceStreamingRunAsync(

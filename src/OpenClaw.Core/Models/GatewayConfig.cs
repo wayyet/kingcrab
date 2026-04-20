@@ -670,6 +670,10 @@ public sealed class CronConfig
 public sealed class CronJobConfig
 {
     public string Name { get; set; } = "";
+
+    /// <summary>Human-readable display name. For dynamic automations this is the automation's Name field; Name is the automation.Id.</summary>
+    public string? DisplayName { get; set; }
+
     public string CronExpression { get; set; } = "";
     public string Prompt { get; set; } = "";
     public bool RunOnStartup { get; set; } = false;
@@ -680,6 +684,15 @@ public sealed class CronJobConfig
 
     /// <summary>IANA timezone ID (e.g. "America/New_York"). Null defaults to UTC.</summary>
     public string? Timezone { get; set; }
+
+    /// <summary>Override the LLM model for this job. Null uses the session/profile default.</summary>
+    public string? ModelId { get; set; }
+
+    /// <summary>One-shot: run at this specific UTC time instead of the cron expression.</summary>
+    public DateTimeOffset? RunAt { get; set; }
+
+    /// <summary>Delete this job after it runs (used with RunAt one-shot jobs).</summary>
+    public bool DeleteAfterRun { get; set; }
 }
 
 public sealed class WebhooksConfig

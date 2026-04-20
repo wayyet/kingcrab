@@ -18,12 +18,12 @@ internal sealed class AutomationTool : IToolWithContext
     }
 
     public string Name => "automation";
-    public string Description => "Inspect and manage scheduled automations. Supports list, get, preview, create, update, pause, resume, and run.";
+    public string Description => "Inspect and manage scheduled automations. Supports list, get, preview, create, update, delete, pause, resume, and run.";
     public string ParameterSchema => """
     {
       "type":"object",
       "properties":{
-        "action":{"type":"string","enum":["list","get","preview","create","update","pause","resume","run"],"default":"list"},
+        "action":{"type":"string","enum":["list","get","preview","create","update","delete","pause","resume","run"],"default":"list"},
         "automation_id":{"type":"string"},
         "name":{"type":"string"},
         "schedule":{"type":"string"},
@@ -58,10 +58,11 @@ internal sealed class AutomationTool : IToolWithContext
             "preview" => Preview(root, context),
             "create" => await SaveAsync(root, context, isUpdate: false, ct),
             "update" => await SaveAsync(root, context, isUpdate: true, ct),
+            "delete" => await DeleteAsync(root, ct),
             "pause" => await SetEnabledAsync(root, enabled: false, ct),
             "resume" => await SetEnabledAsync(root, enabled: true, ct),
             "run" => await RunAsync(root, ct),
-            _ => "Error: Unknown action. Valid actions are list, get, preview, create, update, pause, resume, and run."
+            _ => "Error: Unknown action. Valid actions are list, get, preview, create, update, delete, pause, resume, and run."
         };
     }
 
@@ -88,7 +89,26 @@ internal sealed class AutomationTool : IToolWithContext
             return $"Error: automation '{automationId}' was not found.";
 
         var state = await _automations.GetRunStateAsync(automationId, ct);
-        return $"id: {automation.Id}\nname: {automation.Name}\nenabled: {automation.Enabled}\nschedule: {automation.Schedule}\nprompt:\n{automation.Prompt}\nlast_outcome: {state?.Outcome ?? "never"}";
+        var sb = new StringBuilder();
+        sb.AppendLine($"id: {automation.Id}");
+        sb.AppendLine($"name: {automation.Name}");
+        sb.AppendLine($"enabled: {automation.Enabled}");
+        sb.AppendLine($"schedule: {automation.Schedule}");
+        if (automation.RunAt.HasValue)
+            sb.AppendLine($"run_at: {automation.RunAt.Value:u} (one-shot)");
+        if (!string.IsNullOrWhiteSpace(automation.ModelId))
+            sb.AppendLine($"model: {automation.ModelId}");
+        sb.AppendLine($"prompt:\n{automation.Prompt}");
+        sb.AppendLine($"last_outcome: {state?.Outcome ?? "never"}");
+        if (state?.LastRunAtUtc.HasValue == true)
+            sb.AppendLine($"last_run: {state.LastRunAtUtc.Value:u}");
+        if (state?.RecentRuns is { Count: > 0 } runs)
+        {
+            sb.AppendLine($"recent_runs ({runs.Count}):");
+            foreach (var r in runs)
+                sb.AppendLine($"  {r.RanAtUtc:u}  [{r.Outcome}]  in:{r.InputTokens} out:{r.OutputTokens}");
+        }
+        return sb.ToString().TrimEnd();
     }
 
     private string Preview(JsonElement root, ToolExecutionContext context)
@@ -107,9 +127,30 @@ internal sealed class AutomationTool : IToolWithContext
         if (isUpdate && string.IsNullOrWhiteSpace(definition.Id))
             return "Error: automation_id is required for update.";
 
-        var saved = await _automations.SaveAsync(definition, ct);
+        // Validate — also applies NormalizeSchedule (auto-fixes common 6-field Quartz format)
+        var preview = _automations.BuildPreview(definition);
+        var scheduleIssue = preview.Issues.FirstOrDefault(static i => i.Code is "schedule_required" or "invalid_schedule");
+        if (scheduleIssue is not null)
+            return $"Error: {scheduleIssue.Message}";
+
+        // Save the definition with the already-normalised schedule from the preview
+        var saved = await _automations.SaveAsync(preview.Definition, ct);
         return $"{(isUpdate ? "Updated" : "Created")} automation {saved.Id}.";
     }
+
+    private async Task<string> DeleteAsync(JsonElement root, CancellationToken ct)
+    {
+        var automationId = GetString(root, "automation_id");
+        if (string.IsNullOrWhiteSpace(automationId))
+            return "Error: automation_id is required.";
+
+        var existing = await _automations.GetAsync(automationId, ct);
+        if (existing is null)
+            return $"Error: automation '{automationId}' was not found.";
+
+        await _automations.DeleteAsync(automationId, ct);
+        return $"Deleted automation {automationId}.";
+ }
 
     private async Task<string> SetEnabledAsync(JsonElement root, bool enabled, CancellationToken ct)
     {
@@ -140,7 +181,9 @@ internal sealed class AutomationTool : IToolWithContext
             Source = existing.Source,
             TemplateKey = existing.TemplateKey,
             CreatedAtUtc = existing.CreatedAtUtc,
-            UpdatedAtUtc = DateTimeOffset.UtcNow
+            UpdatedAtUtc = DateTimeOffset.UtcNow,
+            RunAt = existing.RunAt,
+            DeleteAfterRun = existing.DeleteAfterRun
         }, ct);
 
         return $"{(enabled ? "Resumed" : "Paused")} automation {automationId}.";

@@ -54,6 +54,10 @@ public sealed class FeishuChannel : IChannelAdapter, IRestartableChannelAdapter
     // Bot's own open_id, fetched once after token refresh; used for @mention filtering
     private string? _botOpenId;
 
+    // Two-layer dedup: memory TTL (5 min) + persistent disk (24 h) keyed on message_id.
+    // Protects against Feishu event retries and replays after WebSocket reconnects / restarts.
+    private readonly FeishuMessageDedup _dedup = new();
+
     public FeishuChannel(
         FeishuChannelConfig initialConfig,
         ILogger<FeishuChannel> logger)
@@ -105,6 +109,9 @@ public sealed class FeishuChannel : IChannelAdapter, IRestartableChannelAdapter
         ResolveCredentials(cfg);
         if (!ValidateCredentials())
             return;
+
+        // Pre-load previously seen message_ids from disk so replays are caught immediately.
+        _dedup.Warmup(_appId!, _logger);
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         _receiveLoop = RunWsLoopAsync(_cts.Token);
@@ -383,17 +390,31 @@ public sealed class FeishuChannel : IChannelAdapter, IRestartableChannelAdapter
             return;
 
         var eventType = header.TryGetProperty("event_type", out var et) ? et.GetString() : null;
-        var eventId = header.TryGetProperty("event_id", out var eid) ? eid.GetString() : null;
 
         if (!root.TryGetProperty("event", out var eventData))
             return;
 
-        _logger.LogDebug("Feishu event type={EventType} id={EventId}.", eventType, eventId);
+        _logger.LogDebug("Feishu event type={EventType}.", eventType);
 
         if (string.Equals(eventType, "im.message.receive_v1", StringComparison.Ordinal))
+        {
+            // Deduplicate by message_id (stable across Feishu retries; event_id may differ on re-delivery).
+            // Two-layer cache: memory (5 min) catches rapid retries; disk (24 h) catches replays after
+            // WebSocket reconnects and process restarts.
+            var messageId = eventData.TryGetProperty("message", out var msgEl) &&
+                            msgEl.TryGetProperty("message_id", out var midEl)
+                ? midEl.GetString() : null;
+
+            if (!string.IsNullOrEmpty(messageId) &&
+                !await _dedup.TryClaimAsync(messageId, _appId ?? "default", _logger, ct))
+                return;
+
             await HandleMessageReceiveV1Async(eventData, ct);
+        }
         else
+        {
             _logger.LogDebug("Feishu unhandled event type: {EventType}.", eventType);
+        }
     }
 
     private async Task HandleMessageReceiveV1Async(JsonElement evt, CancellationToken ct)
@@ -1613,7 +1634,8 @@ public sealed class FeishuChannel : IChannelAdapter, IRestartableChannelAdapter
 
     public async ValueTask DisposeAsync()
     {
-        // nothing extra to dispose
+        _dedup.Dispose();
+
 
         if (_cts is not null)
         {

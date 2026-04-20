@@ -313,13 +313,19 @@ internal sealed class IntegrationApiFacade
         var result = await _automationService.RunNowAsync(automationId, _runtime.Pipeline, cancellationToken);
         if (result == RunNowResult.Queued)
         {
+            var existing = await _automationService.GetRunStateAsync(automationId, cancellationToken);
             await _automationService.SaveRunStateAsync(new AutomationRunState
             {
                 AutomationId = automationId,
                 Outcome = "queued",
                 LastRunAtUtc = DateTimeOffset.UtcNow,
+                LastDeliveredAtUtc = existing?.LastDeliveredAtUtc,
+                DeliverySuppressed = existing?.DeliverySuppressed ?? false,
+                InputTokens = existing?.InputTokens ?? 0,
+                OutputTokens = existing?.OutputTokens ?? 0,
                 SessionId = string.IsNullOrWhiteSpace(automation.SessionId) ? $"automation:{automation.Id}" : automation.SessionId,
-                MessagePreview = automation.Prompt.Length > 180 ? automation.Prompt[..180] : automation.Prompt
+                MessagePreview = automation.Prompt.Length > 180 ? automation.Prompt[..180] : automation.Prompt,
+                RecentRuns = existing?.RecentRuns ?? []
             }, cancellationToken);
 
             AppendRuntimeEvent(

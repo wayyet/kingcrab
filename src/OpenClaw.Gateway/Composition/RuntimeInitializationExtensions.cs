@@ -547,7 +547,7 @@ internal static class RuntimeInitializationExtensions
             new AgentsListTool(config.Delegation),
 
             // System management tools
-            new CronTool(services.CronJobSource, services.Pipeline),
+            new CronTool(services.CronJobSource, services.Pipeline, services.AutomationService),
             new GatewayTool(services.RuntimeMetrics, services.SessionManager, config),
 
             // Communication & data tools

@@ -1,3 +1,4 @@
+using Cronos;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -989,14 +990,10 @@ internal sealed class HeartbeatService
 
         var utcNow = DateTimeOffset.UtcNow;
         var start = new DateTimeOffset(utcNow.Year, utcNow.Month, utcNow.Day, utcNow.Hour, utcNow.Minute, 0, TimeSpan.Zero);
-        var count = 0;
-        for (var i = 0; i < 43_200; i++)
-        {
-            var utc = start.AddMinutes(i);
-            var local = timezone is null ? utc : TimeZoneInfo.ConvertTime(utc, timezone);
-            if (CronScheduler.IsTime(expression, local))
-                count++;
-        }
+        var tz = timezone ?? TimeZoneInfo.Utc;
+        var expr = CronExpression.Parse(expression, CronFormat.Standard);
+        var end = start.AddMinutes(43_200);
+        var count = expr.GetOccurrences(start, end, tz).Count();
 
         return count;
     }
