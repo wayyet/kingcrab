@@ -6,6 +6,7 @@
 
 - 需要从大型 ontology / taxonomy / schema 中抽取当前任务相关的最小切片
 - 需要把概念、关系、约束整理成稳定结构，供模型、程序或团队协作复用
+- 需要把 slice 稳定投影到 projection / codegen / prompt orchestration 等下游输入
 - 需要让不同成员产出的 ontology slice 能按统一格式校验和审阅
 
 ---
@@ -70,7 +71,7 @@
 
 ### 路径一：先人工梳理，再结构化落地
 
-1. 先看 `SKILL.md`，确认当前任务适不适合做 ontology slice。
+1. 先看 `SKILL.md`，确认当前任务适不适合做 ontology slice 或下游 projection。
 2. 用 `templates/TEMPLATE.md` 梳理范围、来源、核心概念和约束。
 3. 参考 `references/FIELD_GUIDE.md`，统一字段语义和填报口径。
 4. 如需接到 codegen 或 prompt orchestration，补看 `references/DOWNSTREAM_MAPPING_GUIDE.md`，先明确投影规则。
@@ -81,7 +82,7 @@
 
 ### 路径二：直接生成工程化产物
 
-1. 先看 `SKILL.md` 明确切片目标和边界。
+1. 先看 `SKILL.md` 明确切片目标、projection 语义和边界。
 2. 直接基于 `templates/TEMPLATE.json` 生成结果。
 3. 遇到字段拿不准时，回看 `references/FIELD_GUIDE.md`。
 4. 需要面向代码生成或提示词编排时，按 `references/DOWNSTREAM_MAPPING_GUIDE.md` 做投影。
@@ -104,8 +105,8 @@
 ## 快速选择
 
 - 只想先讨论概念边界：用 `templates/TEMPLATE.md`
-- 想输出给程序或流水线：用 `templates/TEMPLATE.json`
-- 想把 slice 投影成 codegen / prompt orchestration 输入：用 `templates/PROJECTION_TEMPLATE.json`
+- 想输出给程序、流水线或下游 projection：用 `templates/TEMPLATE.json`
+- 想把 slice 投影成 projection / codegen / prompt orchestration 输入：用 `templates/PROJECTION_TEMPLATE.json`
 - 想检查结果合不合法：用 `templates/TEMPLATE.schema.json`
 - 想检查 projection 结构是否合法：用 `templates/PROJECTION_TEMPLATE.schema.json`
 - 想直接从一个合法 projection 样例开始改：用 `examples/ready/sample-projection.json`
@@ -115,7 +116,7 @@
 - 想统一 slice 和 projection 两层评审标准：看 `references/REVIEW_CHECKLIST.md`
 - 想看 schema 升级时模板、样例和校验器该怎么一起迁移：看 `references/SCHEMA_MIGRATION.md`
 - 想快速理解这套规范为什么会演进成现在这套结构：看 `references/SESSION_SUMMARY.md`
-- 想把 slice 稳定接到 codegen 或 prompt orchestration：看 `references/DOWNSTREAM_MAPPING_GUIDE.md`
+- 想把 slice 稳定接到 projection、codegen 或 prompt orchestration：看 `references/DOWNSTREAM_MAPPING_GUIDE.md`
 - 想直接在真实样例上改：用 `examples/ready/sample.json`（`READY`）
 - 想看 `READY` 的短入口：用 `examples/ready/sample.entry.md`
 - 想看 `READY` 的完整解释：用 `examples/ready/sample.md`

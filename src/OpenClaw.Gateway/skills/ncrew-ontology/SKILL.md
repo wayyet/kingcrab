@@ -2,6 +2,7 @@
 name: ncrew-ontology
 description: 当用户提到 ontology、本体、slice、schema/projection/mapping、taxonomy 或概念关系建模时，从文档、schema 或代码中抽取当前任务所需的最小可验证 slice，保留 concepts、relations、constraints 与 sources，供评审、codegen 和 prompt 编排使用。
 metadata: {"openclaw":{"emoji":"🧠"}}
+---
 
 # ncrew-ontology
 
@@ -27,7 +28,7 @@ Task-scoped ontology slicing for extracting the smallest verifiable subgraph nee
 | 需要从大图中只拿当前子域 | 收缩范围，构造最小闭包 |
 | 需要统一术语、层级、约束 | 输出标准化概念/关系/规则 |
 | 需要判断某实体或规则属于哪层 | 标注边界、上位概念和排除项 |
-| 需要给 schema / codegen / prompt 提供稳定输入 | 产出结构化 slice JSON |
+| 需要给 projection / codegen / prompt 提供稳定输入 | 产出结构化 slice JSON，作为下游消费的稳定语义输入 |
 
 ## Output Contract
 
