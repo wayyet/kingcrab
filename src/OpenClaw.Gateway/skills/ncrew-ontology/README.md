@@ -129,8 +129,27 @@
 - 想看 projection 的失败样例：用 `examples/invalid/invalid-projection.json`
 - 想看 projection 失败的短入口：用 `examples/invalid/invalid-projection.entry.md`
 - 想看 projection 为什么是 FAIL：用 `examples/invalid/invalid-projection.md`
+- 想单独分享“该不该用这套规范”的判定入口：看 `references/DECISION_GUIDE.md`
 - 想一条命令校验样例或自定义 slice：用 `scripts/validate-slice.ps1`
 - 想一条命令校验样例或自定义 projection：用 `scripts/validate-projection.ps1`
+
+---
+
+## 红黄绿决策图
+
+如果团队在使用前只想先判断一件事: `ncrew-ontology` 到底适不适合当前场景，先看 `references/DECISION_GUIDE.md`。
+
+这份独立指南专门回答三类问题：
+
+- 当前任务到底该不该做 ontology slice。
+- 当前阶段能不能直接用本规范沉淀结果。
+- 当前产出更接近 `READY` 候选、`WARNING` 草案，还是暂时不该进入本规范。
+
+判定口径保持不变：
+
+- `绿灯`：适合按本规范继续做 slice / projection / review。
+- `黄灯`：可以用，但只能作为受控草案、局部治理视图，或需要补证据后再推进。
+- `红灯`：当前不适合，应先补主题、补来源，或改用其他 ontology / knowledge modeling 方法。
 
 ---
 
