@@ -39,7 +39,7 @@ internal static class AdminChannelEndpoints
 
             return channel switch
             {
-                "feishu" => Results.Json(feishu.GetEffectiveConfig(), CoreJsonContext.Default.FeishuChannelConfig),
+                "feishu" => Results.Json(feishu.GetEffectiveConfigForAdmin(), CoreJsonContext.Default.FeishuChannelConfig),
 
                 // Add new channels here:
                 // "slack"   => Results.Json(slack.GetEffectiveConfig(), CoreJsonContext.Default.SlackChannelConfig),

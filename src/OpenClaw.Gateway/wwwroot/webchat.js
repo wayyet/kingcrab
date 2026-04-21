@@ -1700,6 +1700,7 @@
             // Feishu field refs
             const fAppId         = document.getElementById('feishu-appid');
             const fAppSecret     = document.getElementById('feishu-appsecret');
+            const fAppSecretRef  = document.getElementById('feishu-appsecret-ref');
 
             let activeChannel = 'feishu';
 
@@ -1720,9 +1721,9 @@
 
             // Populate the Feishu form from a config object (PascalCase keys from server)
             function populateFeishuForm(cfg) {
-                fAppId.value          = cfg.AppId ?? cfg.appId ?? '';
-                // Never pre-fill secret — leave blank so user must intentionally set it
-                fAppSecret.value      = '';
+                fAppId.value        = cfg.AppId        ?? cfg.appId        ?? '';
+                fAppSecret.value    = cfg.AppSecret    ?? cfg.appSecret    ?? '';
+                fAppSecretRef.value = cfg.AppSecretRef ?? cfg.appSecretRef ?? '';
             }
 
             // Build config object from the Feishu form
@@ -1734,6 +1735,8 @@
                 if (appId) cfg.appId = appId;
                 const appSecret = fAppSecret.value.trim();
                 if (appSecret) cfg.appSecret = appSecret;
+                const appSecretRef = fAppSecretRef.value.trim();
+                if (appSecretRef) cfg.appSecretRef = appSecretRef;
                 return cfg;
             }
 
