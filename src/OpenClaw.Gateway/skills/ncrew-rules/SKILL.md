@@ -77,7 +77,7 @@ metadata:
 
 #### 远程 Skill 版本感知
 
-当你通过 `use_skill` 加载**用户 home 目录下的 managed skills 目录**中的 Skill 时，必须遵循以下流程：
+当你加载**用户 home 目录下的 managed skills 目录**中的 Skill 时，必须遵循以下流程：
 
 - managed 目录的逻辑路径是 `.openclaw/skills/`
 - 版本元数据文件的逻辑路径是 `.openclaw/skills/.remote-skills-meta.json`
