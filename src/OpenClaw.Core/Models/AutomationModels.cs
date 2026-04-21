@@ -9,7 +9,7 @@ public sealed class AutomationsConfig
 
 public sealed class AutomationDefinition
 {
-    public required string Id { get; init; }
+    public string Id { get; init; } = "";
     public string Name { get; init; } = "";
     public bool Enabled { get; init; } = true;
     public string Schedule { get; init; } = "@hourly";
