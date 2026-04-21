@@ -25,6 +25,7 @@
   - `REVIEW_CHECKLIST.md`：同时覆盖 slice 和 projection 两层评审标准。
   - `DOWNSTREAM_MAPPING_GUIDE.md`：下游代码生成 / 提示词编排映射规范。
   - `SCHEMA_MIGRATION.md`：slice 与 projection 的 schema 版本迁移说明。
+  - `SESSION_SUMMARY.md`：本次规范包从 slice skill 演进到完整治理包的总结文章。
 - `examples/ready/`
   - `sample.json`：`READY` 基线样例。
   - `sample-projection.json`：基于 `sample.json` 的合法 projection 样例。
@@ -113,6 +114,7 @@
 - 想统一字段口径：看 `references/FIELD_GUIDE.md`
 - 想统一 slice 和 projection 两层评审标准：看 `references/REVIEW_CHECKLIST.md`
 - 想看 schema 升级时模板、样例和校验器该怎么一起迁移：看 `references/SCHEMA_MIGRATION.md`
+- 想快速理解这套规范为什么会演进成现在这套结构：看 `references/SESSION_SUMMARY.md`
 - 想把 slice 稳定接到 codegen 或 prompt orchestration：看 `references/DOWNSTREAM_MAPPING_GUIDE.md`
 - 想直接在真实样例上改：用 `examples/ready/sample.json`（`READY`）
 - 想看 `READY` 的短入口：用 `examples/ready/sample.entry.md`

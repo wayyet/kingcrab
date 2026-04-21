@@ -1,8 +1,7 @@
 ---
 name: ncrew-ontology
-description: 加载 ontology 切片，抽取与当前任务最相关的概念、关系、约束与上下文边界。
+description: 当用户提到 ontology、本体、slice、schema/projection/mapping、taxonomy 或概念关系建模时，从文档、schema 或代码中抽取当前任务所需的最小可验证 slice，保留 concepts、relations、constraints 与 sources，供评审、codegen 和 prompt 编排使用。
 metadata: {"openclaw":{"emoji":"🧠"}}
----
 
 # ncrew-ontology
 
@@ -24,6 +23,7 @@ Task-scoped ontology slicing for extracting the smallest verifiable subgraph nee
 | Trigger | Action |
 | --- | --- |
 | 用户明确提到 `ontology`、`本体`、`slice` | 抽取任务相关本体切片 |
+| 用户明确提到 `projection`、`schema mapping`、`mapping` | 将 slice 约束到下游 projection 语义，并保留映射关系与边界 |
 | 需要从大图中只拿当前子域 | 收缩范围，构造最小闭包 |
 | 需要统一术语、层级、约束 | 输出标准化概念/关系/规则 |
 | 需要判断某实体或规则属于哪层 | 标注边界、上位概念和排除项 |
