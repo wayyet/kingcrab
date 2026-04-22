@@ -136,10 +136,46 @@ public static class ConfigValidator
         if (config.Sandbox.DefaultTTL < 1)
             errors.Add($"Sandbox.DefaultTTL must be >= 1 (got {config.Sandbox.DefaultTTL}).");
 
+        if (config.Sandbox.ReadyTimeoutSeconds < 1)
+            errors.Add($"Sandbox.ReadyTimeoutSeconds must be >= 1 (got {config.Sandbox.ReadyTimeoutSeconds}).");
+
         if (sandboxProvider.Equals(SandboxProviderNames.OpenSandbox, StringComparison.OrdinalIgnoreCase) &&
             string.IsNullOrWhiteSpace(config.Sandbox.Endpoint))
         {
             errors.Add("Sandbox.Endpoint must be set when Sandbox.Provider='OpenSandbox'.");
+        }
+
+        if (config.Sandbox.Image is not null && string.IsNullOrWhiteSpace(config.Sandbox.Image))
+        {
+            errors.Add("Sandbox.Image must not be empty when provided.");
+        }
+
+        foreach (var (resourceName, resourceValue) in config.Sandbox.Resource)
+        {
+            if (string.IsNullOrWhiteSpace(resourceName))
+                errors.Add("Sandbox.Resource key must not be empty.");
+            if (string.IsNullOrWhiteSpace(resourceValue))
+                errors.Add($"Sandbox.Resource.{resourceName} must not be empty.");
+        }
+
+        for (var i = 0; i < config.Sandbox.Entrypoint.Count; i++)
+        {
+            if (string.IsNullOrWhiteSpace(config.Sandbox.Entrypoint[i]))
+                errors.Add($"Sandbox.Entrypoint[{i}] must not be empty.");
+        }
+
+        foreach (var (envKey, envValue) in config.Sandbox.RuntimeEnv)
+        {
+            if (string.IsNullOrWhiteSpace(envKey))
+                errors.Add("Sandbox.RuntimeEnv key must not be empty.");
+            if (envValue is null)
+                errors.Add($"Sandbox.RuntimeEnv.{envKey} must not be null.");
+        }
+
+        for (var i = 0; i < config.Sandbox.NetworkEgressAllowHosts.Count; i++)
+        {
+            if (string.IsNullOrWhiteSpace(config.Sandbox.NetworkEgressAllowHosts[i]))
+                errors.Add($"Sandbox.NetworkEgressAllowHosts[{i}] must not be empty.");
         }
 
         foreach (var (toolName, toolConfig) in config.Sandbox.Tools)

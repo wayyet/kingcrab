@@ -651,16 +651,22 @@ internal static class HireBotIntegrationEndpoints
 
         var image = ResolveSandboxImage(config);
         var ttl = ResolveSandboxTtl(config);
+        var readyTimeoutSeconds = ResolveSandboxReadyTimeoutSeconds(config);
         var connectionConfig = BuildConnectionConfig(config);
         var volumeRoot = ResolveVolumeRoot();
         var volumePath = $"{volumeRoot.TrimEnd('/')}/{SanitizePathSegment(ownerSub)}/{SanitizePathSegment(hireId)}";
+        var resourceLimits = ResolveSandboxResourceLimits(config);
+        var entrypoint = ResolveSandboxEntrypoint(config);
+        var runtimeEnv = ResolveSandboxRuntimeEnv(config);
+        var networkPolicy = ResolveSandboxNetworkPolicy(config);
+        var skipHealthCheck = ResolveSandboxSkipHealthCheck(config);
 
-        await using var sandbox = await Sandbox.CreateAsync(new SandboxCreateOptions
+        var createOptions = new SandboxCreateOptions
         {
             ConnectionConfig = connectionConfig,
             Image = image,
             TimeoutSeconds = ttl,
-            ReadyTimeoutSeconds = 60,
+            ReadyTimeoutSeconds = readyTimeoutSeconds,
             ManualCleanup = true,
             Metadata = new Dictionary<string, string>(StringComparer.Ordinal)
             {
@@ -668,7 +674,34 @@ internal static class HireBotIntegrationEndpoints
                 ["hire-id"] = hireId,
                 ["owner"] = SanitizePathSegment(ownerSub)
             }
-        }, cancellationToken);
+        };
+
+        if (resourceLimits.Count > 0)
+        {
+            createOptions.Resource = resourceLimits;
+        }
+
+        if (entrypoint.Length > 0)
+        {
+            createOptions.Entrypoint = entrypoint;
+        }
+
+        if (runtimeEnv.Count > 0)
+        {
+            createOptions.Env = runtimeEnv;
+        }
+
+        if (networkPolicy is not null)
+        {
+            createOptions.NetworkPolicy = networkPolicy;
+        }
+
+        if (skipHealthCheck.HasValue)
+        {
+            createOptions.SkipHealthCheck = skipHealthCheck.Value;
+        }
+
+        await using var sandbox = await Sandbox.CreateAsync(createOptions, cancellationToken);
 
         await sandbox.Files.CreateDirectoriesAsync(
             [
@@ -721,10 +754,15 @@ internal static class HireBotIntegrationEndpoints
 
     private static string ResolveSandboxImage(GatewayConfig config)
     {
-        var configured = Environment.GetEnvironmentVariable("HIREBOT_SANDBOX_IMAGE");
-        if (!string.IsNullOrWhiteSpace(configured))
+        var fromEnv = Environment.GetEnvironmentVariable("HIREBOT_SANDBOX_IMAGE");
+        if (!string.IsNullOrWhiteSpace(fromEnv))
         {
-            return configured.Trim();
+            return fromEnv.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(config.Sandbox.Image))
+        {
+            return config.Sandbox.Image.Trim();
         }
 
         if (config.Sandbox.Tools.TryGetValue("shell", out var shell) && !string.IsNullOrWhiteSpace(shell.Template))
@@ -748,6 +786,142 @@ internal static class HireBotIntegrationEndpoints
         }
 
         return config.Sandbox.DefaultTTL > 0 ? config.Sandbox.DefaultTTL : 3600;
+    }
+
+    private static int ResolveSandboxReadyTimeoutSeconds(GatewayConfig config)
+    {
+        if (int.TryParse(Environment.GetEnvironmentVariable("HIREBOT_SANDBOX_READY_TIMEOUT_SECONDS"), out var fromEnv) && fromEnv > 0)
+        {
+            return fromEnv;
+        }
+
+        return config.Sandbox.ReadyTimeoutSeconds > 0 ? config.Sandbox.ReadyTimeoutSeconds : 180;
+    }
+
+    private static Dictionary<string, string> ResolveSandboxResourceLimits(GatewayConfig config)
+    {
+        var resource = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in config.Sandbox.Resource)
+        {
+            if (!string.IsNullOrWhiteSpace(pair.Key) && !string.IsNullOrWhiteSpace(pair.Value))
+            {
+                resource[pair.Key.Trim()] = pair.Value.Trim();
+            }
+        }
+
+        var cpu = Environment.GetEnvironmentVariable("HIREBOT_SANDBOX_RESOURCE_CPU");
+        if (!string.IsNullOrWhiteSpace(cpu))
+        {
+            resource["cpu"] = cpu.Trim();
+        }
+
+        var memory = Environment.GetEnvironmentVariable("HIREBOT_SANDBOX_RESOURCE_MEMORY");
+        if (!string.IsNullOrWhiteSpace(memory))
+        {
+            resource["memory"] = memory.Trim();
+        }
+
+        return resource;
+    }
+
+    private static string[] ResolveSandboxEntrypoint(GatewayConfig config)
+    {
+        var rawEntrypoint = Environment.GetEnvironmentVariable("HIREBOT_SANDBOX_ENTRYPOINT");
+        if (!string.IsNullOrWhiteSpace(rawEntrypoint))
+        {
+            return rawEntrypoint
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(static x => !string.IsNullOrWhiteSpace(x))
+                .ToArray();
+        }
+
+        return config.Sandbox.Entrypoint
+            .Where(static x => !string.IsNullOrWhiteSpace(x))
+            .Select(static x => x.Trim())
+            .ToArray();
+    }
+
+    private static Dictionary<string, string> ResolveSandboxRuntimeEnv(GatewayConfig config)
+    {
+        var runtimeEnv = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var pair in config.Sandbox.RuntimeEnv)
+        {
+            if (!string.IsNullOrWhiteSpace(pair.Key) && !string.IsNullOrWhiteSpace(pair.Value))
+            {
+                runtimeEnv[pair.Key.Trim()] = pair.Value.Trim();
+            }
+        }
+
+        var rawEnvJson = Environment.GetEnvironmentVariable("HIREBOT_SANDBOX_ENV_JSON");
+        if (string.IsNullOrWhiteSpace(rawEnvJson))
+        {
+            return runtimeEnv;
+        }
+
+        try
+        {
+            var envFromJson = JsonSerializer.Deserialize<Dictionary<string, string>>(rawEnvJson);
+            if (envFromJson is null)
+            {
+                return runtimeEnv;
+            }
+
+            foreach (var pair in envFromJson)
+            {
+                if (!string.IsNullOrWhiteSpace(pair.Key) && !string.IsNullOrWhiteSpace(pair.Value))
+                {
+                    runtimeEnv[pair.Key.Trim()] = pair.Value.Trim();
+                }
+            }
+        }
+        catch
+        {
+            // 忽略非法 JSON，避免配置错误影响实例创建主流程。
+        }
+
+        return runtimeEnv;
+    }
+
+    private static NetworkPolicy? ResolveSandboxNetworkPolicy(GatewayConfig config)
+    {
+        var configuredHosts = config.Sandbox.NetworkEgressAllowHosts
+            .Where(static x => !string.IsNullOrWhiteSpace(x))
+            .Select(static x => x.Trim())
+            .ToList();
+
+        var rawHosts = Environment.GetEnvironmentVariable("HIREBOT_SANDBOX_NETWORK_EGRESS_ALLOW_HOSTS");
+        if (!string.IsNullOrWhiteSpace(rawHosts))
+        {
+            configuredHosts = rawHosts
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(static x => !string.IsNullOrWhiteSpace(x))
+                .ToList();
+        }
+
+        if (configuredHosts.Count == 0)
+        {
+            return null;
+        }
+
+        return new NetworkPolicy
+        {
+            DefaultAction = NetworkRuleAction.Allow,
+            Egress = [.. configuredHosts.Select(static host => new NetworkRule
+            {
+                Action = NetworkRuleAction.Allow,
+                Target = host
+            })]
+        };
+    }
+
+    private static bool? ResolveSandboxSkipHealthCheck(GatewayConfig config)
+    {
+        if (bool.TryParse(Environment.GetEnvironmentVariable("HIREBOT_SANDBOX_SKIP_HEALTH_CHECK"), out var fromEnv))
+        {
+            return fromEnv;
+        }
+
+        return config.Sandbox.SkipHealthCheck;
     }
 
     private static string ResolveVolumeRoot()
@@ -993,11 +1167,12 @@ internal static class HireBotIntegrationEndpoints
         try
         {
             var connectionConfig = BuildConnectionConfig(config);
+            var readyTimeoutSeconds = ResolveSandboxReadyTimeoutSeconds(config);
             await using var sandbox = await Sandbox.ConnectAsync(new SandboxConnectOptions
             {
                 SandboxId = state.SandboxId,
                 ConnectionConfig = connectionConfig,
-                ReadyTimeoutSeconds = 60
+                ReadyTimeoutSeconds = readyTimeoutSeconds
             }, cancellationToken);
 
             var data = new
@@ -1059,11 +1234,12 @@ internal static class HireBotIntegrationEndpoints
         try
         {
             var connectionConfig = BuildConnectionConfig(config);
+            var readyTimeoutSeconds = ResolveSandboxReadyTimeoutSeconds(config);
             await using var sandbox = await Sandbox.ConnectAsync(new SandboxConnectOptions
             {
                 SandboxId = state.SandboxId,
                 ConnectionConfig = connectionConfig,
-                ReadyTimeoutSeconds = 60
+                ReadyTimeoutSeconds = readyTimeoutSeconds
             }, cancellationToken);
 
             var artifactRoot = $"{state.VolumePath}/artifacts";

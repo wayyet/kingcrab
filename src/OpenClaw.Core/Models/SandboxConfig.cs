@@ -9,8 +9,15 @@ public sealed class SandboxConfig
     /// Optional API key for OpenSandbox. Supports env:NAME and raw:VALUE secret refs.
     /// </summary>
     public string? ApiKey { get; set; }
+    public string? Image { get; set; }
 
     public int DefaultTTL { get; set; } = 300;
+    public int ReadyTimeoutSeconds { get; set; } = 180;
+    public Dictionary<string, string> Resource { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public List<string> Entrypoint { get; set; } = [];
+    public Dictionary<string, string> RuntimeEnv { get; set; } = new(StringComparer.Ordinal);
+    public List<string> NetworkEgressAllowHosts { get; set; } = [];
+    public bool? SkipHealthCheck { get; set; }
     public Dictionary<string, SandboxToolConfig> Tools { get; set; } = new(StringComparer.Ordinal);
 }
 
