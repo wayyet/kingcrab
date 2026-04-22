@@ -2,7 +2,7 @@
 
 这篇文章不是模板说明，也不是字段手册，而是对本次会话工作的一次整体回顾。它回答的问题是：`ncrew-ontology` 这一套规范，为什么会从“做一个加载 ontology 切片的 skill”逐步演进成今天这套同时覆盖 slice、projection、review、migration 和决策入口的完整包。
 
-如果只想直接使用这套规范，看 [../README.md](../README.md)。如果想理解它为什么长成现在这样、各个文档之间为什么这么分工、以及这次会话真正完成了什么，这篇文章更合适。
+如果只想直接使用这套规范，看 [../src/OpenClaw.Gateway/skills/ncrew-ontology/README.md](../src/OpenClaw.Gateway/skills/ncrew-ontology/README.md)。如果想理解它为什么长成现在这样、各个文档之间为什么这么分工、以及这次会话真正完成了什么，这篇文章更合适。
 
 ---
 
@@ -85,7 +85,7 @@
 - slice 评审：判断 ontology 子图本身是否够稳、够准、够可追溯
 - projection 评审：判断下游投影是否忠实、安全、可治理
 
-于是有了统一后的 [./REVIEW_CHECKLIST.md](./REVIEW_CHECKLIST.md)。
+于是有了统一后的 [../src/OpenClaw.Gateway/skills/ncrew-ontology/references/REVIEW_CHECKLIST.md](../src/OpenClaw.Gateway/skills/ncrew-ontology/references/REVIEW_CHECKLIST.md)。
 
 这份清单并不是为了重复 schema 校验，而是为了补上人工判断层。它把两类产物统一收敛到同一套骨架：
 
@@ -109,7 +109,7 @@
 
 有些场景主题不明确，有些没有事实源，有些实际上想做的是 formal ontology，而不是 task-scoped slice。如果这些情况也强行套进模板，只会得到形式完整但没有治理价值的产物。
 
-因此，规范包后续又补了一份 [./DECISION_GUIDE.md](./DECISION_GUIDE.md)。
+因此，规范包后续又补了一份 [../src/OpenClaw.Gateway/skills/ncrew-ontology/references/DECISION_GUIDE.md](../src/OpenClaw.Gateway/skills/ncrew-ontology/references/DECISION_GUIDE.md)。
 
 这份文档做的事很简单，但非常关键：在“写之前”先回答“该不该写”。
 
@@ -135,7 +135,7 @@
 
 如果没有显式迁移规则，团队很容易只改 schema 或只改模板，最后造成“表面版本号一致，实际规范断裂”。
 
-所以这次会话后期又专门把迁移规则独立成了 [./SCHEMA_MIGRATION.md](./SCHEMA_MIGRATION.md)。
+所以这次会话后期又专门把迁移规则独立成了 [../src/OpenClaw.Gateway/skills/ncrew-ontology/references/SCHEMA_MIGRATION.md](../src/OpenClaw.Gateway/skills/ncrew-ontology/references/SCHEMA_MIGRATION.md)。
 
 这份文档的意义，不是告诉大家“现在就要升级”，而是提前定义升级时必须一起移动的对象：
 

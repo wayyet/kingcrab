@@ -1,5 +1,7 @@
 {
+  "$schema": "../../../../../../../docs/skill-projection-contract-index.schema.json",
   "producer_skill": "ncrew-ontology",
+  "producer_priority": 100,
   "consumer_skill": "software-developer",
   "default_selection_policy": {
     "prefer_ready_only": true,
@@ -116,6 +118,105 @@
           }
         ],
         "tie_breaker": "If the request mixes loading semantics with orchestration flow, prefer tool-orchestration only when the requested artifact is an explicit graph, step sequence, or gating workflow."
+      },
+      {
+        "topics": [
+          "memory-session",
+          "task-execution"
+        ],
+        "prefer_topic_when": [
+          {
+            "topic": "memory-session",
+            "request_signals": [
+              "memory recall",
+              "session management",
+              "retention policy",
+              "session search",
+              "memory store",
+              "recall boundary"
+            ],
+            "reason": "These signals indicate the user is asking about memory/session state, persistence, recall scope, or retention behavior itself rather than higher-level execution guidance."
+          },
+          {
+            "topic": "task-execution",
+            "request_signals": [
+              "execution policy",
+              "implementation guidance",
+              "review guidance",
+              "prompt policy",
+              "task constraint",
+              "review checkpoint"
+            ],
+            "reason": "These signals indicate the user primarily wants execution constraints, implementation guidance, or review behavior layered on top of memory/session semantics."
+          }
+        ],
+        "tie_breaker": "If the request mixes memory/session semantics with implementation or review guidance, prefer memory-session when the artifact is about recall, retention, or session-state policy itself; otherwise prefer task-execution."
+      },
+      {
+        "topics": [
+          "memory-session",
+          "skill-loading"
+        ],
+        "prefer_topic_when": [
+          {
+            "topic": "memory-session",
+            "request_signals": [
+              "session manager",
+              "memory provider",
+              "retention sweep",
+              "recall settings",
+              "session state",
+              "memory note"
+            ],
+            "reason": "These signals indicate the user wants memory/session domain behavior, storage policy, or recall limits rather than skill discovery or source precedence rules."
+          },
+          {
+            "topic": "skill-loading",
+            "request_signals": [
+              "skills config",
+              "skill discovery",
+              "source precedence",
+              "load order",
+              "eligibility filtering",
+              "managed path"
+            ],
+            "reason": "These signals indicate the user is asking about how skills are discovered, prioritized, and loaded rather than how memory/session data is stored or recalled."
+          }
+        ],
+        "tie_breaker": "If the request mixes memory configuration with skill configuration, prefer memory-session when the main artifact is about recall, retention, session state, or memory provider behavior; otherwise prefer skill-loading."
+      },
+      {
+        "topics": [
+          "memory-session",
+          "tool-orchestration"
+        ],
+        "prefer_topic_when": [
+          {
+            "topic": "memory-session",
+            "request_signals": [
+              "recall boundary",
+              "retention lifecycle",
+              "session timeout",
+              "memory archive",
+              "session branch",
+              "memory search"
+            ],
+            "reason": "These signals indicate the user wants memory/session lifecycle rules or storage behavior, not an orchestration artifact about step edges or planner flow."
+          },
+          {
+            "topic": "tool-orchestration",
+            "request_signals": [
+              "workflow contract",
+              "planner flow",
+              "execution graph",
+              "routing sequence",
+              "step ordering",
+              "gating condition"
+            ],
+            "reason": "These signals indicate the user explicitly wants a flow-level orchestration artifact, even if that workflow happens to involve memory or session operations."
+          }
+        ],
+        "tie_breaker": "If the request mixes memory/session lifecycle with orchestration flow, prefer tool-orchestration only when the requested deliverable is an explicit workflow, graph, or ordered execution sequence; otherwise prefer memory-session."
       }
     ]
   },
@@ -235,6 +336,35 @@
           "prompt policy",
           "skills config",
           "eligibility filtering"
+        ]
+      },
+      {
+        "domain_slug": "memory-session",
+        "primary_intent_signals": [
+          "memory session",
+          "session management",
+          "memory recall",
+          "session recall",
+          "memory retention",
+          "session search"
+        ],
+        "supporting_signals": [
+          "memory store",
+          "session manager",
+          "session state",
+          "retention policy"
+        ],
+        "explicit_artifact_signals": [
+          "memory policy",
+          "session contract",
+          "recall guidance",
+          "retention guardrail"
+        ],
+        "demote_when_competing_topic_signals": [
+          "planner flow",
+          "workflow graph",
+          "skill discovery",
+          "execution policy"
         ]
       }
     ]
@@ -462,6 +592,58 @@
             ],
             "score": 2,
             "reason": "Use prompt-constraint when orchestration requests are about language policy rather than flow structure."
+          }
+        ]
+      },
+      {
+        "domain_slug": "memory-session",
+        "bonuses": [
+          {
+            "target_view": "domain-model",
+            "when_request_signals": [
+              "model",
+              "entity",
+              "state",
+              "session manager",
+              "memory store"
+            ],
+            "score": 2,
+            "reason": "Promote domain-model when memory-session requests emphasize implementation structure, state boundaries, or runtime types."
+          },
+          {
+            "target_view": "json-schema",
+            "when_request_signals": [
+              "schema",
+              "payload",
+              "validation",
+              "storage shape"
+            ],
+            "score": 2,
+            "reason": "Promote json-schema when memory-session requests focus on validation contracts or persisted payload shape."
+          },
+          {
+            "target_view": "prompt-constraint",
+            "when_request_signals": [
+              "memory",
+              "session",
+              "recall",
+              "retention",
+              "policy"
+            ],
+            "score": 2,
+            "reason": "Use prompt-constraint when memory-session requests are primarily about terminology, recall boundaries, and clarification guardrails."
+          },
+          {
+            "target_view": "workflow-contract",
+            "when_request_signals": [
+              "flow",
+              "sweep",
+              "lifecycle",
+              "retention job",
+              "cleanup"
+            ],
+            "score": 2,
+            "reason": "Promote workflow-contract when memory-session requests emphasize retention sweeps, recall flow, or lifecycle sequencing."
           }
         ]
       }
@@ -832,6 +1014,65 @@
           "projection_type": "workflow_contract_projection",
           "status": "READY",
           "path": "tool-orchestration/tool-orchestration.workflow-contract.projection.json"
+        }
+      ]
+    },
+    {
+      "domain_slug": "memory-session",
+      "intent_keywords": [
+        "memory session",
+        "session management",
+        "memory recall",
+        "memory retention",
+        "session search"
+      ],
+      "default_target_view": "domain-model",
+      "example_requests": [
+        {
+          "request": "把 memory/session 的核心对象、retention policy 和 recall boundary 建模",
+          "target_view": "domain-model",
+          "reason": "The request is about entities, state boundaries, and runtime policy objects for memory and session behavior."
+        },
+        {
+          "request": "给 memory/session 的持久化载荷和配置生成 JSON Schema",
+          "target_view": "json-schema",
+          "reason": "The request asks for validation and structural contracts rather than executable implementation objects."
+        },
+        {
+          "request": "给 memory/session 行为补一份 prompt policy / reviewer guidance",
+          "target_view": "prompt-constraint",
+          "reason": "The request is about recall boundaries, retention guardrails, and prompt-side clarification policy."
+        },
+        {
+          "request": "把 memory recall、retention sweep 和 session lifecycle 整理成执行步骤",
+          "target_view": "workflow-contract",
+          "reason": "The request emphasizes lifecycle sequencing, cleanup flow, and blocking preconditions for memory/session operations."
+        }
+      ],
+      "views": [
+        {
+          "target_view": "domain-model",
+          "projection_type": "domain_model_projection",
+          "status": "READY",
+          "path": "memory-session/memory-session.domain-model.projection.json"
+        },
+        {
+          "target_view": "json-schema",
+          "projection_type": "json_schema_projection",
+          "status": "READY",
+          "path": "memory-session/memory-session.json-schema.projection.json"
+        },
+        {
+          "target_view": "prompt-constraint",
+          "projection_type": "prompt_constraint_projection",
+          "status": "READY",
+          "path": "memory-session/memory-session.prompt-constraint.projection.json"
+        },
+        {
+          "target_view": "workflow-contract",
+          "projection_type": "workflow_contract_projection",
+          "status": "READY",
+          "path": "memory-session/memory-session.workflow-contract.projection.json"
         }
       ]
     }

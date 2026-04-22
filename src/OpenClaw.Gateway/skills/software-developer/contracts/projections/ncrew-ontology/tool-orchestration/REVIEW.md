@@ -5,9 +5,9 @@
 - producer skill：`ncrew-ontology`
 - 当前主题：`tool-orchestration`
 - 当前文件：
-	- `tool-orchestration.domain-model.projection.json`
-	- `tool-orchestration.prompt-constraint.projection.json`
-	- `tool-orchestration.workflow-contract.projection.json`
+  - `tool-orchestration.domain-model.projection.json`
+  - `tool-orchestration.prompt-constraint.projection.json`
+  - `tool-orchestration.workflow-contract.projection.json`
 
 评审备注：
 
@@ -15,3 +15,11 @@
 - `domain-model` 适合路由对象、source tier 和 orchestration policy 的实现建模。
 - `prompt-constraint` 适合 prompt 侧的编排 guardrail 和术语边界。
 - `workflow-contract` 适合 planner、编排步骤和执行前置条件治理。
+
+评审核对顺序：
+
+1. 当前主题是否已经先在 `ncrew-ontology` 中收缩成最小 slice，且 slice 已通过 `TEMPLATE.schema.json` 或 `validate-slice` 校验。
+2. 本次 projection 是否已经明确选定单一主视图，而不是把 `domain-model`、`json-schema`、`prompt-constraint`、`workflow-contract` 的要求混写在一起。
+3. `PROJECTION_TEMPLATE.json` 是否由 `ncrew-ontology` 按映射规范填写完成，且 `concepts`、`relations`、`constraints` 都有显式映射而不是靠隐式推断。
+4. projection 是否已经通过 `validate-projection.ps1` 或 `validate-projection.py`，并确认关键字段完整、结构合法、编辑器诊断为零。
+5. projection 是否只在通过校验后才落入 consumer skill 的 `contracts/projections` 目录，且 `contract-index.json`、路由提示和相关说明已经同步更新。

@@ -33,7 +33,7 @@ When a user provides an `ncrew-ontology` projection for this skill to consume:
 
 - Read projection contracts from `contracts/projections/ncrew-ontology/` when a bound contract exists for the current topic.
 - Use `contracts/projections/ncrew-ontology/contract-index.json` as the first lookup source for topic and target-view selection.
-- Current multi-topic skeleton includes `skill-loading/`, `task-execution/`, and `tool-orchestration/` as example domains.
+- Current multi-topic skeleton includes `skill-loading/`, `task-execution/`, `tool-orchestration/`, and `memory-session/` as example domains.
 
 ### Projection Routing
 
@@ -43,6 +43,7 @@ When a task can be routed through a bound projection contract, follow this order
    - `skill-loading`: requests about skill discovery, config, precedence, overwrite order, or eligibility filtering.
    - `task-execution`: requests about prompt policy, execution guidance, review wording, or implementation constraints.
    - `tool-orchestration`: requests about workflow steps, planner flow, orchestration, or execution preconditions.
+   - `memory-session`: requests about memory recall, session management, retention policy, or retrieval boundaries.
 2. Score the topic candidates using `contract-index.json`.
    - Start with `topic_scoring` and prefer the highest-scoring `READY` topic.
    - If the top topic scores are too close, surface the ambiguity instead of guessing.
@@ -74,6 +75,10 @@ Use the following examples as concrete routing hints when both the topic and the
 | "给 tool orchestration 生成 planner / workflow contract" | `tool-orchestration` | `workflow-contract` | The request explicitly asks for orchestration flow, planner edges, or execution preconditions. |
 | "给 tool orchestration 约束 prompt 术语和推理路径" | `tool-orchestration` | `prompt-constraint` | The request is about prompt-side orchestration rules, not code structure. |
 | "把 tool orchestration 的核心对象和路由规则建模" | `tool-orchestration` | `domain-model` | The request is about entities, value objects, enums, and runtime policy. |
+| "把 memory/session 的核心对象、retention policy 和 recall boundary 建模" | `memory-session` | `domain-model` | The request is about entities, runtime state boundaries, and implementation policy objects for memory/session behavior. |
+| "给 memory/session 的持久化载荷和配置生成 JSON Schema" | `memory-session` | `json-schema` | The request asks for validation and structural contracts rather than executable implementation objects. |
+| "给 memory/session 行为补一份 prompt policy / reviewer guidance" | `memory-session` | `prompt-constraint` | The request is about recall boundaries, retention guardrails, and prompt-side clarification policy. |
+| "把 memory recall、retention sweep 和 session lifecycle 整理成执行步骤" | `memory-session` | `workflow-contract` | The request emphasizes lifecycle sequencing, cleanup flow, and blocking preconditions for memory/session operations. |
 
 If a request matches the topic but not the output shape clearly, use `target_view_scoring` first and only fall back to the topic's `default_target_view` when no stronger view-specific artifact match exists.
 
@@ -91,7 +96,10 @@ If a request appears to span multiple topics, use these conflict rules:
 1. `task-execution` vs `tool-orchestration`: prefer `tool-orchestration` only when planner flow, execution graph, routing sequence, or gating workflow is the main deliverable; otherwise prefer `task-execution`.
 2. `skill-loading` vs `task-execution`: prefer `skill-loading` when the request is about config, precedence, or eligibility behavior itself; prefer `task-execution` when the request is about guidance, review, or execution policy layered on top.
 3. `skill-loading` vs `tool-orchestration`: prefer `tool-orchestration` only when the user explicitly wants a workflow or planner artifact; otherwise prefer `skill-loading`.
-4. If no topic clearly dominates after these checks, surface the ambiguity instead of silently choosing one.
+4. `memory-session` vs `task-execution`: prefer `memory-session` when the request is about recall boundaries, retention semantics, or session-state policy itself; prefer `task-execution` when the request is primarily about implementation guidance or review behavior layered on top.
+5. `memory-session` vs `skill-loading`: prefer `memory-session` when the main artifact is about recall, retention, session state, or memory provider behavior; prefer `skill-loading` when the request is about skill discovery, source precedence, load order, or eligibility filtering.
+6. `memory-session` vs `tool-orchestration`: prefer `tool-orchestration` only when the requested deliverable is an explicit workflow, graph, or ordered execution sequence; otherwise prefer `memory-session`.
+7. If no topic clearly dominates after these checks, surface the ambiguity instead of silently choosing one.
 
 Use the scoring model in `contract-index.json` when the request mixes multiple topic signals:
 

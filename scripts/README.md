@@ -75,80 +75,134 @@
 
 ---
 
-### validate-ontology-slice.ps1（ontology slice 校验入口）
+### 校验入口通用规则
 
-统一调用 `src/OpenClaw.Gateway/skills/ncrew-ontology/scripts/validate-slice.ps1` 的根目录包装脚本，适合团队从仓库根目录或任意当前目录直接校验 ontology slice JSON。
+- PowerShell 和 Python 两个入口都会把传入的相对路径按你当前执行目录解析为绝对路径，再转交给真实校验器
+- Python 入口会复用当前 Python 解释器来调用技能目录下的真实 `validate-*.py` 校验器
+- 两类真实 schema、默认样例和参考文档都位于 `src/OpenClaw.Gateway/skills/ncrew-ontology/` 下的 `templates/`、`examples/`、`references/` 目录
 
-| 参数 | 默认值 | 说明 |
-| --- | --- | --- |
-| `Paths` | `examples/ready/sample.json` | 一个或多个待校验的 slice 文件路径；不传时校验内置样例 |
-| `-SchemaPath` | 内置 `templates/TEMPLATE.schema.json` | 可选，显式指定 schema 路径 |
+---
+
+### Slice 校验入口
+
+根目录同时提供 PowerShell 与 Python 两个入口，统一调用 `src/OpenClaw.Gateway/skills/ncrew-ontology/scripts/validate-slice.*` 真实校验器，适合团队从仓库根目录或任意当前目录直接校验 ontology slice JSON。
+
+| 入口 | 参数 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| PowerShell | `Paths` | `examples/ready/sample.json` | 一个或多个待校验的 slice 文件路径；不传时校验内置样例 |
+| PowerShell | `-SchemaPath` | 内置 `templates/TEMPLATE.schema.json` | 可选，显式指定 schema 路径 |
+| Python | `paths` | `examples/ready/sample.json` | 一个或多个待校验的 slice 文件路径；不传时校验内置样例 |
+| Python | `--schema-path` | 内置 `templates/TEMPLATE.schema.json` | 可选，显式指定 schema 路径 |
 
 **常用命令：**
 
 ```powershell
 # 校验内置样例
+# PowerShell
 .\scripts\validate-ontology-slice.ps1
 
+# Python
+c:/python314/python.exe .\scripts\validate-ontology-slice.py
+
 # 校验仓库里的自定义 slice
+# PowerShell
 .\scripts\validate-ontology-slice.ps1 .\my-slice.json
 
+# Python
+c:/python314/python.exe .\scripts\validate-ontology-slice.py .\my-slice.json
+
 # 一次校验多个文件
+# PowerShell
 .\scripts\validate-ontology-slice.ps1 .\sample-a.json .\sample-b.json
+
+# Python
+c:/python314/python.exe .\scripts\validate-ontology-slice.py .\sample-a.json .\sample-b.json
 ```
 
-**注意事项：**
+**差异说明：**
 
-- 该脚本会把传入的相对路径按你当前执行目录解析为绝对路径，再转交给真实校验器
-- 真实 schema、默认样例和评审文档位于 `src/OpenClaw.Gateway/skills/ncrew-ontology/` 下的 `templates/`、`examples/`、`references/` 目录
-- 适合在本地检查、评审前自检，后续也可以直接挂到 CI
+- 默认 schema 为 `templates/TEMPLATE.schema.json`
+- 主要用于 slice 的本地检查、评审前自检，以及后续 CI 接入
 
 ---
 
-### validate-ontology-projection.ps1（ontology projection 校验入口）
+### Projection 校验入口
 
-统一调用 `src/OpenClaw.Gateway/skills/ncrew-ontology/scripts/validate-projection.ps1` 的根目录包装脚本，适合团队从仓库根目录或任意当前目录直接校验 ontology projection JSON。
+根目录同时提供 PowerShell 与 Python 两个入口，统一调用 `src/OpenClaw.Gateway/skills/ncrew-ontology/scripts/validate-projection.*` 真实校验器，适合团队从仓库根目录或任意当前目录直接校验 ontology projection JSON。
 
-| 参数 | 默认值 | 说明 |
-| --- | --- | --- |
-| `Paths` | `examples/ready/sample-projection.json` | 一个或多个待校验的 projection 文件路径；不传时校验内置样例 |
-| `-SchemaPath` | 内置 `templates/PROJECTION_TEMPLATE.schema.json` | 可选，显式指定 projection schema 路径 |
+| 入口 | 参数 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| PowerShell | `Paths` | `examples/ready/sample-projection.json` | 一个或多个待校验的 projection 文件路径；不传时校验内置样例 |
+| PowerShell | `-SchemaPath` | 内置 `templates/PROJECTION_TEMPLATE.schema.json` | 可选，显式指定 projection schema 路径 |
+| Python | `paths` | `examples/ready/sample-projection.json` | 一个或多个待校验的 projection 文件路径；不传时校验内置样例 |
+| Python | `--schema-path` | 内置 `templates/PROJECTION_TEMPLATE.schema.json` | 可选，显式指定 projection schema 路径 |
 
 **常用命令：**
 
 ```powershell
 # 校验内置 projection 样例
+# PowerShell
 .\scripts\validate-ontology-projection.ps1
 
+# Python
+c:/python314/python.exe .\scripts\validate-ontology-projection.py
+
 # 校验仓库里的自定义 projection
+# PowerShell
 .\scripts\validate-ontology-projection.ps1 .\my-projection.json
 
+# Python
+c:/python314/python.exe .\scripts\validate-ontology-projection.py .\my-projection.json
+
 # 一次校验多个 projection 文件
+# PowerShell
 .\scripts\validate-ontology-projection.ps1 .\projection-a.json .\projection-b.json
+
+# Python
+c:/python314/python.exe .\scripts\validate-ontology-projection.py .\projection-a.json .\projection-b.json
 ```
 
-**注意事项：**
+**差异说明：**
 
-- 该脚本会把传入的相对路径按你当前执行目录解析为绝对路径，再转交给真实校验器
-- 真实 schema、默认样例和 review 参考位于 `src/OpenClaw.Gateway/skills/ncrew-ontology/` 下的 `templates/`、`examples/`、`references/` 目录
-- 适合在 projection 进入 codegen、prompt orchestration 或 CI 前先做结构自检
+- 默认 schema 为 `templates/PROJECTION_TEMPLATE.schema.json`
+- 主要用于 projection 进入 codegen、prompt orchestration 或 CI 前的结构自检
 
 ---
 
 ## 典型工作流
 
-```text
-依赖变更时（apt 包 / Node / Playwright）:
-  build-opensandbox-base-image.ps1  →  docker push <base-tag>
+依赖变更时（apt 包 / Node / Playwright）：
 
-日常代码迭代:
-  build-opensandbox-app-image.ps1 -BaseTag <base-tag>  →  docker push <app-tag>
+```powershell
+.\build-opensandbox-base-image.ps1
+docker push <base-tag>
+```
 
-ontology slice 校验:
-  scripts\validate-ontology-slice.ps1 [slice.json ...]
+日常代码迭代：
 
-ontology projection 校验:
-  scripts\validate-ontology-projection.ps1 [projection.json ...]
+```powershell
+.\build-opensandbox-app-image.ps1 -BaseTag <base-tag>
+docker push <app-tag>
+```
+
+ontology slice 校验：
+
+```powershell
+# PowerShell
+.\scripts\validate-ontology-slice.ps1 .\slice.json
+
+# Python
+c:/python314/python.exe .\scripts\validate-ontology-slice.py .\slice.json
+```
+
+ontology projection 校验：
+
+```powershell
+# PowerShell
+.\scripts\validate-ontology-projection.ps1 .\projection.json
+
+# Python
+c:/python314/python.exe .\scripts\validate-ontology-projection.py .\projection.json
 ```
 
 ## 镜像命名格式

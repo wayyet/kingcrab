@@ -1,20 +1,23 @@
-# task-execution projection review
+# memory-session projection review
 
 - 当前状态：`READY`
 - consumer skill：`software-developer`
 - producer skill：`ncrew-ontology`
-- 当前主题：`task-execution`
+- 当前主题：`memory-session`
 - 当前文件：
-  - `task-execution.domain-model.projection.json`
-  - `task-execution.prompt-constraint.projection.json`
-  - `task-execution.workflow-contract.projection.json`
+  - `memory-session.domain-model.projection.json`
+  - `memory-session.json-schema.projection.json`
+  - `memory-session.prompt-constraint.projection.json`
+  - `memory-session.workflow-contract.projection.json`
 
 评审备注：
 
-- 该主题现在同时覆盖 `domain-model`、`prompt-constraint`、`workflow-contract` 三种 target view。
-- `domain-model` 适合实现对象和执行 guard。
-- `prompt-constraint` 适合提示词、计划与 review 模式下的执行边界输入。
-- `workflow-contract` 适合执行步骤、review checkpoint 和转换条件治理。
+- 这已经是新增第 4 个 topic 的完整主题，而不是仅供路由打通的最小骨架。
+- 当前主题同时提供 `domain-model`、`json-schema`、`prompt-constraint`、`workflow-contract` 四种 target view。
+- 默认视图选择 `domain-model`，便于在未显式指定产物形态时优先落到实现对象和运行时边界。
+- 文件命名仍采用 `<domain-slug>.<projection-type-short>.projection.json` 规则。
+- 文件路径仍采用 `contracts/projections/<producer-skill>/<domain-slug>/` 规则。
+- 各 target view 的评分信号与 topic-specific bonuses 已同步接入 `contract-index.json`。
 
 评审核对顺序：
 

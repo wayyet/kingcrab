@@ -1,0 +1,133 @@
+{
+  "$schema": "../../../../../../../../docs/skill-projection-document.schema.json",
+  "template_type": "ontology_projection",
+  "projection_version": "1.0.0",
+  "projection": {
+    "projection_id": "software-developer-memory-session-json-schema-v1",
+    "projection_type": "json_schema_projection",
+    "target_name": "SoftwareDeveloperMemorySessionSchemaContract",
+    "target_format": "json_schema",
+    "target_runtime": "json_schema_2020_12",
+    "projection_goal": "Provide the software-developer skill with a JSON Schema contract for memory/session configuration, persisted payloads, and retention request validation.",
+    "source_slice": {
+      "path": "../../../../../../../../docs/openclaw-memory-recall-and-retention.md",
+      "slice_topic": "memory provider config, recall limits, and retention payload shape",
+      "schema_version": "1.0.0"
+    },
+    "intended_consumers": [
+      "software_developer_skill",
+      "schema_generator",
+      "runtime_validator"
+    ]
+  },
+  "mapping_policy": {
+    "preserve_source_trace": true,
+    "preserve_constraints": true,
+    "relation_flattening_policy": "disallow_by_default",
+    "unresolved_item_policy": "block_or_escalate",
+    "dropped_item_policy": "disallow_drop",
+    "prompt_assumption_policy": "disallow_unmapped_terms"
+  },
+  "concept_mappings": [
+    {
+      "concept_id": "C1",
+      "projection_action": "map",
+      "target_kind": "value_object",
+      "target_name": "MemoryConfigSchema",
+      "target_path": "#/defs/MemoryConfig",
+      "source_ids": [
+        "S1",
+        "S3"
+      ],
+      "notes": "Model the top-level memory configuration as a reusable schema definition so provider, recall, and retention settings remain structurally explicit."
+    },
+    {
+      "concept_id": "C2",
+      "projection_action": "map",
+      "target_kind": "value_object",
+      "target_name": "SessionRecordSchema",
+      "target_path": "#/defs/SessionRecord",
+      "source_ids": [
+        "S2",
+        "S3"
+      ],
+      "notes": "Keep the session record shape explicit so persisted turns, counters, and route overrides are not flattened into free-form JSON."
+    },
+    {
+      "concept_id": "C3",
+      "projection_action": "map",
+      "target_kind": "value_object",
+      "target_name": "RetentionSweepRequestSchema",
+      "target_path": "#/defs/RetentionSweepRequest",
+      "source_ids": [
+        "S1"
+      ],
+      "notes": "Represent retention sweep inputs as a dedicated schema so dry-run and lifecycle controls stay typed and auditable."
+    }
+  ],
+  "relation_mappings": [
+    {
+      "relation_id": "R1",
+      "projection_action": "map",
+      "target_kind": "dependency_rule",
+      "target_name": "SessionRecordDependsOnMemoryConfig",
+      "representation": "json_schema_ref_dependency",
+      "source_ids": [
+        "S1",
+        "S2",
+        "S3"
+      ],
+      "notes": "Represent session persistence and recall behavior as an explicit schema dependency on memory configuration rather than an implicit runtime side effect."
+    }
+  ],
+  "constraint_mappings": [
+    {
+      "constraint_id": "K1",
+      "projection_action": "map",
+      "target_kind": "schema_rule",
+      "target_name": "RecallLimitsMustRemainBounded",
+      "severity_mapping": "high -> schema_rejection_or_conflict_report",
+      "source_ids": [
+        "S1"
+      ],
+      "notes": "Carry recall note-count and char-budget constraints into schema validation guidance so unsafe configuration drift is surfaced early."
+    }
+  ],
+  "prompt_projection": {
+    "allowed_terms": [
+      "memory_config",
+      "session_record",
+      "retention_sweep_request",
+      "recall_limits"
+    ],
+    "forbidden_assumptions": [
+      "Do not treat optional schema fields as permission to ignore trust-boundary constraints.",
+      "Do not infer persisted session shape from examples alone when the bounded schema object is absent."
+    ],
+    "required_clarifications": [],
+    "reasoning_paths": [
+      "memory_config -> recall_limits -> injected_context_budget",
+      "session_record -> retention_sweep_request -> archive_decision"
+    ],
+    "source_digest": [
+      "Primary source: docs/openclaw-memory-recall-and-retention.md",
+      "Primary source: docs/OpenClaw-Session-Management.md"
+    ]
+  },
+  "delivery_artifacts": [
+    {
+      "artifact_name": "memory-session.schema.json",
+      "artifact_type": "json_schema",
+      "path": "src/OpenClaw.Gateway/skills/software-developer/contracts/generated/memory-session/memory-session.schema.json",
+      "status": "planned"
+    }
+  ],
+  "dropped_items": [],
+  "open_questions": [],
+  "meta": {
+    "generated_at": "2026-04-22T00:00:00Z",
+    "generated_by": "ncrew-ontology",
+    "workspace": "kingcrab",
+    "notes": "This consumer-skill JSON Schema projection gives software-developer a validation contract for memory and session payloads, limits, and lifecycle requests."
+  }
+}
