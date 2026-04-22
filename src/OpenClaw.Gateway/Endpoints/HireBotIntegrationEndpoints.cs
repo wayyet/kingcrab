@@ -104,6 +104,36 @@ internal static class HireBotIntegrationEndpoints
                     Status: state.Status,
                     NextAction: $"/api/integration/hirebot/hirings/{hireId}"));
             }
+            catch (OperationCanceledException ex) when (ctx.RequestAborted.IsCancellationRequested)
+            {
+                logger.LogWarning(
+                    ex,
+                    "HireBot 创建实例请求被取消: HireId={HireId}, Owner={Owner}",
+                    hireId,
+                    ownerSub);
+                return Results.Json(
+                    new
+                    {
+                        code = 499,
+                        message = "创建实例请求已取消"
+                    },
+                    statusCode: 499);
+            }
+            catch (OperationCanceledException ex)
+            {
+                logger.LogWarning(
+                    ex,
+                    "HireBot 创建实例超时: HireId={HireId}, Owner={Owner}",
+                    hireId,
+                    ownerSub);
+                return Results.Json(
+                    new
+                    {
+                        code = 504,
+                        message = "创建 OpenSandbox 实例超时"
+                    },
+                    statusCode: StatusCodes.Status504GatewayTimeout);
+            }
             catch (Exception ex)
             {
                 logger.LogError(ex, "HireBot 创建实例失败: HireId={HireId}, Owner={Owner}", hireId, ownerSub);
