@@ -14,6 +14,7 @@ internal static class EndpointMappingsExtensions
         app.MapOpenClawDiagnosticsEndpoints(startup, runtime);
         app.MapOpenClawOpenAiEndpoints(startup, runtime);
         app.MapOpenClawIntegrationEndpoints(startup, runtime);
+        app.MapOpenClawHireBotIntegrationEndpoints(startup, runtime);
         app.MapOpenClawIntegrationAccountEndpoints(startup, runtime);
         app.MapOpenClawIntegrationBackendEndpoints(startup, runtime);
         app.MapOpenClawWebUiEndpoints(startup, runtime);
