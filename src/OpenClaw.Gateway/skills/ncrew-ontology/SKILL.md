@@ -156,6 +156,8 @@ meta: 生成信息
 - `{baseDir}/references/FIELD_GUIDE.md`：字段语义与填报口径
 - `{baseDir}/references/REVIEW_CHECKLIST.md`：三态样例统一评审标准
 - `{baseDir}/references/DOWNSTREAM_MAPPING_GUIDE.md`：下游代码生成 / 提示词编排映射规范
+- `{baseDir}/references/PROJECTION_CONSUMPTION_GUIDE.md`：其他 skill 如何消费 projection.json
+- `{baseDir}/references/CONSUMER_PROJECTION_LAYOUT_GUIDE.md`：consumer skill 专用 projection 目录与命名规范
 - `{baseDir}/references/SCHEMA_MIGRATION.md`：slice 与 projection 的 schema 版本迁移说明
 - `{baseDir}/examples/ready/sample.json`：READY 基线样例
 - `{baseDir}/scripts/validate-slice.ps1`：本地校验入口

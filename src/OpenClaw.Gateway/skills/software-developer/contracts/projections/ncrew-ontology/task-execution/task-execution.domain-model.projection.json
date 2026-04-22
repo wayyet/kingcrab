@@ -1,0 +1,151 @@
+{
+  "$schema": "../../../../../ncrew-ontology/templates/PROJECTION_TEMPLATE.schema.json",
+  "template_type": "ontology_projection",
+  "projection_version": "1.0.0",
+  "projection": {
+    "projection_id": "software-developer-task-execution-domain-model-v1",
+    "projection_type": "domain_model_projection",
+    "target_name": "SoftwareDeveloperTaskExecutionModel",
+    "target_format": "csharp_domain_model",
+    "target_runtime": "dotnet",
+    "projection_goal": "Provide the software-developer skill with a domain model for execution planning, source-aware review decisions, and bounded implementation tasks.",
+    "source_slice": {
+      "path": "../../../../../ncrew-ontology/examples/ready/sample.json",
+      "slice_topic": "skill loading order, source precedence, and eligibility filtering",
+      "schema_version": "1.0.0"
+    },
+    "intended_consumers": [
+      "software_developer_skill",
+      "code_generator"
+    ]
+  },
+  "mapping_policy": {
+    "preserve_source_trace": true,
+    "preserve_constraints": true,
+    "relation_flattening_policy": "disallow_by_default",
+    "unresolved_item_policy": "block_or_escalate",
+    "dropped_item_policy": "disallow_drop",
+    "prompt_assumption_policy": "disallow_unmapped_terms"
+  },
+  "concept_mappings": [
+    {
+      "concept_id": "C1",
+      "projection_action": "map",
+      "target_kind": "domain_entity",
+      "target_name": "TaskExecutionConfigModel",
+      "target_path": "contracts/generated/task-execution/Domain/TaskExecutionConfigModel.cs",
+      "source_ids": [
+        "S2",
+        "S3"
+      ],
+      "notes": "Model the bounded execution context as the aggregate root so planning logic stays tied to the same configuration boundary as the source slice."
+    },
+    {
+      "concept_id": "C2",
+      "projection_action": "map",
+      "target_kind": "value_object",
+      "target_name": "ExecutionSourceSelectionModel",
+      "target_path": "contracts/generated/task-execution/Domain/ExecutionSourceSelectionModel.cs",
+      "source_ids": [
+        "S2",
+        "S3"
+      ],
+      "notes": "Keep the source-selection knobs explicit so execution planning can reason about bundled, managed, workspace, and extra-directory inputs separately."
+    },
+    {
+      "concept_id": "C3",
+      "projection_action": "map",
+      "target_kind": "domain_entity",
+      "target_name": "ExecutableSkillDefinitionModel",
+      "target_path": "contracts/generated/task-execution/Domain/ExecutableSkillDefinitionModel.cs",
+      "source_ids": [
+        "S2",
+        "S3"
+      ],
+      "notes": "Treat each selected skill definition as an executable planning object so implementation steps can preserve source and metadata semantics."
+    },
+    {
+      "concept_id": "C4",
+      "projection_action": "map",
+      "target_kind": "enum",
+      "target_name": "ExecutionSourceTier",
+      "target_path": "contracts/generated/task-execution/Domain/ExecutionSourceTier.cs",
+      "source_ids": [
+        "S1",
+        "S2",
+        "S3",
+        "S4"
+      ],
+      "notes": "Keep source tiers as a bounded enum so precedence-sensitive execution decisions remain machine-checkable."
+    }
+  ],
+  "relation_mappings": [
+    {
+      "relation_id": "R3",
+      "projection_action": "map",
+      "target_kind": "association",
+      "target_name": "ExecutableSkillDefinitionUsesExecutionSourceTier",
+      "representation": "domain_association",
+      "source_ids": [
+        "S2",
+        "S3"
+      ],
+      "notes": "Preserve the definition-to-source association so planning and review code cannot sever provenance from executable items."
+    }
+  ],
+  "constraint_mappings": [
+    {
+      "constraint_id": "K1",
+      "projection_action": "map",
+      "target_kind": "runtime_guard",
+      "target_name": "RespectExecutionSourcePrecedence",
+      "severity_mapping": "high -> blocking_validation",
+      "source_ids": [
+        "S1",
+        "S2",
+        "S4"
+      ],
+      "notes": "Project source precedence into a runtime guard so execution plans cannot silently invert overwrite order."
+    }
+  ],
+  "prompt_projection": {
+    "allowed_terms": [
+      "task_execution_config",
+      "executable_skill_definition",
+      "execution_source_tier",
+      "source_precedence"
+    ],
+    "forbidden_assumptions": [
+      "Do not assume execution order can ignore source precedence.",
+      "Do not flatten execution-source semantics into generic labels."
+    ],
+    "required_clarifications": [
+      "Clarify which source tier should win when task instructions imply a different priority than the runtime configuration."
+    ],
+    "reasoning_paths": [
+      "task_execution_config -> executable_skill_definition -> execution_source_tier",
+      "execution_source_tier -> source_precedence -> execution_decision"
+    ],
+    "source_digest": [
+      "Primary source: S2 src/OpenClaw.Core/Skills/SkillLoader.cs",
+      "Primary source: S3 src/OpenClaw.Core/Skills/SkillModels.cs",
+      "Supporting source: S1 docs/skillloader-loadall-analysis.md"
+    ]
+  },
+  "delivery_artifacts": [
+    {
+      "artifact_name": "TaskExecutionConfigModel.cs",
+      "artifact_type": "code_file",
+      "path": "src/OpenClaw.Gateway/skills/software-developer/contracts/generated/task-execution/Domain/TaskExecutionConfigModel.cs",
+      "status": "planned"
+    }
+  ],
+  "dropped_items": [],
+  "open_questions": [],
+  "meta": {
+    "generated_at": "2026-04-21T00:00:00Z",
+    "generated_by": "ncrew-ontology",
+    "workspace": "kingcrab",
+    "notes": "This consumer-skill domain-model projection gives software-developer an execution-oriented model for planning and review tasks while preserving provenance and precedence semantics."
+  }
+}

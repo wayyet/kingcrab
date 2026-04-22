@@ -25,15 +25,24 @@
   - `FIELD_GUIDE.md`：字段语义说明。
   - `REVIEW_CHECKLIST.md`：同时覆盖 slice 和 projection 两层评审标准。
   - `DOWNSTREAM_MAPPING_GUIDE.md`：下游代码生成 / 提示词编排映射规范。
+  - `PROJECTION_CONSUMPTION_GUIDE.md`：其他 skill 如何消费 `projection.json`。
+  - `CONSUMER_PROJECTION_LAYOUT_GUIDE.md`：consumer skill 专用 projection 目录与命名规范。
   - `SCHEMA_MIGRATION.md`：slice 与 projection 的 schema 版本迁移说明。
   - `SESSION_SUMMARY.md`：本次规范包从 slice skill 演进到完整治理包的总结文章。
 - `examples/ready/`
   - `sample.json`：`READY` 基线样例。
   - `sample-projection.json`：基于 `sample.json` 的合法 projection 样例。
+  - `json-schema-projection.json`：面向 `json_schema_projection` 的 `READY` 样例。
+  - `workflow-contract-projection.json`：面向 `workflow_contract_projection` 的 `READY` 样例。
+  - `minimal-projection.json`：最小可机读 projection 样例。
   - `sample.entry.md`：`sample.json` 的短入口页。
   - `sample-projection.entry.md`：`sample-projection.json` 的短入口页。
+  - `json-schema-projection.entry.md`：`json-schema-projection.json` 的短入口页。
+  - `workflow-contract-projection.entry.md`：`workflow-contract-projection.json` 的短入口页。
   - `sample.md`：`sample.json` 的人读评审版。
   - `sample-projection.md`：`sample-projection.json` 的人读评审版。
+  - `json-schema-projection.md`：`json-schema-projection.json` 的人读评审版。
+  - `workflow-contract-projection.md`：`workflow-contract-projection.json` 的人读评审版。
 - `examples/warning/`
   - `warning-sample.json`：`WARNING` 黄灯样例。
   - `warning-sample.entry.md`：短入口页。
@@ -94,11 +103,13 @@
 
 1. 先看 `examples/ready/sample.json -> sample.entry.md -> sample.md` 建立正向基线。
 2. 再看 `examples/ready/sample-projection.json -> sample-projection.entry.md -> sample-projection.md`，理解 READY slice 如何落成可交付 projection。
-3. 再看 `examples/warning/warning-sample.json -> warning-sample.entry.md -> warning-sample.md` 学会识别黄灯风险。
-4. 再看 `examples/warning/warning-projection.json -> warning-projection.entry.md -> warning-projection.md` 理解 projection 为什么也可能是黄灯。
-5. 最后看 `examples/invalid/invalid-sample.json -> invalid-sample.entry.md -> invalid-sample.md` 理解失败路径和报错边界。
-6. 再看 `examples/invalid/invalid-projection.json -> invalid-projection.entry.md -> invalid-projection.md` 理解 projection 结构失败长什么样。
-7. 回到 `references/REVIEW_CHECKLIST.md`，把三态样例统一成同一套评审口径。
+3. 再看 `examples/ready/json-schema-projection.json -> json-schema-projection.entry.md -> json-schema-projection.md`，理解同一份 slice 如何投影成 JSON Schema 契约。
+4. 再看 `examples/ready/workflow-contract-projection.json -> workflow-contract-projection.entry.md -> workflow-contract-projection.md`，理解同一份 slice 如何投影成 workflow contract。
+5. 再看 `examples/warning/warning-sample.json -> warning-sample.entry.md -> warning-sample.md` 学会识别黄灯风险。
+6. 再看 `examples/warning/warning-projection.json -> warning-projection.entry.md -> warning-projection.md` 理解 projection 为什么也可能是黄灯。
+7. 最后看 `examples/invalid/invalid-sample.json -> invalid-sample.entry.md -> invalid-sample.md` 理解失败路径和报错边界。
+8. 再看 `examples/invalid/invalid-projection.json -> invalid-projection.entry.md -> invalid-projection.md` 理解 projection 结构失败长什么样。
+9. 回到 `references/REVIEW_CHECKLIST.md`，把三态样例统一成同一套评审口径。
 
 ---
 
@@ -110,13 +121,22 @@
 - 想检查结果合不合法：用 `templates/TEMPLATE.schema.json`
 - 想检查 projection 结构是否合法：用 `templates/PROJECTION_TEMPLATE.schema.json`
 - 想直接从一个合法 projection 样例开始改：用 `examples/ready/sample-projection.json`
+- 想直接从 JSON Schema projection 样例开始改：用 `examples/ready/json-schema-projection.json`
+- 想直接从 workflow contract projection 样例开始改：用 `examples/ready/workflow-contract-projection.json`
+- 想从最小合法 projection 骨架开始改：用 `examples/ready/minimal-projection.json`
 - 想看 projection 的短入口：用 `examples/ready/sample-projection.entry.md`
 - 想看 projection 为什么算 READY：用 `examples/ready/sample-projection.md`
+- 想看 JSON Schema projection 的短入口：用 `examples/ready/json-schema-projection.entry.md`
+- 想看 JSON Schema projection 为什么算 READY：用 `examples/ready/json-schema-projection.md`
+- 想看 workflow contract projection 的短入口：用 `examples/ready/workflow-contract-projection.entry.md`
+- 想看 workflow contract projection 为什么算 READY：用 `examples/ready/workflow-contract-projection.md`
 - 想统一字段口径：看 `references/FIELD_GUIDE.md`
 - 想统一 slice 和 projection 两层评审标准：看 `references/REVIEW_CHECKLIST.md`
 - 想看 schema 升级时模板、样例和校验器该怎么一起迁移：看 `references/SCHEMA_MIGRATION.md`
 - 想快速理解这套规范为什么会演进成现在这套结构：看 `references/SESSION_SUMMARY.md`
 - 想把 slice 稳定接到 projection、codegen 或 prompt orchestration：看 `references/DOWNSTREAM_MAPPING_GUIDE.md`
+- 想让其他 skill 正式消费 projection 文件：看 `references/PROJECTION_CONSUMPTION_GUIDE.md`
+- 想统一 consumer skill 内 projection 的目录和命名：看 `references/CONSUMER_PROJECTION_LAYOUT_GUIDE.md`
 - 想直接在真实样例上改：用 `examples/ready/sample.json`（`READY`）
 - 想看 `READY` 的短入口：用 `examples/ready/sample.entry.md`
 - 想看 `READY` 的完整解释：用 `examples/ready/sample.md`
@@ -298,4 +318,4 @@
 ## 后续可扩展方向
 
 - 增加自动校验脚本或 CI 校验入口
-- 增加可机读的 projection 模板或示例
+- 继续增加按运行时或交付介质细分的 projection 样例（如更细的 prompt policy、tool contract、event schema）

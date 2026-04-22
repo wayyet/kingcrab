@@ -11,6 +11,8 @@
 - slice 黄灯样例：[warning-sample.json](../examples/warning/warning-sample.json)
 - slice 失败样例：[invalid-sample.json](../examples/invalid/invalid-sample.json)
 - projection 正向样例：[sample-projection.json](../examples/ready/sample-projection.json)
+- projection 正向样例：[json-schema-projection.json](../examples/ready/json-schema-projection.json)
+- projection 正向样例：[workflow-contract-projection.json](../examples/ready/workflow-contract-projection.json)
 - projection 黄灯样例：[warning-projection.json](../examples/warning/warning-projection.json)
 - projection 失败样例：[invalid-projection.json](../examples/invalid/invalid-projection.json)
 
@@ -367,6 +369,8 @@
 - `warning-sample` = slice 黄灯样例，说明“什么叫结构过关但语义仍需 review”
 - `invalid-sample` = slice 失败样例，说明“什么叫连结构关都没过”
 - `sample-projection` = projection 通过样例，说明“什么叫忠实、安全、可追溯地下游投影”
+- `json-schema-projection` = projection 通过样例，说明“什么叫把 slice 稳定投影成 JSON Schema 契约”
+- `workflow-contract-projection` = projection 通过样例，说明“什么叫把 slice 稳定投影成 workflow step 契约”
 - `warning-projection` = projection 黄灯样例，说明“什么叫 projection 合法但仍不应直接定稿”
 - `invalid-projection` = projection 失败样例，说明“什么叫 projection 连结构层都没过”
 
@@ -393,5 +397,7 @@
 
 - 想看“什么叫合格 slice 基线”：看 `sample`
 - 想看“什么叫合格 projection 基线”：看 `sample-projection`
+- 想看“什么叫合格 JSON Schema projection 基线”：看 `json-schema-projection`
+- 想看“什么叫合格 workflow contract projection 基线”：看 `workflow-contract-projection`
 - 想看“什么叫结构过关但仍需 review”：看 `warning-sample` 和 `warning-projection`
 - 想看“什么叫应该直接退回修结构”：看 `invalid-sample` 和 `invalid-projection`

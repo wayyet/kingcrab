@@ -1,0 +1,139 @@
+{
+  "$schema": "../../../../../ncrew-ontology/templates/PROJECTION_TEMPLATE.schema.json",
+  "template_type": "ontology_projection",
+  "projection_version": "1.0.0",
+  "projection": {
+    "projection_id": "software-developer-tool-orchestration-prompt-constraint-v1",
+    "projection_type": "prompt_constraint_projection",
+    "target_name": "SoftwareDeveloperToolOrchestrationPromptPolicy",
+    "target_format": "system_prompt_policy",
+    "target_runtime": "llm_orchestrator",
+    "projection_goal": "Provide the software-developer skill with a prompt-side orchestration contract that preserves routing terminology, allowed reasoning paths, and source-precedence guardrails.",
+    "source_slice": {
+      "path": "../../../../../ncrew-ontology/examples/ready/sample.json",
+      "slice_topic": "skill loading order, source precedence, and eligibility filtering",
+      "schema_version": "1.0.0"
+    },
+    "intended_consumers": [
+      "software_developer_skill",
+      "prompt_orchestrator"
+    ]
+  },
+  "mapping_policy": {
+    "preserve_source_trace": true,
+    "preserve_constraints": true,
+    "relation_flattening_policy": "disallow_by_default",
+    "unresolved_item_policy": "block_or_escalate",
+    "dropped_item_policy": "disallow_drop",
+    "prompt_assumption_policy": "disallow_unmapped_terms"
+  },
+  "concept_mappings": [
+    {
+      "concept_id": "C1",
+      "projection_action": "map",
+      "target_kind": "prompt_term",
+      "target_name": "tool_orchestration_config",
+      "target_path": "prompt.allowed_terms",
+      "source_ids": [
+        "S2",
+        "S3"
+      ],
+      "notes": "Expose orchestration configuration as an approved prompt term so planning prompts stay bounded by the same configuration semantics as the source slice."
+    },
+    {
+      "concept_id": "C3",
+      "projection_action": "map",
+      "target_kind": "prompt_term",
+      "target_name": "tool_orchestration_skill_definition",
+      "target_path": "prompt.allowed_terms",
+      "source_ids": [
+        "S2",
+        "S3"
+      ],
+      "notes": "Keep orchestration-participant skill definitions as explicit prompt terms so routing discussions preserve provenance."
+    },
+    {
+      "concept_id": "C4",
+      "projection_action": "map",
+      "target_kind": "prompt_term",
+      "target_name": "tool_orchestration_source_tier",
+      "target_path": "prompt.allowed_terms",
+      "source_ids": [
+        "S1",
+        "S2",
+        "S3",
+        "S4"
+      ],
+      "notes": "Carry source tier into the prompt vocabulary so orchestration reasoning cannot drop precedence semantics."
+    }
+  ],
+  "relation_mappings": [
+    {
+      "relation_id": "R3",
+      "projection_action": "map",
+      "target_kind": "reasoning_path",
+      "target_name": "ToolOrchestrationSkillDependsOnSourceTier",
+      "representation": "prompt_reasoning_path",
+      "source_ids": [
+        "S2",
+        "S3"
+      ],
+      "notes": "Preserve the source-aware dependency as a permitted orchestration reasoning path for planning and review prompts."
+    }
+  ],
+  "constraint_mappings": [
+    {
+      "constraint_id": "K1",
+      "projection_action": "map",
+      "target_kind": "prompt_guardrail",
+      "target_name": "DoNotBypassToolOrchestrationSourcePrecedence",
+      "severity_mapping": "high -> blocking_prompt_guardrail",
+      "source_ids": [
+        "S1",
+        "S2",
+        "S4"
+      ],
+      "notes": "Require prompt-side orchestration guidance to respect source precedence and reject any plan that silently reorders source priority."
+    }
+  ],
+  "prompt_projection": {
+    "allowed_terms": [
+      "tool_orchestration_config",
+      "tool_orchestration_skill_definition",
+      "tool_orchestration_source_tier",
+      "source_precedence"
+    ],
+    "forbidden_assumptions": [
+      "Do not treat source precedence as optional in tool-routing prompts.",
+      "Do not rename orchestration source tiers into informal labels."
+    ],
+    "required_clarifications": [
+      "Clarify the active source tier when a routing proposal conflicts with runtime precedence rules."
+    ],
+    "reasoning_paths": [
+      "tool_orchestration_config -> tool_orchestration_skill_definition -> tool_orchestration_source_tier",
+      "tool_orchestration_source_tier -> source_precedence -> routing_decision"
+    ],
+    "source_digest": [
+      "Primary source: S2 src/OpenClaw.Core/Skills/SkillLoader.cs",
+      "Primary source: S3 src/OpenClaw.Core/Skills/SkillModels.cs",
+      "Supporting source: S1 docs/skillloader-loadall-analysis.md"
+    ]
+  },
+  "delivery_artifacts": [
+    {
+      "artifact_name": "ToolOrchestrationPromptPolicy.md",
+      "artifact_type": "prompt_fragment",
+      "path": "src/OpenClaw.Gateway/skills/software-developer/contracts/generated/tool-orchestration/ToolOrchestrationPromptPolicy.md",
+      "status": "planned"
+    }
+  ],
+  "dropped_items": [],
+  "open_questions": [],
+  "meta": {
+    "generated_at": "2026-04-21T00:00:00Z",
+    "generated_by": "ncrew-ontology",
+    "workspace": "kingcrab",
+    "notes": "This consumer-skill prompt projection gives software-developer a prompt-side orchestration contract for routing guidance and source-precedence guardrails."
+  }
+}

@@ -1,0 +1,839 @@
+{
+  "producer_skill": "ncrew-ontology",
+  "consumer_skill": "software-developer",
+  "default_selection_policy": {
+    "prefer_ready_only": true,
+    "block_on_open_questions": true,
+    "fallback_order_by_target_view": [
+      "domain-model",
+      "json-schema",
+      "prompt-constraint",
+      "workflow-contract"
+    ],
+    "multi_view_resolution_hints": [
+      "Prefer the target view that matches the user's explicitly requested output artifact.",
+      "If the request combines implementation and validation, choose domain-model or json-schema based on which artifact is primary.",
+      "If the request combines implementation and orchestration, choose workflow-contract only when step ordering, transitions, or gating conditions are the core deliverable.",
+      "If the request asks for guidance, policy, or review language rather than executable artifacts, choose prompt-constraint."
+    ]
+  },
+  "topic_conflict_resolution": {
+    "default_rule": "Prefer the topic whose deliverable shape and intent keywords best match the user's primary output request. If no topic clearly dominates, ask for clarification instead of silently switching topics.",
+    "pairwise_rules": [
+      {
+        "topics": [
+          "task-execution",
+          "tool-orchestration"
+        ],
+        "prefer_topic_when": [
+          {
+            "topic": "tool-orchestration",
+            "request_signals": [
+              "planner",
+              "workflow",
+              "orchestration",
+              "execution graph",
+              "step ordering",
+              "routing flow",
+              "gating condition"
+            ],
+            "reason": "These signals indicate the user primarily wants execution flow structure, orchestration edges, or planner-level control."
+          },
+          {
+            "topic": "task-execution",
+            "request_signals": [
+              "review guidance",
+              "execution policy",
+              "implementation guidance",
+              "review checkpoint",
+              "prompt policy",
+              "task constraint"
+            ],
+            "reason": "These signals indicate the user primarily wants execution constraints, review rules, or implementation guidance rather than orchestration flow."
+          }
+        ],
+        "tie_breaker": "If the request mentions both orchestration flow and review or guidance concerns, prefer tool-orchestration only when step edges, transitions, or planner behavior are the primary deliverable; otherwise prefer task-execution."
+      },
+      {
+        "topics": [
+          "skill-loading",
+          "task-execution"
+        ],
+        "prefer_topic_when": [
+          {
+            "topic": "skill-loading",
+            "request_signals": [
+              "skills config",
+              "load skills",
+              "source precedence",
+              "eligibility filtering",
+              "managed path",
+              "skill discovery"
+            ],
+            "reason": "These signals indicate the user is asking about the loading domain itself rather than the higher-level execution policy around it."
+          },
+          {
+            "topic": "task-execution",
+            "request_signals": [
+              "execution policy",
+              "review wording",
+              "task guidance",
+              "review checkpoint",
+              "prompt guidance"
+            ],
+            "reason": "These signals indicate the user is asking for execution or review behavior layered on top of loading semantics."
+          }
+        ],
+        "tie_breaker": "If the request mixes loading semantics with execution guidance, prefer skill-loading when the artifact is about configuration or precedence behavior; otherwise prefer task-execution."
+      },
+      {
+        "topics": [
+          "skill-loading",
+          "tool-orchestration"
+        ],
+        "prefer_topic_when": [
+          {
+            "topic": "tool-orchestration",
+            "request_signals": [
+              "workflow contract",
+              "planner flow",
+              "execution steps",
+              "orchestration graph",
+              "routing sequence"
+            ],
+            "reason": "These signals indicate the user wants a flow-level orchestration artifact rather than a loading-domain artifact."
+          },
+          {
+            "topic": "skill-loading",
+            "request_signals": [
+              "config model",
+              "skill source tier",
+              "load order",
+              "overwrite rule",
+              "eligibility rule"
+            ],
+            "reason": "These signals indicate the user wants the loading-domain model, schema, or rules themselves."
+          }
+        ],
+        "tie_breaker": "If the request mixes loading semantics with orchestration flow, prefer tool-orchestration only when the requested artifact is an explicit graph, step sequence, or gating workflow."
+      }
+    ]
+  },
+  "topic_scoring": {
+    "selection_rule": "Score all candidate topics, prefer the highest READY topic, and ask for clarification when the top scores are too close to distinguish safely.",
+    "clarify_when_score_gap_below": 2,
+    "score_dimensions": [
+      {
+        "dimension": "primary_intent_match",
+        "score": 5,
+        "description": "Award when the request's main deliverable clearly matches the topic's core responsibility."
+      },
+      {
+        "dimension": "strong_keyword_match",
+        "score": 3,
+        "description": "Award for each strong topic-specific signal that appears in the request."
+      },
+      {
+        "dimension": "supporting_keyword_match",
+        "score": 1,
+        "description": "Award for each weaker supporting signal that still aligns with the topic."
+      },
+      {
+        "dimension": "cross_topic_conflict_penalty",
+        "score": -2,
+        "description": "Apply when the request carries stronger signals for a competing topic and this topic only matches secondarily."
+      },
+      {
+        "dimension": "explicit_artifact_bonus",
+        "score": 4,
+        "description": "Award when the user explicitly asks for the artifact shape most characteristic of this topic."
+      }
+    ],
+    "topics": [
+      {
+        "domain_slug": "skill-loading",
+        "primary_intent_signals": [
+          "skill loading",
+          "skills config",
+          "source precedence",
+          "eligibility filtering",
+          "skill discovery",
+          "load order"
+        ],
+        "supporting_signals": [
+          "managed path",
+          "overwrite rule",
+          "skill source tier",
+          "config model"
+        ],
+        "explicit_artifact_signals": [
+          "config contract",
+          "loading model",
+          "loading schema",
+          "eligibility rule"
+        ],
+        "demote_when_competing_topic_signals": [
+          "execution policy",
+          "review guidance",
+          "planner flow",
+          "workflow graph"
+        ]
+      },
+      {
+        "domain_slug": "task-execution",
+        "primary_intent_signals": [
+          "task execution",
+          "execution policy",
+          "implementation guidance",
+          "review guidance",
+          "review checkpoint",
+          "prompt policy"
+        ],
+        "supporting_signals": [
+          "task constraint",
+          "review wording",
+          "prompt guidance",
+          "execution rule"
+        ],
+        "explicit_artifact_signals": [
+          "review policy",
+          "execution checkpoint",
+          "transition policy",
+          "implementation guardrail"
+        ],
+        "demote_when_competing_topic_signals": [
+          "planner flow",
+          "orchestration graph",
+          "skill discovery",
+          "load order"
+        ]
+      },
+      {
+        "domain_slug": "tool-orchestration",
+        "primary_intent_signals": [
+          "tool orchestration",
+          "workflow orchestration",
+          "planner flow",
+          "execution graph",
+          "routing sequence",
+          "workflow contract"
+        ],
+        "supporting_signals": [
+          "execution steps",
+          "gating condition",
+          "orchestration graph",
+          "planner"
+        ],
+        "explicit_artifact_signals": [
+          "workflow",
+          "step graph",
+          "execution flow",
+          "routing workflow"
+        ],
+        "demote_when_competing_topic_signals": [
+          "review guidance",
+          "prompt policy",
+          "skills config",
+          "eligibility filtering"
+        ]
+      }
+    ]
+  },
+  "target_view_scoring": {
+    "selection_rule": "Within the selected topic, score all available target views, prefer the highest READY view, and ask for clarification when competing views remain too close to distinguish safely.",
+    "clarify_when_score_gap_below": 2,
+    "prefer_explicit_user_artifact_requests": true,
+    "score_dimensions": [
+      {
+        "dimension": "explicit_output_match",
+        "score": 5,
+        "description": "Award when the user explicitly names the output artifact or contract shape represented by the target view."
+      },
+      {
+        "dimension": "strong_signal_match",
+        "score": 3,
+        "description": "Award for each strong target-view-specific signal that appears in the request."
+      },
+      {
+        "dimension": "supporting_signal_match",
+        "score": 1,
+        "description": "Award for each weaker signal that still reinforces the target view choice."
+      },
+      {
+        "dimension": "cross_view_conflict_penalty",
+        "score": -2,
+        "description": "Apply when another target view has the stronger artifact match and this view only matches secondarily."
+      },
+      {
+        "dimension": "topic_default_view_bonus",
+        "score": 1,
+        "description": "Award when no stronger artifact match exists and the view is the topic's declared default target view."
+      }
+    ],
+    "views": [
+      {
+        "target_view": "domain-model",
+        "explicit_output_signals": [
+          "domain model",
+          "code model",
+          "implementation model",
+          "runtime model",
+          "object model"
+        ],
+        "strong_signals": [
+          "types",
+          "guards",
+          "implementation structure",
+          "domain objects",
+          "runtime policy"
+        ],
+        "supporting_signals": [
+          "value object",
+          "enum",
+          "association",
+          "strategy model"
+        ],
+        "demote_when_competing_view_signals": [
+          "json schema",
+          "validation contract",
+          "prompt policy",
+          "workflow steps"
+        ]
+      },
+      {
+        "target_view": "json-schema",
+        "explicit_output_signals": [
+          "json schema",
+          "schema",
+          "validation schema",
+          "config schema",
+          "serialization contract"
+        ],
+        "strong_signals": [
+          "validation contract",
+          "config shape",
+          "import/export schema",
+          "structured validation"
+        ],
+        "supporting_signals": [
+          "required field",
+          "property shape",
+          "schema constraint",
+          "payload validation"
+        ],
+        "demote_when_competing_view_signals": [
+          "runtime guard",
+          "prompt guidance",
+          "execution graph",
+          "review policy"
+        ]
+      },
+      {
+        "target_view": "prompt-constraint",
+        "explicit_output_signals": [
+          "prompt constraint",
+          "prompt policy",
+          "reviewer guidance",
+          "prompt guardrail",
+          "reasoning policy"
+        ],
+        "strong_signals": [
+          "constrained reasoning",
+          "allowed terms",
+          "review guidance",
+          "prompt wording",
+          "guardrails"
+        ],
+        "supporting_signals": [
+          "review wording",
+          "policy language",
+          "review checklist",
+          "language constraint"
+        ],
+        "demote_when_competing_view_signals": [
+          "json schema",
+          "runtime model",
+          "workflow steps",
+          "execution graph"
+        ]
+      },
+      {
+        "target_view": "workflow-contract",
+        "explicit_output_signals": [
+          "workflow contract",
+          "execution graph",
+          "planner flow",
+          "step graph",
+          "orchestration flow"
+        ],
+        "strong_signals": [
+          "workflow steps",
+          "gating conditions",
+          "checkpoints",
+          "transitions",
+          "routing sequence"
+        ],
+        "supporting_signals": [
+          "precondition",
+          "step ordering",
+          "approval step",
+          "blocking condition"
+        ],
+        "demote_when_competing_view_signals": [
+          "json schema",
+          "review wording",
+          "runtime object",
+          "type model"
+        ]
+      }
+    ],
+    "within_topic_overrides": [
+      {
+        "domain_slug": "skill-loading",
+        "bonuses": [
+          {
+            "target_view": "json-schema",
+            "when_request_signals": [
+              "config",
+              "schema",
+              "validation"
+            ],
+            "score": 2,
+            "reason": "Skill-loading requests frequently pivot from domain semantics into configuration validation artifacts."
+          },
+          {
+            "target_view": "workflow-contract",
+            "when_request_signals": [
+              "flow",
+              "steps",
+              "orchestration"
+            ],
+            "score": 2,
+            "reason": "Use workflow-contract when the loading request is explicitly reframed as execution flow or sequencing."
+          }
+        ]
+      },
+      {
+        "domain_slug": "task-execution",
+        "bonuses": [
+          {
+            "target_view": "prompt-constraint",
+            "when_request_signals": [
+              "review",
+              "guidance",
+              "policy",
+              "guardrail"
+            ],
+            "score": 2,
+            "reason": "Task-execution defaults toward prompt-constraint when the requested output is guidance-heavy."
+          },
+          {
+            "target_view": "workflow-contract",
+            "when_request_signals": [
+              "checkpoint",
+              "transition",
+              "step"
+            ],
+            "score": 2,
+            "reason": "Promote workflow-contract when task-execution requests emphasize staged execution flow."
+          }
+        ]
+      },
+      {
+        "domain_slug": "tool-orchestration",
+        "bonuses": [
+          {
+            "target_view": "workflow-contract",
+            "when_request_signals": [
+              "planner",
+              "workflow",
+              "graph",
+              "gating"
+            ],
+            "score": 2,
+            "reason": "Tool-orchestration naturally favors workflow-contract when the request is explicitly flow-oriented."
+          },
+          {
+            "target_view": "prompt-constraint",
+            "when_request_signals": [
+              "prompt",
+              "reasoning",
+              "allowed terms"
+            ],
+            "score": 2,
+            "reason": "Use prompt-constraint when orchestration requests are about language policy rather than flow structure."
+          }
+        ]
+      }
+    ]
+  },
+  "selection_algorithm": {
+    "version": "1.0",
+    "goal": "Select the safest READY topic and target view by accumulating deterministic scores from request signals instead of relying on ad hoc pairwise branching.",
+    "inputs": [
+      "user_request_text",
+      "topic_scoring",
+      "target_view_scoring",
+      "topics",
+      "default_selection_policy"
+    ],
+    "normalization_steps": [
+      "Lowercase the request text before matching signals.",
+      "Treat exact phrase hits as a single match per signal per topic or view.",
+      "Do not count the same signal twice within the same scoring bucket."
+    ],
+    "phases": [
+      {
+        "phase": "score_topics",
+        "steps": [
+          {
+            "action": "initialize_topic_scores",
+            "description": "Create one score record per topic with score = 0 and an empty matched_reasons list."
+          },
+          {
+            "action": "apply_primary_intent_match",
+            "source": "topic_scoring.topics[].primary_intent_signals",
+            "score_dimension": "primary_intent_match",
+            "match_mode": "best_topic_only",
+            "description": "Award the primary intent score to the topic whose primary intent signals best match the user's main requested deliverable."
+          },
+          {
+            "action": "apply_explicit_artifact_bonus",
+            "source": "topic_scoring.topics[].explicit_artifact_signals",
+            "score_dimension": "explicit_artifact_bonus",
+            "match_mode": "all_matching_topics",
+            "description": "Award the explicit artifact bonus when the request explicitly names an artifact strongly associated with a topic."
+          },
+          {
+            "action": "apply_strong_keyword_matches",
+            "source": "topic_scoring.topics[].primary_intent_signals",
+            "score_dimension": "strong_keyword_match",
+            "match_mode": "per_signal",
+            "description": "For each matched strong signal, add the strong keyword score once per unique signal."
+          },
+          {
+            "action": "apply_supporting_keyword_matches",
+            "source": "topic_scoring.topics[].supporting_signals",
+            "score_dimension": "supporting_keyword_match",
+            "match_mode": "per_signal",
+            "description": "For each matched supporting signal, add the supporting keyword score once per unique signal."
+          },
+          {
+            "action": "apply_cross_topic_penalties",
+            "source": "topic_scoring.topics[].demote_when_competing_topic_signals",
+            "score_dimension": "cross_topic_conflict_penalty",
+            "match_mode": "per_topic_if_competing_topic_is_stronger",
+            "description": "Subtract the cross-topic penalty when the request contains stronger competing-topic signals and the current topic is only a secondary fit."
+          },
+          {
+            "action": "prefer_ready_topics_only",
+            "description": "If default_selection_policy.prefer_ready_only is true, remove non-READY topics that have no READY views from final selection consideration."
+          },
+          {
+            "action": "rank_topics",
+            "description": "Sort topic score records by descending score and keep the top candidate list."
+          },
+          {
+            "action": "clarify_on_close_topic_scores",
+            "threshold_source": "topic_scoring.clarify_when_score_gap_below",
+            "description": "If the score gap between the top two candidate topics is below the threshold, return clarify instead of auto-selecting a topic."
+          }
+        ],
+        "output": "selected_topic or clarify"
+      },
+      {
+        "phase": "score_target_views",
+        "precondition": "selected_topic exists",
+        "steps": [
+          {
+            "action": "initialize_view_scores",
+            "description": "Create one score record per READY target view under the selected topic with score = 0 and an empty matched_reasons list."
+          },
+          {
+            "action": "apply_explicit_output_matches",
+            "source": "target_view_scoring.views[].explicit_output_signals",
+            "score_dimension": "explicit_output_match",
+            "match_mode": "all_matching_views",
+            "description": "Award explicit output match when the request names a concrete artifact such as json schema, prompt policy, or workflow contract."
+          },
+          {
+            "action": "apply_strong_view_signal_matches",
+            "source": "target_view_scoring.views[].strong_signals",
+            "score_dimension": "strong_signal_match",
+            "match_mode": "per_signal",
+            "description": "For each matched strong target-view signal, add the strong signal score once per unique signal."
+          },
+          {
+            "action": "apply_supporting_view_signal_matches",
+            "source": "target_view_scoring.views[].supporting_signals",
+            "score_dimension": "supporting_signal_match",
+            "match_mode": "per_signal",
+            "description": "For each matched supporting signal, add the supporting signal score once per unique signal."
+          },
+          {
+            "action": "apply_topic_overrides",
+            "source": "target_view_scoring.within_topic_overrides",
+            "match_mode": "selected_topic_only",
+            "description": "Apply within-topic bonuses for the selected topic when the request contains the override's request signals."
+          },
+          {
+            "action": "apply_default_view_bonus",
+            "source": "topics[].default_target_view",
+            "score_dimension": "topic_default_view_bonus",
+            "match_mode": "selected_topic_default_view_only_when_no_stronger_explicit_match",
+            "description": "Award the default target view bonus only as a weak fallback when the request does not strongly point to another target view."
+          },
+          {
+            "action": "apply_cross_view_penalties",
+            "source": "target_view_scoring.views[].demote_when_competing_view_signals",
+            "score_dimension": "cross_view_conflict_penalty",
+            "match_mode": "per_view_if_competing_view_is_stronger",
+            "description": "Subtract the cross-view penalty when another target view has the stronger artifact match and the current view is only secondary."
+          },
+          {
+            "action": "rank_target_views",
+            "description": "Sort view score records by descending score and keep the top candidate list."
+          },
+          {
+            "action": "clarify_on_close_view_scores",
+            "threshold_source": "target_view_scoring.clarify_when_score_gap_below",
+            "description": "If the score gap between the top two target views is below the threshold, return clarify instead of auto-selecting a target view."
+          }
+        ],
+        "output": "selected_target_view or clarify"
+      },
+      {
+        "phase": "resolve_projection",
+        "precondition": "selected_topic and selected_target_view exist",
+        "steps": [
+          {
+            "action": "lookup_projection_record",
+            "source": "topics[].views[]",
+            "description": "Find the projection record whose topic and target_view match the selected values."
+          },
+          {
+            "action": "enforce_ready_status",
+            "description": "Use the projection only when its status is READY; otherwise fall back to the topic default target view only if that still matches the requested outcome."
+          },
+          {
+            "action": "block_on_open_questions_when_required",
+            "description": "If default_selection_policy.block_on_open_questions is true and the selected projection carries blocking open questions, surface the block instead of silently proceeding."
+          }
+        ],
+        "output": "selected_projection_path or clarify_or_block"
+      }
+    ],
+    "result_shape": {
+      "topic_scores": "array",
+      "selected_topic": "string or null",
+      "target_view_scores": "array",
+      "selected_target_view": "string or null",
+      "resolution": "selected | clarify | block",
+      "projection_path": "string or null"
+    }
+  },
+  "target_view_hints": [
+    {
+      "target_view": "domain-model",
+      "request_signals": [
+        "code model",
+        "types",
+        "guards",
+        "implementation structure",
+        "domain objects",
+        "runtime policy"
+      ],
+      "use_when": "The user needs executable implementation structure, objects, associations, enums, or runtime guards."
+    },
+    {
+      "target_view": "json-schema",
+      "request_signals": [
+        "json schema",
+        "validation contract",
+        "config shape",
+        "import/export schema",
+        "structured validation"
+      ],
+      "use_when": "The user needs a validation or serialization contract rather than runtime implementation code."
+    },
+    {
+      "target_view": "prompt-constraint",
+      "request_signals": [
+        "prompt policy",
+        "reviewer guidance",
+        "constrained reasoning",
+        "allowed terms",
+        "prompt guardrails"
+      ],
+      "use_when": "The user needs prompt-side terminology, reasoning limits, review rules, or other non-code execution guidance."
+    },
+    {
+      "target_view": "workflow-contract",
+      "request_signals": [
+        "workflow steps",
+        "execution graph",
+        "planner flow",
+        "gating conditions",
+        "checkpoints",
+        "transitions"
+      ],
+      "use_when": "The user needs explicit step ordering, execution edges, or blocking preconditions."
+    }
+  ],
+  "topics": [
+    {
+      "domain_slug": "skill-loading",
+      "intent_keywords": [
+        "skill loading",
+        "skills config",
+        "source precedence",
+        "eligibility filtering",
+        "load skills"
+      ],
+      "default_target_view": "domain-model",
+      "example_requests": [
+        {
+          "request": "实现 skill loading 相关的代码重构",
+          "target_view": "domain-model",
+          "reason": "The request is about implementation structure, domain types, and runtime guards."
+        },
+        {
+          "request": "给 skill loading 配置生成 JSON Schema",
+          "target_view": "json-schema",
+          "reason": "The request asks for a validation or config contract rather than runtime code."
+        },
+        {
+          "request": "把 skill loading 流程整理成执行步骤或编排图",
+          "target_view": "workflow-contract",
+          "reason": "The request is about explicit orchestration order and gating conditions."
+        }
+      ],
+      "views": [
+        {
+          "target_view": "domain-model",
+          "projection_type": "domain_model_projection",
+          "status": "READY",
+          "path": "skill-loading/skill-loading.domain-model.projection.json"
+        },
+        {
+          "target_view": "json-schema",
+          "projection_type": "json_schema_projection",
+          "status": "READY",
+          "path": "skill-loading/skill-loading.json-schema.projection.json"
+        },
+        {
+          "target_view": "workflow-contract",
+          "projection_type": "workflow_contract_projection",
+          "status": "READY",
+          "path": "skill-loading/skill-loading.workflow-contract.projection.json"
+        }
+      ]
+    },
+    {
+      "domain_slug": "task-execution",
+      "intent_keywords": [
+        "task execution",
+        "execution policy",
+        "prompt policy",
+        "implementation guidance",
+        "review prompt"
+      ],
+      "default_target_view": "prompt-constraint",
+      "example_requests": [
+        {
+          "request": "给实现任务补一份 prompt policy / reviewer guidance",
+          "target_view": "prompt-constraint",
+          "reason": "The request is about prompt wording, review constraints, and allowed reasoning paths."
+        },
+        {
+          "request": "把任务执行约束落成实现对象或策略模型",
+          "target_view": "domain-model",
+          "reason": "The request needs execution-oriented objects, associations, and runtime guards."
+        },
+        {
+          "request": "把任务执行过程拆成 review checkpoint 和 transition",
+          "target_view": "workflow-contract",
+          "reason": "The request is asking for step transitions, checkpoints, and blocking preconditions."
+        },
+        {
+          "request": "给实现任务补一份 review 规则，但不需要 planner 图",
+          "target_view": "prompt-constraint",
+          "reason": "The request mentions execution and review concerns, but the primary deliverable is guidance rather than orchestration flow."
+        }
+      ],
+      "views": [
+        {
+          "target_view": "domain-model",
+          "projection_type": "domain_model_projection",
+          "status": "READY",
+          "path": "task-execution/task-execution.domain-model.projection.json"
+        },
+        {
+          "target_view": "prompt-constraint",
+          "projection_type": "prompt_constraint_projection",
+          "status": "READY",
+          "path": "task-execution/task-execution.prompt-constraint.projection.json"
+        },
+        {
+          "target_view": "workflow-contract",
+          "projection_type": "workflow_contract_projection",
+          "status": "READY",
+          "path": "task-execution/task-execution.workflow-contract.projection.json"
+        }
+      ]
+    },
+    {
+      "domain_slug": "tool-orchestration",
+      "intent_keywords": [
+        "tool orchestration",
+        "workflow orchestration",
+        "execution steps",
+        "planner flow",
+        "workflow contract"
+      ],
+      "default_target_view": "workflow-contract",
+      "example_requests": [
+        {
+          "request": "给 tool orchestration 生成 planner / workflow contract",
+          "target_view": "workflow-contract",
+          "reason": "The request explicitly asks for orchestration flow, planner edges, or execution preconditions."
+        },
+        {
+          "request": "给 tool orchestration 约束 prompt 术语和推理路径",
+          "target_view": "prompt-constraint",
+          "reason": "The request is about prompt-side orchestration rules, not code structure."
+        },
+        {
+          "request": "把 tool orchestration 的核心对象和路由规则建模",
+          "target_view": "domain-model",
+          "reason": "The request is about entities, value objects, enums, and runtime policy."
+        },
+        {
+          "request": "给 tool orchestration 做一个执行步骤图，并保留 gating condition",
+          "target_view": "workflow-contract",
+          "reason": "The request emphasizes explicit orchestration flow and blocking execution conditions."
+        }
+      ],
+      "views": [
+        {
+          "target_view": "domain-model",
+          "projection_type": "domain_model_projection",
+          "status": "READY",
+          "path": "tool-orchestration/tool-orchestration.domain-model.projection.json"
+        },
+        {
+          "target_view": "prompt-constraint",
+          "projection_type": "prompt_constraint_projection",
+          "status": "READY",
+          "path": "tool-orchestration/tool-orchestration.prompt-constraint.projection.json"
+        },
+        {
+          "target_view": "workflow-contract",
+          "projection_type": "workflow_contract_projection",
+          "status": "READY",
+          "path": "tool-orchestration/tool-orchestration.workflow-contract.projection.json"
+        }
+      ]
+    }
+  ]
+}
