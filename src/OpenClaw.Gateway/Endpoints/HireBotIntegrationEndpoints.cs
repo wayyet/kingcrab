@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using OpenClaw.Core.Models;
 using OpenClaw.Core.Security;
 using OpenClaw.Gateway.Bootstrap;
@@ -16,21 +17,22 @@ namespace OpenClaw.Gateway.Endpoints;
 internal static class HireBotIntegrationEndpoints
 {
     private const string HireBotChannelId = "hirebot";
-    private const string RuntimeSkillName = "runtime.hirebot.agent";
     private static readonly ConcurrentDictionary<string, HireBotState> States = new(StringComparer.OrdinalIgnoreCase);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true,
         PropertyNameCaseInsensitive = true
     };
+    private static readonly Regex SkillNamePattern = new("^[a-zA-Z0-9][a-zA-Z0-9_\\-]{0,63}$", RegexOptions.Compiled);
+    private const long SkillPackageMaxBytes = 20 * 1024 * 1024;
 
     private static readonly StageSkillMapping[] StageSkills =
     [
-        new(HireStages.Goal, RuntimeSkillName, ["business_goal", "owner", "success_metric"], "通过 Runtime 收集目标信息"),
-        new(HireStages.Scenario, RuntimeSkillName, ["user_profile", "trigger_event", "expected_outcome"], "通过 Runtime 收集业务场景"),
-        new(HireStages.Systems, RuntimeSkillName, ["system_list", "permission_scope", "data_sources"], "通过 Runtime 收集系统与权限"),
-        new(HireStages.Gaps, RuntimeSkillName, ["blockers", "risk_level", "fallback_plan"], "通过 Runtime 收集风险与缺口"),
-        new(HireStages.Package, RuntimeSkillName, ["runbook", "acceptance_criteria", "delivery_window"], "通过 Runtime 生成交付准备信息"),
+        new(HireStages.Goal, "skill.hirebot.goal.collect", ["business_goal", "owner", "success_metric"], "收集雇佣目标、负责人和成功标准"),
+        new(HireStages.Scenario, "skill.hirebot.scenario.collect", ["user_profile", "trigger_event", "expected_outcome"], "收集业务场景、触发条件和期望结果"),
+        new(HireStages.Systems, "skill.hirebot.systems.collect", ["system_list", "permission_scope", "data_sources"], "收集系统清单、权限范围和数据来源"),
+        new(HireStages.Gaps, "skill.hirebot.gaps.collect", ["blockers", "risk_level", "fallback_plan"], "收集风险缺口与回退方案"),
+        new(HireStages.Package, "skill.hirebot.package.prepare", ["runbook", "acceptance_criteria", "delivery_window"], "收集交付运行手册、验收标准和交付窗口"),
     ];
 
     public static void MapOpenClawHireBotIntegrationEndpoints(
@@ -81,6 +83,7 @@ internal static class HireBotIntegrationEndpoints
                     ChannelId = HireBotChannelId,
                     SenderId = senderId,
                     VolumePath = volumePath,
+                    RequiredSkillNames = NormalizeSkillNames(request.RequiredSkillNames),
                     Status = HireStatuses.Ready,
                     CollectionPhase = HireCollectionPhases.NotStarted,
                     CurrentStage = HireStages.Goal,
@@ -192,7 +195,10 @@ internal static class HireBotIntegrationEndpoints
                         statusCode: StatusCodes.Status409Conflict);
                 }
 
-                state.CollectionPhase = HireCollectionPhases.InProgress;
+                state.CollectionPhase = state.Messages.Any(static message =>
+                    string.Equals(message.Role, "user", StringComparison.OrdinalIgnoreCase))
+                    ? HireCollectionPhases.InProgress
+                    : HireCollectionPhases.NotStarted;
                 state.UpdatedAtUtc = DateTimeOffset.UtcNow;
             }
 
@@ -229,7 +235,11 @@ internal static class HireBotIntegrationEndpoints
             }
 
             var userText = string.IsNullOrWhiteSpace(request.Content) ? "补充信息" : request.Content.Trim();
-            var outboundText = BuildRuntimePrompt(userText, request.StructuredAnswers);
+            string outboundText;
+            lock (state.SyncRoot)
+            {
+                outboundText = BuildRuntimePrompt(state, userText, request.StructuredAnswers);
+            }
             var baselineAssistantCount = await CountAssistantTurnsAsync(runtime, state.SessionId, ctx.RequestAborted);
 
             await facade.QueueMessageAsync(
@@ -259,10 +269,6 @@ internal static class HireBotIntegrationEndpoints
 
             lock (state.SyncRoot)
             {
-                state.CollectionPhase = HireCollectionPhases.InProgress;
-                state.CurrentStage = ResolveStageByUserTurnCount(state.Messages.Count(static x => string.Equals(x.Role, "user", StringComparison.OrdinalIgnoreCase)) + 1);
-                state.UpdatedAtUtc = DateTimeOffset.UtcNow;
-
                 var userMessage = new ConversationMessage(
                     MessageId: $"msg_{Guid.NewGuid():N}",
                     Role: "user",
@@ -284,6 +290,12 @@ internal static class HireBotIntegrationEndpoints
                         state.CollectedFields[pair.Key] = pair.Value;
                     }
                 }
+
+                state.CurrentStage = ResolveCurrentStage(state.CollectedFields);
+                state.CollectionPhase = IsCollectionReadyForFinalize(state.CollectedFields)
+                    ? HireCollectionPhases.ReadyForFinalize
+                    : HireCollectionPhases.InProgress;
+                state.UpdatedAtUtc = DateTimeOffset.UtcNow;
 
                 preview = BuildStagePreview(state, request.StructuredAnswers, assistantContent);
                 state.LatestPreview = preview;
@@ -370,10 +382,12 @@ internal static class HireBotIntegrationEndpoints
 
             lock (state.SyncRoot)
             {
+                var stageName = request.Stage.Trim().ToUpperInvariant();
+                var stageSkill = ResolveStageSkillMapping(stageName);
                 state.AuditLogs.Add(new AuditLog(
                     LogId: $"audit_{Guid.NewGuid():N}",
-                    Stage: request.Stage.Trim().ToUpperInvariant(),
-                    SkillName: RuntimeSkillName,
+                    Stage: stageName,
+                    SkillName: stageSkill.SkillName,
                     Decision: request.Decision.Trim().ToUpperInvariant(),
                     Actor: ResolveOwnerSubject(ctx, state.TenantId, state.OperatorId),
                     Comment: request.Comment,
@@ -955,17 +969,44 @@ internal static class HireBotIntegrationEndpoints
         return new string(buffer);
     }
 
-    private static string BuildRuntimePrompt(string content, IReadOnlyDictionary<string, string>? structuredAnswers)
+    private static string BuildRuntimePrompt(
+        HireBotState state,
+        string content,
+        IReadOnlyDictionary<string, string>? structuredAnswers)
     {
-        if (structuredAnswers is null || structuredAnswers.Count == 0)
+        var stageSkill = ResolveStageSkillMapping(state.CurrentStage);
+        var mergedFields = new Dictionary<string, string?>(state.CollectedFields, StringComparer.OrdinalIgnoreCase);
+        if (structuredAnswers is not null)
         {
-            return content;
+            foreach (var pair in structuredAnswers)
+            {
+                mergedFields[pair.Key] = pair.Value;
+            }
         }
 
+        var missingFields = ResolveMissingFields(stageSkill, mergedFields);
         var builder = new StringBuilder();
-        builder.AppendLine(content);
+        builder.AppendLine($"[CURRENT_STAGE] {state.CurrentStage}");
+        builder.AppendLine($"[STAGE_SKILL] {stageSkill.SkillName}");
+        builder.AppendLine($"[STAGE_TARGET] {stageSkill.Description}");
+        builder.AppendLine($"[REQUIRED_FIELDS] {string.Join(", ", stageSkill.RequiredFields)}");
+        builder.AppendLine($"[MISSING_FIELDS] {(missingFields.Count == 0 ? "none" : string.Join(", ", missingFields))}");
+        builder.AppendLine("[REPLY_RULES]");
+        builder.AppendLine("1. 使用简体中文回复，聚焦当前阶段信息收集。");
+        builder.AppendLine("2. 先确认已收集信息，再追问缺失字段。");
+        builder.AppendLine("3. 不要编造事实，未知项直接说明待补充。");
+        builder.AppendLine("4. 当前阶段字段齐全时，提示可进入下一阶段。");
         builder.AppendLine();
-        builder.AppendLine("以下是结构化补充信息：");
+        builder.AppendLine("[USER_INPUT]");
+        builder.AppendLine(content);
+
+        if (structuredAnswers is null || structuredAnswers.Count == 0)
+        {
+            return builder.ToString();
+        }
+
+        builder.AppendLine();
+        builder.AppendLine("[STRUCTURED_ANSWERS]");
         foreach (var pair in structuredAnswers.OrderBy(static x => x.Key, StringComparer.OrdinalIgnoreCase))
         {
             builder.Append("- ");
@@ -1025,6 +1066,7 @@ internal static class HireBotIntegrationEndpoints
         IReadOnlyDictionary<string, string>? structuredAnswers,
         string assistantSummary)
     {
+        var stageSkill = ResolveStageSkillMapping(state.CurrentStage);
         var structuredData = new Dictionary<string, string?>(state.CollectedFields, StringComparer.OrdinalIgnoreCase);
         if (structuredAnswers is not null)
         {
@@ -1034,33 +1076,65 @@ internal static class HireBotIntegrationEndpoints
             }
         }
 
-        var missing = structuredData.Count == 0 ? new[] { "structured_answers" } : Array.Empty<string>();
-        var riskNotes = missing.Length == 0
-            ? new[] { "已接入 Runtime 对话链路，建议上线前配置业务白名单和审计策略。" }
-            : new[] { "未提供结构化字段，建议补充关键配置项。" };
+        var missing = ResolveMissingFields(stageSkill, structuredData);
+        var collectionReady = IsCollectionReadyForFinalize(structuredData);
+        var riskNotes = missing.Count == 0
+            ? collectionReady
+                ? new[] { "全部阶段字段已收集完成，可执行 finalize 生成交付包。" }
+                : new[] { "当前阶段字段已齐全，可继续下一阶段信息收集。" }
+            : new[] { $"当前阶段仍缺少字段：{string.Join("、", missing)}" };
 
         return new StagePreview(
             HireId: state.HireId,
             Stage: state.CurrentStage,
-            SkillName: RuntimeSkillName,
+            SkillName: stageSkill.SkillName,
             Summary: assistantSummary.Length > 240 ? assistantSummary[..240] : assistantSummary,
             StructuredData: structuredData,
             MissingFields: missing,
             RiskNotes: riskNotes,
-            ReadyForAudit: missing.Length == 0,
+            ReadyForAudit: missing.Count == 0,
             GeneratedAt: DateTimeOffset.UtcNow);
     }
 
-    private static string ResolveStageByUserTurnCount(int userTurnCount)
+    private static StageSkillMapping ResolveStageSkillMapping(string stage)
     {
-        return userTurnCount switch
+        return StageSkills.FirstOrDefault(skill =>
+                   string.Equals(skill.Stage, stage, StringComparison.OrdinalIgnoreCase))
+               ?? StageSkills[0];
+    }
+
+    private static IReadOnlyList<string> ResolveMissingFields(
+        StageSkillMapping stageSkill,
+        IReadOnlyDictionary<string, string?> structuredData)
+    {
+        var missing = new List<string>();
+        foreach (var field in stageSkill.RequiredFields)
         {
-            <= 1 => HireStages.Goal,
-            2 => HireStages.Scenario,
-            3 => HireStages.Systems,
-            4 => HireStages.Gaps,
-            _ => HireStages.Package
-        };
+            if (!structuredData.TryGetValue(field, out var value) || string.IsNullOrWhiteSpace(value))
+            {
+                missing.Add(field);
+            }
+        }
+
+        return missing;
+    }
+
+    private static string ResolveCurrentStage(IReadOnlyDictionary<string, string?> structuredData)
+    {
+        foreach (var stageSkill in StageSkills)
+        {
+            if (ResolveMissingFields(stageSkill, structuredData).Count > 0)
+            {
+                return stageSkill.Stage;
+            }
+        }
+
+        return HireStages.Package;
+    }
+
+    private static bool IsCollectionReadyForFinalize(IReadOnlyDictionary<string, string?> structuredData)
+    {
+        return StageSkills.All(stageSkill => ResolveMissingFields(stageSkill, structuredData).Count == 0);
     }
 
     private static string ComputeDigest(string value)
@@ -1304,6 +1378,7 @@ internal static class HireBotIntegrationEndpoints
     {
         public const string NotStarted = "NOT_STARTED";
         public const string InProgress = "IN_PROGRESS";
+        public const string ReadyForFinalize = "READY_FOR_FINALIZE";
         public const string Finalized = "FINALIZED";
     }
 
