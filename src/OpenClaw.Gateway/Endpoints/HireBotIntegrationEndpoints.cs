@@ -3,7 +3,6 @@ using System.IO.Compression;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using OpenClaw.Core.Models;
 using OpenClaw.Core.Security;
 using OpenClaw.Gateway.Bootstrap;
@@ -23,8 +22,6 @@ internal static class HireBotIntegrationEndpoints
         WriteIndented = true,
         PropertyNameCaseInsensitive = true
     };
-    private static readonly Regex SkillNamePattern = new("^[a-zA-Z0-9][a-zA-Z0-9_\\-]{0,63}$", RegexOptions.Compiled);
-    private const long SkillPackageMaxBytes = 20 * 1024 * 1024;
 
     private static readonly StageSkillMapping[] StageSkills =
     [
@@ -83,7 +80,6 @@ internal static class HireBotIntegrationEndpoints
                     ChannelId = HireBotChannelId,
                     SenderId = senderId,
                     VolumePath = volumePath,
-                    RequiredSkillNames = NormalizeSkillNames(request.RequiredSkillNames),
                     Status = HireStatuses.Ready,
                     CollectionPhase = HireCollectionPhases.NotStarted,
                     CurrentStage = HireStages.Goal,
