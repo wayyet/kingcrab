@@ -425,6 +425,8 @@ consumer 侧此时要做的不是重写 projection，而是：
 
 如果你要把这套方法迁移到一个新的业务 Skill，最小清单如下。
 
+如果团队还需要把 `producer 模板 schema` 与 `runtime contract schema` 的边界固化成固定流程，可继续配合 `docs/skill-projection-schema-migration-checklist.md` 使用。
+
 1. 在 `ncrew-ontology` 中先产出一份通过校验的 JSON slice；如需评审或人读说明，可再补一份配套 Markdown。
 2. 复制 `PROJECTION_TEMPLATE.json`，按交付视图从 slice 显式映射并产出至少一个通过校验的 `*.projection.json`。
 3. 在 consumer skill 下创建 `contracts/projections/<producer>/contract-index.json`。

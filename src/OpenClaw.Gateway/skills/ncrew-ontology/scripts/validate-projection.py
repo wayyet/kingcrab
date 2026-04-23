@@ -114,6 +114,17 @@ def test_schema_node(value: Any, schema_node: Any, schema_root: Any, path: str, 
     if schema is None:
         return
 
+    if isinstance(schema, dict) and "allOf" in schema:
+        for clause in schema["allOf"]:
+            test_schema_node(value, clause, schema_root, path, validation_issues)
+
+    if isinstance(schema, dict) and "if" in schema:
+        condition_errors: list[str] = []
+        test_schema_node(value, schema["if"], schema_root, path, condition_errors)
+        branch_name = "then" if not condition_errors else "else"
+        if branch_name in schema:
+            test_schema_node(value, schema[branch_name], schema_root, path, validation_issues)
+
     if isinstance(schema, dict) and "oneOf" in schema:
         matched = 0
         for option in schema["oneOf"]:

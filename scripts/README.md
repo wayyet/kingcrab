@@ -169,6 +169,51 @@ c:/python314/python.exe .\scripts\validate-ontology-projection.py .\projection-a
 
 ---
 
+### Runtime Contract 校验入口
+
+如果目标不是校验 producer 侧的 `PROJECTION_TEMPLATE.json`，而是校验 consumer skill 内真正进入 runtime 的 projection contracts，则根目录提供 `contract-index.json` 的专用入口，`*.projection.json` 则建议显式绑定 runtime schema 执行。
+
+#### contract-index.json
+
+| 入口 | 参数 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| PowerShell | `Paths` | `src/OpenClaw.Gateway/skills/software-developer/contracts/projections/ncrew-ontology/contract-index.json` | 一个或多个 `contract-index.json` 路径；不传时校验仓库内真实样例 |
+| PowerShell | `-SchemaPath` | `docs/skill-projection-contract-index.schema.json` | 可选，显式指定 runtime contract index schema |
+| Python | `paths` | `src/OpenClaw.Gateway/skills/software-developer/contracts/projections/ncrew-ontology/contract-index.json` | 一个或多个 `contract-index.json` 路径；不传时校验仓库内真实样例 |
+| Python | `--schema-path` | `docs/skill-projection-contract-index.schema.json` | 可选，显式指定 runtime contract index schema |
+
+**常用命令：**
+
+```powershell
+# 校验真实 contract-index 样例
+# PowerShell
+.\scripts\validate-skill-projection-contract-index.ps1
+
+# Python
+c:/python314/python.exe .\scripts\validate-skill-projection-contract-index.py
+```
+
+#### *.projection.json
+
+运行时 projection contract 的基线 schema 不再是 `templates/PROJECTION_TEMPLATE.schema.json`，而是 `docs/skill-projection-document.schema.json`。根目录现在提供专用入口，无需再手工拼接 `-SchemaPath`：
+
+```powershell
+# PowerShell
+.\scripts\validate-skill-projection-document.ps1
+
+# Python
+c:/python314/python.exe .\scripts\validate-skill-projection-document.py
+```
+
+**基线说明：**
+
+- `templates/PROJECTION_TEMPLATE.schema.json` 仍用于 producer 侧产物模板校验
+- `docs/skill-projection-contract-index.schema.json` 用于 runtime `contract-index.json`
+- `docs/skill-projection-document.schema.json` 用于 runtime `*.projection.json`
+- runtime 会把 `dropped_items` 与 `open_questions` 归一化为可显示文本，因此这两组字段既允许字符串数组，也允许结构化对象数组
+
+---
+
 ## 典型工作流
 
 依赖变更时（apt 包 / Node / Playwright）：
@@ -203,6 +248,26 @@ ontology projection 校验：
 
 # Python
 c:/python314/python.exe .\scripts\validate-ontology-projection.py .\projection.json
+```
+
+runtime contract-index 校验：
+
+```powershell
+# PowerShell
+.\scripts\validate-skill-projection-contract-index.ps1
+
+# Python
+c:/python314/python.exe .\scripts\validate-skill-projection-contract-index.py
+```
+
+runtime projection contract 校验：
+
+```powershell
+# PowerShell
+.\scripts\validate-skill-projection-document.ps1
+
+# Python
+c:/python314/python.exe .\scripts\validate-skill-projection-document.py
 ```
 
 ## 镜像命名格式

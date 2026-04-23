@@ -389,7 +389,11 @@ function Test-ObjectProperty {
         return $Object.Keys -contains $PropertyName
     }
 
-    return $Object.PSObject.Properties.Name -contains $PropertyName
+    if ($Object -is [pscustomobject]) {
+        return $Object.PSObject.Properties.Name -contains $PropertyName
+    }
+
+    return $false
 }
 
 function Resolve-SchemaNode {
@@ -488,6 +492,21 @@ function Test-SchemaNode {
     $schema = Resolve-SchemaNode -SchemaRoot $SchemaRoot -SchemaNode $SchemaNode
     if ($null -eq $schema) {
         return
+    }
+
+    if (Test-ObjectProperty -Object $schema -PropertyName 'allOf') {
+        foreach ($clause in (Get-ObjectValue -Object $schema -PropertyName 'allOf')) {
+            Test-SchemaNode -Value $Value -SchemaNode $clause -SchemaRoot $SchemaRoot -Path $Path -ValidationIssues $ValidationIssues
+        }
+    }
+
+    if (Test-ObjectProperty -Object $schema -PropertyName 'if') {
+        $conditionErrors = New-Object System.Collections.ArrayList
+        Test-SchemaNode -Value $Value -SchemaNode (Get-ObjectValue -Object $schema -PropertyName 'if') -SchemaRoot $SchemaRoot -Path $Path -ValidationIssues $conditionErrors
+        $branchName = if ($conditionErrors.Count -eq 0) { 'then' } else { 'else' }
+        if (Test-ObjectProperty -Object $schema -PropertyName $branchName) {
+            Test-SchemaNode -Value $Value -SchemaNode (Get-ObjectValue -Object $schema -PropertyName $branchName) -SchemaRoot $SchemaRoot -Path $Path -ValidationIssues $ValidationIssues
+        }
     }
 
     if (Test-ObjectProperty -Object $schema -PropertyName 'oneOf') {

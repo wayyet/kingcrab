@@ -49,10 +49,10 @@
       }
     },
     "dropped_items": {
-      "$ref": "#/$defs/stringArray"
+      "$ref": "#/$defs/displayTextArray"
     },
     "open_questions": {
-      "$ref": "#/$defs/stringArray"
+      "$ref": "#/$defs/displayTextArray"
     },
     "meta": {
       "type": "object"
@@ -73,6 +73,22 @@
       "type": "array",
       "items": {
         "$ref": "#/$defs/nonEmptyString"
+      }
+    },
+    "displayTextArray": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/nonEmptyString"
+          },
+          {
+            "$ref": "#/$defs/droppedItem"
+          },
+          {
+            "$ref": "#/$defs/openQuestion"
+          }
+        ]
       }
     },
     "mappingPolicy": {
@@ -140,6 +156,42 @@
         "artifact_name",
         "artifact_type",
         "path"
+      ],
+      "additionalProperties": true
+    },
+    "droppedItem": {
+      "type": "object",
+      "properties": {
+        "item_type": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "item_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "reason": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "additionalProperties": true
+    },
+    "openQuestion": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "impact": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "required_input": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      },
+      "required": [
+        "question"
       ],
       "additionalProperties": true
     }

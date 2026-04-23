@@ -356,8 +356,8 @@ public static class SkillProjectionResolver
             MappingPolicy = mappingPolicy,
             PromptProjection = promptProjection,
             DeliveryArtifacts = deliveryArtifacts,
-            DroppedItems = ReadStringArray(root, "dropped_items"),
-            OpenQuestions = ReadStringArray(root, "open_questions")
+            DroppedItems = ReadDisplayArray(root, "dropped_items"),
+            OpenQuestions = ReadDisplayArray(root, "open_questions")
         };
     }
 
@@ -406,6 +406,77 @@ public static class SkillProjectionResolver
         }
 
         return values;
+    }
+
+    private static IReadOnlyList<string> ReadDisplayArray(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.Array)
+            return [];
+
+        var values = new List<string>();
+        foreach (var item in property.EnumerateArray())
+        {
+            var displayText = ToDisplayText(item);
+            if (!string.IsNullOrWhiteSpace(displayText))
+                values.Add(displayText);
+        }
+
+        return values;
+    }
+
+    private static string? ToDisplayText(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.String)
+            return string.IsNullOrWhiteSpace(element.GetString()) ? null : element.GetString();
+
+        if (element.ValueKind != JsonValueKind.Object)
+            return null;
+
+        if (TryBuildOpenQuestionText(element, out var openQuestionText))
+            return openQuestionText;
+
+        if (TryBuildDroppedItemText(element, out var droppedItemText))
+            return droppedItemText;
+
+        return element.GetRawText();
+    }
+
+    private static bool TryBuildOpenQuestionText(JsonElement element, out string? text)
+    {
+        text = GetOptionalString(element, "question");
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        var details = new List<string>();
+        var impact = GetOptionalString(element, "impact");
+        var requiredInput = GetOptionalString(element, "required_input");
+
+        if (!string.IsNullOrWhiteSpace(impact))
+            details.Add($"Impact: {impact}");
+
+        if (!string.IsNullOrWhiteSpace(requiredInput))
+            details.Add($"Required input: {requiredInput}");
+
+        if (details.Count > 0)
+            text = $"{text} ({string.Join("; ", details)})";
+
+        return true;
+    }
+
+    private static bool TryBuildDroppedItemText(JsonElement element, out string? text)
+    {
+        text = GetOptionalString(element, "reason");
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        var itemType = GetOptionalString(element, "item_type");
+        var itemId = GetOptionalString(element, "item_id");
+        var prefix = string.Join(" ", new[] { itemType, itemId }.Where(static value => !string.IsNullOrWhiteSpace(value)));
+
+        if (!string.IsNullOrWhiteSpace(prefix))
+            text = $"{prefix}: {text}";
+
+        return true;
     }
 
     private sealed record ProjectionScore<T>(T Item, int Score);

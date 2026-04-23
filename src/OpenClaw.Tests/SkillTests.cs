@@ -950,6 +950,145 @@ public class SkillProjectionResolverTests
     }
 
     [Fact]
+    public void ResolveForRequest_WithStructuredProjectionMetadata_BlocksAndBuildsReadablePatch()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"openclaw-projection-tests-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var relativePath = Path.Combine("task-execution", "task-execution.prompt-constraint.projection.json");
+            var projectionDir = Path.Combine(tempDir, "task-execution");
+            Directory.CreateDirectory(projectionDir);
+
+            File.WriteAllText(
+                Path.Combine(tempDir, relativePath),
+                """
+                {
+                  "mapping_policy": {
+                    "unresolved_item_policy": "record_only"
+                  },
+                  "prompt_projection": {
+                    "allowed_terms": ["skills_config"]
+                  },
+                  "delivery_artifacts": [],
+                  "dropped_items": [
+                    {
+                      "item_type": "concept",
+                      "item_id": "C2",
+                      "reason": "Projection keeps only the aggregate root in the runtime patch."
+                    }
+                  ],
+                  "open_questions": [
+                    {
+                      "question": "Should the managed path be treated as config or runtime state?",
+                      "impact": "This changes the chosen validation boundary.",
+                      "required_input": "Need a maintainer decision."
+                    }
+                  ]
+                }
+                """);
+
+            var skill = new SkillDefinition
+            {
+                Name = "software-developer",
+                Description = "Developer skill",
+                Instructions = "Base skill instructions.",
+                Location = "/skills/software-developer",
+                ProjectionContracts =
+                [
+                    new SkillProjectionContractSet
+                    {
+                        RootPath = tempDir,
+                        Index = new ProjectionContractIndex
+                        {
+                            DefaultSelectionPolicy = new ProjectionSelectionPolicy
+                            {
+                                PreferReadyOnly = true,
+                                BlockOnOpenQuestions = true
+                            },
+                            Topics =
+                            [
+                                new ProjectionTopicRecord
+                                {
+                                    DomainSlug = "task-execution",
+                                    DefaultTargetView = "prompt-constraint",
+                                    Views =
+                                    [
+                                        new ProjectionViewRecord
+                                        {
+                                            TargetView = "prompt-constraint",
+                                            Status = "READY",
+                                            Path = relativePath.Replace('\\', '/')
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ]
+            };
+
+            var blockedResolution = SkillProjectionResolver.ResolveForRequest(skill, "task execution", new TestLogger());
+
+            Assert.True(blockedResolution.IsBlocked);
+            Assert.Contains("blocking open questions", blockedResolution.BlockReason);
+
+            var unblockedSkill = new SkillDefinition
+            {
+                Name = skill.Name,
+                Description = skill.Description,
+                Instructions = skill.Instructions,
+                Location = skill.Location,
+                ProjectionContracts =
+                [
+                    new SkillProjectionContractSet
+                    {
+                        RootPath = tempDir,
+                        Index = new ProjectionContractIndex
+                        {
+                            DefaultSelectionPolicy = new ProjectionSelectionPolicy
+                            {
+                                PreferReadyOnly = true,
+                                BlockOnOpenQuestions = false
+                            },
+                            Topics =
+                            [
+                                new ProjectionTopicRecord
+                                {
+                                    DomainSlug = "task-execution",
+                                    DefaultTargetView = "prompt-constraint",
+                                    Views =
+                                    [
+                                        new ProjectionViewRecord
+                                        {
+                                            TargetView = "prompt-constraint",
+                                            Status = "READY",
+                                            Path = relativePath.Replace('\\', '/')
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ]
+            };
+
+            var unblockedResolution = SkillProjectionResolver.ResolveForRequest(unblockedSkill, "task execution", new TestLogger());
+
+            Assert.False(unblockedResolution.IsBlocked);
+
+            var patch = SkillProjectionResolver.BuildPromptPatch(unblockedResolution);
+            Assert.Contains("Dropped items:", patch);
+            Assert.Contains("concept C2: Projection keeps only the aggregate root in the runtime patch.", patch);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ResolveForRequest_WithMultipleContracts_SelectsHigherScoringProducer()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), $"openclaw-projection-tests-{Guid.NewGuid():N}");

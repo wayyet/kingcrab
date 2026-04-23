@@ -3,6 +3,7 @@
 本文为 `SkillProjection Contracts` 的显式 schema 说明，配套设计文档如下：
 
 - `docs/skill-projection-contracts-design.md`
+- `docs/skill-projection-schema-migration-checklist.md`
 
 与本文配套的机器可校验 schema 文件如下：
 
@@ -413,10 +414,10 @@
   说明：prompt patch 的核心输入
 - `delivery_artifacts: array`
   说明：仅解析结构，目前不直接参与 route scoring
-- `dropped_items: string[]`
-  说明：追加到 prompt patch 的补充信息
-- `open_questions: string[]`
-  说明：用于 blocking checks
+- `dropped_items: (string | object)[]`
+  说明：runtime 会归一化为可显示文本，再追加到 prompt patch
+- `open_questions: (string | object)[]`
+  说明：runtime 会归一化为可显示文本，并以归一化后的非空数组参与 blocking checks
 
 `Advisory-only` 字段：
 
@@ -511,18 +512,30 @@
 
 ### 4.6 dropped_items
 
-- 类型：`string[]`
+- 类型：`(string | object)[]`
 - 必填：否
 - 状态：`Runtime-consumed`
 - 用途：如果非空，会追加到 prompt patch 的 `Dropped items` 段落
+- 兼容基线：
+  - 可以是简单字符串数组
+  - 也可以是带 `item_type`、`item_id`、`reason` 的结构化对象数组
+- 归一化规则：
+  - 若存在 `reason`，runtime 会优先输出 `item_type item_id: reason`
+  - 若缺少上述字段，则退回对象原始 JSON 文本
 
 ### 4.7 open_questions
 
-- 类型：`string[]`
+- 类型：`(string | object)[]`
 - 必填：否
 - 状态：`Runtime-consumed`
 - 用途一：如果 `block_on_open_questions = true` 且该数组非空，则阻断
 - 用途二：如果 `mapping_policy.unresolved_item_policy = block_or_escalate` 且该数组非空，也会阻断
+- 兼容基线：
+  - 可以是简单字符串数组
+  - 也可以是带 `question`、`impact`、`required_input` 的结构化对象数组
+- 归一化规则：
+  - 若存在 `question`，runtime 会优先输出问题文本，并附带 `impact` / `required_input`
+  - 阻断判断只看归一化后的数组是否非空
 
 ## 5. 运行时实际使用到的字段清单
 
@@ -828,16 +841,35 @@ src/OpenClaw.Gateway/skills/software-developer/contracts/projections/ncrew-ontol
 
 ### 9.3 最后做显式 schema 校验
 
-如果环境里有 JSON Schema 校验器，建议至少校验：
+当前仓库内建议直接用统一命令完成这一步，而不是依赖环境外 JSON Schema 工具。
 
-- 一个真实 `contract-index.json`
-- 一个真实 `*.projection.json`
+`contract-index.json`：
 
-例如可以用支持 draft 2020-12 的校验器，直接对 `docs/` 下的 schema 和真实 contract 文件做验证。
+```powershell
+# PowerShell
+.\scripts\validate-skill-projection-contract-index.ps1
 
-当前仓库已确认的环境限制是：
+# Python
+c:/python314/python.exe .\scripts\validate-skill-projection-contract-index.py
+```
 
-- PowerShell 会话里不一定有可直接使用的 `Test-Json`
+`*.projection.json`：
+
+```powershell
+# PowerShell
+.\scripts\validate-skill-projection-document.ps1
+
+# Python
+c:/python314/python.exe .\scripts\validate-skill-projection-document.py
+```
+
+最小基线要求：
+
+- 至少校验一个真实 `contract-index.json`
+- 至少校验一个真实 `*.projection.json`
+- `contract-index.json` 使用 `docs/skill-projection-contract-index.schema.json`
+- `*.projection.json` 使用 `docs/skill-projection-document.schema.json`
+- producer 侧模板仍继续使用 `templates/PROJECTION_TEMPLATE.schema.json`
 - Python 环境默认可能没有 `jsonschema` 模块
 
 因此在没有额外工具依赖时，维护上的最低可执行标准是：
