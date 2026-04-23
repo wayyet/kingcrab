@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using System.IO;
 using System.IO.Compression;
 using System.Security.Claims;
 using System.Text;
@@ -154,7 +155,7 @@ internal static class HireBotIntegrationEndpoints
                 return failure;
             }
 
-            if (!TryGetStateForCaller(ctx, hireId, out var state, out var ownerFailure))
+            if (!TryGetStateForCaller(ctx, startup.Config, logger, hireId, out var state, out var ownerFailure))
             {
                 return ownerFailure!;
             }
@@ -169,7 +170,7 @@ internal static class HireBotIntegrationEndpoints
                 CurrentStage: state.CurrentStage));
         });
 
-        group.MapPost("/hirings/{hireId}/conversation/start", (HttpContext ctx, string hireId) =>
+        group.MapPost("/hirings/{hireId}/conversation/start", async (HttpContext ctx, string hireId) =>
         {
             var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, "hirebot_http_start", requireCsrf: false);
             if (failure is not null)
@@ -177,33 +178,44 @@ internal static class HireBotIntegrationEndpoints
                 return failure;
             }
 
-            if (!TryGetStateForCaller(ctx, hireId, out var state, out var ownerFailure))
+            if (!TryGetStateForCaller(ctx, startup.Config, logger, hireId, out var state, out var ownerFailure))
             {
                 return ownerFailure!;
             }
 
+            IResult? lockedFailure = null;
+            StartConversationResult? response = null;
             lock (state.SyncRoot)
             {
                 if (state.Status != HireStatuses.Ready)
                 {
-                    return Results.Json(
+                    lockedFailure = Results.Json(
                         new { message = "实例未就绪，请稍后重试" },
                         statusCode: StatusCodes.Status409Conflict);
                 }
-
-                state.CollectionPhase = state.Messages.Any(static message =>
-                    string.Equals(message.Role, "user", StringComparison.OrdinalIgnoreCase))
-                    ? HireCollectionPhases.InProgress
-                    : HireCollectionPhases.NotStarted;
-                state.UpdatedAtUtc = DateTimeOffset.UtcNow;
+                else
+                {
+                    state.CollectionPhase = state.Messages.Any(static message =>
+                        string.Equals(message.Role, "user", StringComparison.OrdinalIgnoreCase))
+                        ? HireCollectionPhases.InProgress
+                        : HireCollectionPhases.NotStarted;
+                    state.UpdatedAtUtc = DateTimeOffset.UtcNow;
+                    response = new StartConversationResult(
+                        HireId: state.HireId,
+                        SessionId: state.SessionId,
+                        CurrentStage: state.CurrentStage,
+                        RequiresAudit: false,
+                        StageSkills: StageSkills);
+                }
             }
 
-            return Results.Json(new StartConversationResult(
-                HireId: state.HireId,
-                SessionId: state.SessionId,
-                CurrentStage: state.CurrentStage,
-                RequiresAudit: false,
-                StageSkills: StageSkills));
+            if (lockedFailure is not null)
+            {
+                return lockedFailure;
+            }
+
+            await PersistConversationToSandboxAsync(state, startup.Config, logger, ctx.RequestAborted);
+            return Results.Json(response!);
         });
 
         group.MapPost("/hirings/{hireId}/conversation/messages", async (HttpContext ctx, string hireId) =>
@@ -214,7 +226,7 @@ internal static class HireBotIntegrationEndpoints
                 return failure;
             }
 
-            if (!TryGetStateForCaller(ctx, hireId, out var state, out var ownerFailure))
+            if (!TryGetStateForCaller(ctx, startup.Config, logger, hireId, out var state, out var ownerFailure))
             {
                 return ownerFailure!;
             }
@@ -316,7 +328,7 @@ internal static class HireBotIntegrationEndpoints
                 return failure;
             }
 
-            if (!TryGetStateForCaller(ctx, hireId, out var state, out var ownerFailure))
+            if (!TryGetStateForCaller(ctx, startup.Config, logger, hireId, out var state, out var ownerFailure))
             {
                 return ownerFailure!;
             }
@@ -345,7 +357,7 @@ internal static class HireBotIntegrationEndpoints
                 return failure;
             }
 
-            if (!TryGetStateForCaller(ctx, hireId, out var state, out var ownerFailure))
+            if (!TryGetStateForCaller(ctx, startup.Config, logger, hireId, out var state, out var ownerFailure))
             {
                 return ownerFailure!;
             }
@@ -365,7 +377,7 @@ internal static class HireBotIntegrationEndpoints
                 return failure;
             }
 
-            if (!TryGetStateForCaller(ctx, hireId, out var state, out var ownerFailure))
+            if (!TryGetStateForCaller(ctx, startup.Config, logger, hireId, out var state, out var ownerFailure))
             {
                 return ownerFailure!;
             }
@@ -393,6 +405,8 @@ internal static class HireBotIntegrationEndpoints
                 state.UpdatedAtUtc = DateTimeOffset.UtcNow;
             }
 
+            await PersistConversationToSandboxAsync(state, startup.Config, logger, ctx.RequestAborted);
+
             return Results.Json(new AuditDecisionResult(
                 HireId: state.HireId,
                 Stage: request.Stage.Trim().ToUpperInvariant(),
@@ -410,7 +424,7 @@ internal static class HireBotIntegrationEndpoints
                 return failure;
             }
 
-            if (!TryGetStateForCaller(ctx, hireId, out var state, out var ownerFailure))
+            if (!TryGetStateForCaller(ctx, startup.Config, logger, hireId, out var state, out var ownerFailure))
             {
                 return ownerFailure!;
             }
@@ -431,7 +445,7 @@ internal static class HireBotIntegrationEndpoints
                 return failure;
             }
 
-            if (!TryGetStateForCaller(ctx, hireId, out var state, out var ownerFailure))
+            if (!TryGetStateForCaller(ctx, startup.Config, logger, hireId, out var state, out var ownerFailure))
             {
                 return ownerFailure!;
             }
@@ -474,7 +488,7 @@ internal static class HireBotIntegrationEndpoints
                 return failure;
             }
 
-            if (!TryGetStateForCaller(ctx, hireId, out var state, out var ownerFailure))
+            if (!TryGetStateForCaller(ctx, startup.Config, logger, hireId, out var state, out var ownerFailure))
             {
                 return ownerFailure!;
             }
@@ -502,7 +516,7 @@ internal static class HireBotIntegrationEndpoints
                 return failure;
             }
 
-            if (!TryGetStateForCaller(ctx, hireId, out var state, out var ownerFailure))
+            if (!TryGetStateForCaller(ctx, startup.Config, logger, hireId, out var state, out var ownerFailure))
             {
                 return ownerFailure!;
             }
@@ -527,7 +541,7 @@ internal static class HireBotIntegrationEndpoints
                 return failure;
             }
 
-            if (!TryGetStateForCaller(ctx, hireId, out var state, out var ownerFailure))
+            if (!TryGetStateForCaller(ctx, startup.Config, logger, hireId, out var state, out var ownerFailure))
             {
                 return ownerFailure!;
             }
@@ -584,14 +598,27 @@ internal static class HireBotIntegrationEndpoints
         return null;
     }
 
-    private static bool TryGetStateForCaller(HttpContext ctx, string hireId, out HireBotState state, out IResult? failure)
+    private static bool TryGetStateForCaller(HttpContext ctx, GatewayConfig config, ILogger logger, string hireId, out HireBotState state, out IResult? failure)
     {
         failure = null;
         state = default!;
-        if (string.IsNullOrWhiteSpace(hireId) || !States.TryGetValue(hireId.Trim(), out state!))
+        if (string.IsNullOrWhiteSpace(hireId))
         {
             failure = Results.NotFound(new { message = "雇佣流程不存在" });
             return false;
+        }
+
+        var normalizedHireId = hireId.Trim();
+        if (!States.TryGetValue(normalizedHireId, out state!))
+        {
+            if (!TryRestoreStateFromSnapshot(config, logger, normalizedHireId, out state))
+            {
+                failure = Results.NotFound(new { message = "雇佣流程不存在" });
+                return false;
+            }
+
+            States[normalizedHireId] = state;
+            logger.LogInformation("从持久化快照恢复 HireBot 状态: HireId={HireId}, SandboxId={SandboxId}", state.HireId, state.SandboxId);
         }
 
         var caller = ResolveOwnerSubject(ctx, state.TenantId, state.OperatorId);
@@ -603,6 +630,34 @@ internal static class HireBotIntegrationEndpoints
         }
 
         return true;
+    }
+
+    private static bool TryRestoreStateFromSnapshot(GatewayConfig config, ILogger logger, string hireId, out HireBotState state)
+    {
+        state = default!;
+        var snapshotPath = BuildSnapshotFilePath(config, hireId);
+        if (!File.Exists(snapshotPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            var json = File.ReadAllText(snapshotPath);
+            var snapshot = JsonSerializer.Deserialize<HireBotStateSnapshot>(json, JsonOptions);
+            if (snapshot is null)
+            {
+                return false;
+            }
+
+            state = snapshot.ToState();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "读取 HireBot 状态快照失败: Path={SnapshotPath}, HireId={HireId}", snapshotPath, hireId);
+            return false;
+        }
     }
 
     private static string ResolveOwnerSubject(HttpContext ctx, string tenantId, string operatorId)
@@ -943,6 +998,29 @@ internal static class HireBotIntegrationEndpoints
         }
 
         return "/workspace/hirebot-data";
+    }
+
+    private static string ResolveSnapshotRoot(GatewayConfig config)
+    {
+        var envValue = Environment.GetEnvironmentVariable("HIREBOT_STATE_SNAPSHOT_ROOT");
+        if (!string.IsNullOrWhiteSpace(envValue))
+        {
+            return Path.GetFullPath(envValue.Trim());
+        }
+
+        var storageRoot = string.IsNullOrWhiteSpace(config.Memory.StoragePath)
+            ? "./memory"
+            : config.Memory.StoragePath;
+        var absoluteStorageRoot = Path.IsPathRooted(storageRoot)
+            ? storageRoot
+            : Path.GetFullPath(storageRoot, AppContext.BaseDirectory);
+        return Path.Combine(absoluteStorageRoot, "hirebot-snapshots");
+    }
+
+    private static string BuildSnapshotFilePath(GatewayConfig config, string hireId)
+    {
+        var root = ResolveSnapshotRoot(config);
+        return Path.Combine(root, $"{SanitizePathSegment(hireId)}.json");
     }
 
     private static string SanitizePathSegment(string value)
@@ -1288,6 +1366,38 @@ internal static class HireBotIntegrationEndpoints
         {
             logger.LogWarning(ex, "写入 HireBot 数据卷失败: HireId={HireId}, SandboxId={SandboxId}", state.HireId, state.SandboxId);
         }
+
+        await PersistSnapshotToDiskAsync(state, config, logger, cancellationToken);
+    }
+
+    private static async Task PersistSnapshotToDiskAsync(
+        HireBotState state,
+        GatewayConfig config,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            HireBotStateSnapshot snapshot;
+            lock (state.SyncRoot)
+            {
+                snapshot = HireBotStateSnapshot.FromState(state);
+            }
+
+            var snapshotPath = BuildSnapshotFilePath(config, state.HireId);
+            var snapshotDirectory = Path.GetDirectoryName(snapshotPath);
+            if (!string.IsNullOrWhiteSpace(snapshotDirectory))
+            {
+                Directory.CreateDirectory(snapshotDirectory);
+            }
+
+            var payload = JsonSerializer.Serialize(snapshot, JsonOptions);
+            await File.WriteAllTextAsync(snapshotPath, payload, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "写入 HireBot 状态快照失败: HireId={HireId}", state.HireId);
+        }
     }
 
     private static async Task PersistArtifactsToSandboxAsync(
@@ -1365,6 +1475,120 @@ internal static class HireBotIntegrationEndpoints
         public object SyncRoot { get; } = new();
     }
 
+    private sealed class HireBotStateSnapshot
+    {
+        public required string HireId { get; init; }
+        public required string TemplateId { get; init; }
+        public required string TenantId { get; init; }
+        public required string OperatorId { get; init; }
+        public required string OwnerSubject { get; init; }
+        public required string SandboxId { get; init; }
+        public required string SessionId { get; init; }
+        public required string ChannelId { get; init; }
+        public required string SenderId { get; init; }
+        public required string VolumePath { get; init; }
+        public required string Status { get; init; }
+        public string? ErrorCode { get; init; }
+        public string? ErrorMessage { get; init; }
+        public required string CollectionPhase { get; init; }
+        public required string CurrentStage { get; init; }
+        public required DateTimeOffset CreatedAtUtc { get; init; }
+        public required DateTimeOffset UpdatedAtUtc { get; init; }
+        public List<ConversationMessage> Messages { get; init; } = [];
+        public Dictionary<string, string?> CollectedFields { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+        public StagePreview? LatestPreview { get; init; }
+        public List<AuditLog> AuditLogs { get; init; } = [];
+        public Dictionary<string, byte[]> ArtifactFiles { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+        public byte[]? ArtifactArchive { get; init; }
+        public string? ArtifactArchiveFileName { get; init; }
+
+        public static HireBotStateSnapshot FromState(HireBotState state)
+        {
+            return new HireBotStateSnapshot
+            {
+                HireId = state.HireId,
+                TemplateId = state.TemplateId,
+                TenantId = state.TenantId,
+                OperatorId = state.OperatorId,
+                OwnerSubject = state.OwnerSubject,
+                SandboxId = state.SandboxId,
+                SessionId = state.SessionId,
+                ChannelId = state.ChannelId,
+                SenderId = state.SenderId,
+                VolumePath = state.VolumePath,
+                Status = state.Status,
+                ErrorCode = state.ErrorCode,
+                ErrorMessage = state.ErrorMessage,
+                CollectionPhase = state.CollectionPhase,
+                CurrentStage = state.CurrentStage,
+                CreatedAtUtc = state.CreatedAtUtc,
+                UpdatedAtUtc = state.UpdatedAtUtc,
+                Messages = state.Messages.ToList(),
+                CollectedFields = state.CollectedFields.ToDictionary(
+                    static pair => pair.Key,
+                    static pair => pair.Value,
+                    StringComparer.OrdinalIgnoreCase),
+                LatestPreview = state.LatestPreview,
+                AuditLogs = state.AuditLogs.ToList(),
+                ArtifactFiles = state.ArtifactFiles.ToDictionary(
+                    static pair => pair.Key,
+                    static pair => pair.Value.ToArray(),
+                    StringComparer.OrdinalIgnoreCase),
+                ArtifactArchive = state.ArtifactArchive?.ToArray(),
+                ArtifactArchiveFileName = state.ArtifactArchiveFileName
+            };
+        }
+
+        public HireBotState ToState()
+        {
+            var state = new HireBotState
+            {
+                HireId = HireId,
+                TemplateId = TemplateId,
+                TenantId = TenantId,
+                OperatorId = OperatorId,
+                OwnerSubject = OwnerSubject,
+                SandboxId = SandboxId,
+                SessionId = SessionId,
+                ChannelId = ChannelId,
+                SenderId = SenderId,
+                VolumePath = VolumePath,
+                Status = Status,
+                ErrorCode = ErrorCode,
+                ErrorMessage = ErrorMessage,
+                CollectionPhase = CollectionPhase,
+                CurrentStage = CurrentStage,
+                CreatedAtUtc = CreatedAtUtc,
+                UpdatedAtUtc = UpdatedAtUtc,
+                LatestPreview = LatestPreview,
+                ArtifactArchive = ArtifactArchive?.ToArray(),
+                ArtifactArchiveFileName = ArtifactArchiveFileName
+            };
+
+            if (Messages.Count > 0)
+            {
+                state.Messages.AddRange(Messages);
+            }
+
+            foreach (var pair in CollectedFields)
+            {
+                state.CollectedFields[pair.Key] = pair.Value;
+            }
+
+            if (AuditLogs.Count > 0)
+            {
+                state.AuditLogs.AddRange(AuditLogs);
+            }
+
+            foreach (var pair in ArtifactFiles)
+            {
+                state.ArtifactFiles[pair.Key] = pair.Value.ToArray();
+            }
+
+            return state;
+        }
+    }
+
     private static class HireStatuses
     {
         public const string Ready = "READY";
@@ -1422,3 +1646,4 @@ internal static class HireBotIntegrationEndpoints
         string OutputDigest,
         DateTimeOffset TimestampUtc);
 }
+
