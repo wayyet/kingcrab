@@ -154,7 +154,12 @@ public sealed class MafSessionStateStore
         var routeAllowedTools = session.RouteAllowedTools.Length == 0
             ? string.Empty
             : string.Join(",", session.RouteAllowedTools.OrderBy(static item => item, StringComparer.OrdinalIgnoreCase));
-        var payload = $"{modelOverride}\n{systemPromptOverride}\n{routePresetId}\n{routeAllowedTools}\n{historyJson}";
+        var executionSandboxId = session.ExecutionBinding?.SandboxId ?? string.Empty;
+        var executionWorkingDirectory = session.ExecutionBinding?.WorkingDirectory ?? string.Empty;
+        var executionAllowedTools = session.ExecutionBinding?.AllowedTools is { Length: > 0 } allowedTools
+            ? string.Join(",", allowedTools.OrderBy(static item => item, StringComparer.OrdinalIgnoreCase))
+            : string.Empty;
+        var payload = $"{modelOverride}\n{systemPromptOverride}\n{routePresetId}\n{routeAllowedTools}\n{executionSandboxId}\n{executionWorkingDirectory}\n{executionAllowedTools}\n{historyJson}";
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
     }
 }

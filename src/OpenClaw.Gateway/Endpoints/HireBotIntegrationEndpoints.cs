@@ -17,6 +17,7 @@ namespace OpenClaw.Gateway.Endpoints;
 internal static class HireBotIntegrationEndpoints
 {
     private const string HireBotChannelId = "hirebot";
+    private const string SandboxWorkspacePath = "/workspace";
     private static readonly ConcurrentDictionary<string, HireBotState> States = new(StringComparer.OrdinalIgnoreCase);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -24,7 +25,7 @@ internal static class HireBotIntegrationEndpoints
         PropertyNameCaseInsensitive = true
     };
 
-    private static readonly StageSkillMapping[] StageSkills =
+    private static readonly StageSkillMapping[] DefaultStageSkills =
     [
         new(HireStages.Goal, "skill.hirebot.goal.collect", ["business_goal", "owner", "success_metric"], "收集雇佣目标、负责人和成功标准"),
         new(HireStages.Scenario, "skill.hirebot.scenario.collect", ["user_profile", "trigger_event", "expected_outcome"], "收集业务场景、触发条件和期望结果"),
@@ -32,6 +33,8 @@ internal static class HireBotIntegrationEndpoints
         new(HireStages.Gaps, "skill.hirebot.gaps.collect", ["blockers", "risk_level", "fallback_plan"], "收集风险缺口与回退方案"),
         new(HireStages.Package, "skill.hirebot.package.prepare", ["runbook", "acceptance_criteria", "delivery_window"], "收集交付运行手册、验收标准和交付窗口"),
     ];
+
+    private static readonly string[] HireSandboxAllowedTools = ["shell"];
 
     public static void MapOpenClawHireBotIntegrationEndpoints(
         this WebApplication app,
@@ -147,6 +150,139 @@ internal static class HireBotIntegrationEndpoints
             }
         });
 
+        group.MapPost("/hirings/{hireId}/system-skills/upload", async (HttpContext ctx, string hireId) =>
+        {
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, "hirebot_http_system_skill_upload", requireCsrf: false);
+            if (failure is not null)
+            {
+                return failure;
+            }
+
+            if (!TryGetStateForCaller(ctx, startup.Config, logger, hireId, out var state, out var ownerFailure))
+            {
+                return ownerFailure!;
+            }
+
+            var request = await ReadJsonAsync<SystemSkillUploadRequest>(ctx, ctx.RequestAborted);
+            if (request is null ||
+                string.IsNullOrWhiteSpace(request.SkillId) ||
+                string.IsNullOrWhiteSpace(request.SkillVersion) ||
+                string.IsNullOrWhiteSpace(request.SkillHash) ||
+                request.Files is null ||
+                request.Files.Count == 0)
+            {
+                return Results.BadRequest(new { message = "skillId、skillVersion、skillHash、files 为必填项" });
+            }
+
+            var normalizedSkillId = SanitizePathSegment(request.SkillId);
+            if (string.IsNullOrWhiteSpace(normalizedSkillId))
+            {
+                return Results.BadRequest(new { message = "skillId 无效" });
+            }
+
+            if (request.Files.All(file => !string.Equals(file.RelativePath, "SKILL.md", StringComparison.OrdinalIgnoreCase)))
+            {
+                return Results.BadRequest(new { message = "system skill 必须包含 SKILL.md" });
+            }
+
+            var validationError = ValidateSkillFiles(request.Files);
+            if (validationError is not null)
+            {
+                return Results.BadRequest(new { message = validationError });
+            }
+
+            await PersistSystemSkillToSandboxAsync(state, normalizedSkillId, request, startup.Config, logger, ctx.RequestAborted);
+
+            var stageRules = request.StageRules ?? [];
+            IReadOnlyList<StageSkillMapping> loadedStageSkills = stageRules.Count > 0
+                ? stageRules
+                    .Select(rule => new StageSkillMapping(
+                        Stage: rule.Stage,
+                        SkillName: rule.SkillName,
+                        RequiredFields: rule.RequiredFields,
+                        Description: rule.Description))
+                    .ToArray()
+                : DefaultStageSkills;
+
+            lock (state.SyncRoot)
+            {
+                state.DiscoverySkillId = request.SkillId.Trim();
+                state.DiscoverySkillVersion = request.SkillVersion.Trim();
+                state.DiscoverySkillHash = request.SkillHash.Trim();
+                state.StageSkills.Clear();
+                state.StageSkills.AddRange(loadedStageSkills);
+                state.CurrentStage = ResolveCurrentStage(state, state.CollectedFields);
+                state.CollectionPhase = IsCollectionReadyForFinalize(state, state.CollectedFields)
+                    ? HireCollectionPhases.ReadyForFinalize
+                    : state.CollectionPhase;
+                state.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            }
+
+            await PersistConversationToSandboxAsync(state, startup.Config, logger, ctx.RequestAborted);
+
+            return Results.Json(new SystemSkillUploadResult(
+                HireId: state.HireId,
+                SandboxId: state.SandboxId,
+                SkillId: request.SkillId,
+                SkillVersion: request.SkillVersion,
+                SkillHash: request.SkillHash,
+                InstalledPath: $"{SandboxWorkspacePath}/skills/{normalizedSkillId}",
+                LoadedStageSkills: loadedStageSkills));
+        });
+
+        group.MapPost("/hirings/{hireId}/template-package/upload", async (HttpContext ctx, string hireId) =>
+        {
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, "hirebot_http_template_package_upload", requireCsrf: false);
+            if (failure is not null)
+            {
+                return failure;
+            }
+
+            if (!TryGetStateForCaller(ctx, startup.Config, logger, hireId, out var state, out var ownerFailure))
+            {
+                return ownerFailure!;
+            }
+
+            var request = await ReadJsonAsync<TemplatePackageUploadRequest>(ctx, ctx.RequestAborted);
+            if (request is null ||
+                string.IsNullOrWhiteSpace(request.PackageId) ||
+                string.IsNullOrWhiteSpace(request.PackageVersion) ||
+                string.IsNullOrWhiteSpace(request.PackageHash) ||
+                string.IsNullOrWhiteSpace(request.ManifestJson))
+            {
+                return Results.BadRequest(new { message = "packageId、packageVersion、packageHash、manifestJson 为必填项" });
+            }
+
+            var validationError = ValidateTemplatePackageUpload(request);
+            if (validationError is not null)
+            {
+                return Results.BadRequest(new { message = validationError });
+            }
+
+            var normalizedPackageId = SanitizePathSegment(request.PackageId);
+            var installedPath = $"{SandboxWorkspacePath}/hirebot/template-package";
+            await PersistTemplatePackageToSandboxAsync(state, normalizedPackageId, request, startup.Config, logger, ctx.RequestAborted);
+
+            lock (state.SyncRoot)
+            {
+                state.TemplatePackageId = request.PackageId.Trim();
+                state.TemplatePackageVersion = request.PackageVersion.Trim();
+                state.TemplatePackageHash = request.PackageHash.Trim();
+                state.TemplatePackagePath = installedPath;
+                state.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            }
+
+            await PersistConversationToSandboxAsync(state, startup.Config, logger, ctx.RequestAborted);
+
+            return Results.Json(new TemplatePackageUploadResult(
+                HireId: state.HireId,
+                SandboxId: state.SandboxId,
+                PackageId: request.PackageId,
+                PackageVersion: request.PackageVersion,
+                PackageHash: request.PackageHash,
+                InstalledPath: installedPath));
+        });
+
         group.MapGet("/hirings/{hireId}", (HttpContext ctx, string hireId) =>
         {
             var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, "hirebot_http_status", requireCsrf: false);
@@ -205,7 +341,7 @@ internal static class HireBotIntegrationEndpoints
                         SessionId: state.SessionId,
                         CurrentStage: state.CurrentStage,
                         RequiresAudit: false,
-                        StageSkills: StageSkills);
+                        StageSkills: state.StageSkills.ToArray());
                 }
             }
 
@@ -232,9 +368,12 @@ internal static class HireBotIntegrationEndpoints
             }
 
             var request = await ReadJsonAsync<ConversationMessageRequest>(ctx, ctx.RequestAborted);
-            if (request is null || (string.IsNullOrWhiteSpace(request.Content) && (request.StructuredAnswers is null || request.StructuredAnswers.Count == 0)))
+            if (request is null ||
+                (string.IsNullOrWhiteSpace(request.Content) &&
+                 (request.StructuredAnswers is null || request.StructuredAnswers.Count == 0) &&
+                 (request.Materials is null || request.Materials.Count == 0)))
             {
-                return Results.BadRequest(new { message = "content 与 structuredAnswers 不能同时为空" });
+                return Results.BadRequest(new { message = "content、structuredAnswers 与 materials 不能同时为空" });
             }
 
             if (state.Status != HireStatuses.Ready)
@@ -243,11 +382,27 @@ internal static class HireBotIntegrationEndpoints
             }
 
             var userText = string.IsNullOrWhiteSpace(request.Content) ? "补充信息" : request.Content.Trim();
+            var incomingMaterials = BuildMaterialsFromRequest(request);
             string outboundText;
+            var persistMaterialsBeforeRun = incomingMaterials.Count > 0;
             lock (state.SyncRoot)
             {
-                outboundText = BuildRuntimePrompt(state, userText, request.StructuredAnswers);
+                if (persistMaterialsBeforeRun)
+                {
+                    MergeMaterials(state.Materials, incomingMaterials);
+                    state.UpdatedAtUtc = DateTimeOffset.UtcNow;
+                }
+
+                outboundText = BuildRuntimePrompt(state, userText, request.StructuredAnswers, Array.Empty<ConversationMaterial>());
             }
+
+            // Make this turn's uploaded materials available on disk before the assistant runs.
+            if (persistMaterialsBeforeRun)
+            {
+                await PersistConversationToSandboxAsync(state, startup.Config, logger, ctx.RequestAborted);
+            }
+
+            await EnsureSessionExecutionBindingAsync(runtime, state, ctx.RequestAborted);
             var baselineAssistantCount = await CountAssistantTurnsAsync(runtime, state.SessionId, ctx.RequestAborted);
 
             await facade.QueueMessageAsync(
@@ -299,8 +454,8 @@ internal static class HireBotIntegrationEndpoints
                     }
                 }
 
-                state.CurrentStage = ResolveCurrentStage(state.CollectedFields);
-                state.CollectionPhase = IsCollectionReadyForFinalize(state.CollectedFields)
+                state.CurrentStage = ResolveCurrentStage(state, state.CollectedFields);
+                state.CollectionPhase = IsCollectionReadyForFinalize(state, state.CollectedFields)
                     ? HireCollectionPhases.ReadyForFinalize
                     : HireCollectionPhases.InProgress;
                 state.UpdatedAtUtc = DateTimeOffset.UtcNow;
@@ -346,7 +501,7 @@ internal static class HireBotIntegrationEndpoints
                 RequiresAudit: false,
                 CollectionPhase: state.CollectionPhase,
                 Messages: timeline,
-                StageSkills: StageSkills));
+                StageSkills: state.StageSkills.ToArray()));
         });
 
         group.MapGet("/hirings/{hireId}/stage-preview", (HttpContext ctx, string hireId) =>
@@ -391,7 +546,7 @@ internal static class HireBotIntegrationEndpoints
             lock (state.SyncRoot)
             {
                 var stageName = request.Stage.Trim().ToUpperInvariant();
-                var stageSkill = ResolveStageSkillMapping(stageName);
+                var stageSkill = ResolveStageSkillMapping(state, stageName);
                 state.AuditLogs.Add(new AuditLog(
                     LogId: $"audit_{Guid.NewGuid():N}",
                     Stage: stageName,
@@ -451,7 +606,7 @@ internal static class HireBotIntegrationEndpoints
             }
 
             var session = await runtime.SessionManager.LoadAsync(state.SessionId, ctx.RequestAborted);
-            var artifacts = BuildArtifactFiles(state, session);
+            var artifacts = await BuildArtifactFilesAsync(state, session, startup.Config, logger, ctx.RequestAborted);
             var archive = BuildZipArchive(artifacts);
 
             lock (state.SyncRoot)
@@ -501,7 +656,7 @@ internal static class HireBotIntegrationEndpoints
                     CurrentStage: state.CurrentStage,
                     RequiresAudit: false,
                     CollectionPhase: state.CollectionPhase,
-                    StageSkills: StageSkills,
+                    StageSkills: state.StageSkills.ToArray(),
                     AuditLogs: state.AuditLogs
                         .OrderByDescending(static x => x.TimestampUtc)
                         .ToArray()));
@@ -1043,12 +1198,111 @@ internal static class HireBotIntegrationEndpoints
         return new string(buffer);
     }
 
+    private static IReadOnlyList<ConversationMaterial> BuildMaterialsFromRequest(ConversationMessageRequest request)
+    {
+        var result = new List<ConversationMaterial>();
+        if (!string.IsNullOrWhiteSpace(request.Content))
+        {
+            var content = request.Content.Trim();
+            result.Add(new ConversationMaterial(
+                Type: "text",
+                Name: $"conversation-{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}",
+                Content: content,
+                ContentHash: ComputeDigest(content),
+                Size: Encoding.UTF8.GetByteCount(content),
+                MimeType: "text/plain",
+                Metadata: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["source"] = "conversation"
+                }));
+        }
+
+        if (request.Materials is not null)
+        {
+            foreach (var material in request.Materials)
+            {
+                var normalized = NormalizeMaterial(material);
+                if (normalized is not null)
+                {
+                    result.Add(normalized);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private static ConversationMaterial? NormalizeMaterial(ConversationMaterial? material)
+    {
+        if (material is null)
+        {
+            return null;
+        }
+
+        var type = string.IsNullOrWhiteSpace(material.Type) ? "file" : material.Type.Trim();
+        var name = string.IsNullOrWhiteSpace(material.Name)
+            ? $"{type}-{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}"
+            : material.Name.Trim();
+        var content = string.IsNullOrWhiteSpace(material.Content) ? null : material.Content;
+        return material with
+        {
+            Type = type,
+            Name = name,
+            Content = content,
+            ContentHash = string.IsNullOrWhiteSpace(material.ContentHash) && content is not null
+                ? ComputeDigest(content)
+                : material.ContentHash,
+            Size = material.Size ?? (content is null ? null : Encoding.UTF8.GetByteCount(content)),
+            MimeType = string.IsNullOrWhiteSpace(material.MimeType) ? null : material.MimeType.Trim(),
+            Metadata = material.Metadata?
+                .Where(pair => !string.IsNullOrWhiteSpace(pair.Key))
+                .ToDictionary(
+                    pair => pair.Key.Trim(),
+                    pair => pair.Value?.Trim() ?? string.Empty,
+                    StringComparer.OrdinalIgnoreCase)
+        };
+    }
+
+    internal static int MergeMaterials(
+        ICollection<ConversationMaterial> existingMaterials,
+        IReadOnlyList<ConversationMaterial> incomingMaterials)
+    {
+        var added = 0;
+        foreach (var material in incomingMaterials)
+        {
+            var hasDuplicate = !string.IsNullOrWhiteSpace(material.ContentHash) &&
+                               existingMaterials.Any(existing => string.Equals(
+                                   existing.ContentHash,
+                                   material.ContentHash,
+                                   StringComparison.OrdinalIgnoreCase));
+            if (!hasDuplicate)
+            {
+                existingMaterials.Add(material);
+                added++;
+            }
+        }
+
+        return added;
+    }
+
+    private static string? Preview(string? content, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return null;
+        }
+
+        var normalized = content.ReplaceLineEndings(" ").Trim();
+        return normalized.Length <= maxLength ? normalized : normalized[..maxLength] + "...";
+    }
+
     private static string BuildRuntimePrompt(
         HireBotState state,
         string content,
-        IReadOnlyDictionary<string, string>? structuredAnswers)
+        IReadOnlyDictionary<string, string>? structuredAnswers,
+        IReadOnlyList<ConversationMaterial> incomingMaterials)
     {
-        var stageSkill = ResolveStageSkillMapping(state.CurrentStage);
+        var stageSkill = ResolveStageSkillMapping(state, state.CurrentStage);
         var mergedFields = new Dictionary<string, string?>(state.CollectedFields, StringComparer.OrdinalIgnoreCase);
         if (structuredAnswers is not null)
         {
@@ -1065,14 +1319,48 @@ internal static class HireBotIntegrationEndpoints
         builder.AppendLine($"[STAGE_TARGET] {stageSkill.Description}");
         builder.AppendLine($"[REQUIRED_FIELDS] {string.Join(", ", stageSkill.RequiredFields)}");
         builder.AppendLine($"[MISSING_FIELDS] {(missingFields.Count == 0 ? "none" : string.Join(", ", missingFields))}");
+        builder.AppendLine($"[DISCOVERY_SYSTEM_SKILL_PATH] {ResolveDiscoverySkillPath(state)}");
+        builder.AppendLine($"[TEMPLATE_PACKAGE_PATH] {state.TemplatePackagePath ?? $"{SandboxWorkspacePath}/hirebot/template-package"}");
+        builder.AppendLine($"[MATERIALS_PATH] {state.VolumePath}/materials");
         builder.AppendLine("[REPLY_RULES]");
         builder.AppendLine("1. 使用简体中文回复，聚焦当前阶段信息收集。");
         builder.AppendLine("2. 先确认已收集信息，再追问缺失字段。");
         builder.AppendLine("3. 不要编造事实，未知项直接说明待补充。");
         builder.AppendLine("4. 当前阶段字段齐全时，提示可进入下一阶段。");
+        builder.AppendLine("5. 把用户文字、上传文件和上传 skill 都视为资料；按 discovery system skill 规则，用这些资料优化模板包中的 ontology slice 与 skill 文件。");
+        builder.AppendLine("6. 当前会话已绑定到雇佣 sandbox，且只提供 sandbox 内 shell 工具；如需读取或修改 discovery skill、模板包和资料文件，请使用 shell 在给定路径下操作。");
+        builder.AppendLine("7. finalize 会直接回收 [TEMPLATE_PACKAGE_PATH] 下当前文件内容作为交付产物，因此请把优化结果真实写回这些模板文件，而不是只在回复里描述。");
         builder.AppendLine();
         builder.AppendLine("[USER_INPUT]");
         builder.AppendLine(content);
+
+        var allMaterials = state.Materials.Concat(incomingMaterials).ToArray();
+        if (allMaterials.Length > 0)
+        {
+            builder.AppendLine();
+            builder.AppendLine("[MATERIALS]");
+            foreach (var material in allMaterials.TakeLast(20))
+            {
+                builder.Append("- ");
+                builder.Append(material.Type);
+                builder.Append(" | ");
+                builder.Append(material.Name);
+                if (!string.IsNullOrWhiteSpace(material.ContentHash))
+                {
+                    builder.Append(" | sha256=");
+                    builder.Append(material.ContentHash);
+                }
+
+                var preview = Preview(material.Content, 240);
+                if (!string.IsNullOrWhiteSpace(preview))
+                {
+                    builder.Append(" | preview=");
+                    builder.Append(preview);
+                }
+
+                builder.AppendLine();
+            }
+        }
 
         if (structuredAnswers is null || structuredAnswers.Count == 0)
         {
@@ -1092,6 +1380,13 @@ internal static class HireBotIntegrationEndpoints
         return builder.ToString();
     }
 
+    private static string ResolveDiscoverySkillPath(HireBotState state)
+    {
+        return string.IsNullOrWhiteSpace(state.DiscoverySkillId)
+            ? $"{SandboxWorkspacePath}/skills/digital-employee-discovery"
+            : $"{SandboxWorkspacePath}/skills/{SanitizePathSegment(state.DiscoverySkillId)}";
+    }
+
     private static async Task<int> CountAssistantTurnsAsync(
         GatewayAppRuntime runtime,
         string sessionId,
@@ -1104,6 +1399,46 @@ internal static class HireBotIntegrationEndpoints
         }
 
         return session.History.Count(static x => string.Equals(x.Role, "assistant", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static async Task EnsureSessionExecutionBindingAsync(
+        GatewayAppRuntime runtime,
+        HireBotState state,
+        CancellationToken cancellationToken)
+    {
+        var session = await runtime.SessionManager.GetOrCreateByIdAsync(
+            state.SessionId,
+            state.ChannelId,
+            state.SenderId,
+            cancellationToken);
+
+        await using var sessionLock = await runtime.SessionManager.AcquireSessionLockAsync(state.SessionId, cancellationToken);
+        if (HasExpectedExecutionBinding(session, state))
+            return;
+
+        session.ExecutionBinding = new SessionExecutionBinding
+        {
+            SandboxId = state.SandboxId,
+            WorkingDirectory = SandboxWorkspacePath,
+            AllowedTools = HireSandboxAllowedTools.ToArray()
+        };
+        session.LastActiveAt = DateTimeOffset.UtcNow;
+
+        await runtime.SessionManager.PersistAsync(session, cancellationToken, sessionLockHeld: true);
+    }
+
+    private static bool HasExpectedExecutionBinding(Session session, HireBotState state)
+    {
+        if (session.ExecutionBinding is null)
+            return false;
+
+        if (!string.Equals(session.ExecutionBinding.SandboxId, state.SandboxId, StringComparison.Ordinal))
+            return false;
+
+        if (!string.Equals(session.ExecutionBinding.WorkingDirectory, SandboxWorkspacePath, StringComparison.Ordinal))
+            return false;
+
+        return session.ExecutionBinding.AllowedTools.SequenceEqual(HireSandboxAllowedTools, StringComparer.OrdinalIgnoreCase);
     }
 
     private static async Task<ChatTurn?> WaitForAssistantTurnAsync(
@@ -1140,7 +1475,7 @@ internal static class HireBotIntegrationEndpoints
         IReadOnlyDictionary<string, string>? structuredAnswers,
         string assistantSummary)
     {
-        var stageSkill = ResolveStageSkillMapping(state.CurrentStage);
+        var stageSkill = ResolveStageSkillMapping(state, state.CurrentStage);
         var structuredData = new Dictionary<string, string?>(state.CollectedFields, StringComparer.OrdinalIgnoreCase);
         if (structuredAnswers is not null)
         {
@@ -1151,7 +1486,7 @@ internal static class HireBotIntegrationEndpoints
         }
 
         var missing = ResolveMissingFields(stageSkill, structuredData);
-        var collectionReady = IsCollectionReadyForFinalize(structuredData);
+        var collectionReady = IsCollectionReadyForFinalize(state, structuredData);
         var riskNotes = missing.Count == 0
             ? collectionReady
                 ? new[] { "全部阶段字段已收集完成，可执行 finalize 生成交付包。" }
@@ -1170,11 +1505,12 @@ internal static class HireBotIntegrationEndpoints
             GeneratedAt: DateTimeOffset.UtcNow);
     }
 
-    private static StageSkillMapping ResolveStageSkillMapping(string stage)
+    private static StageSkillMapping ResolveStageSkillMapping(HireBotState state, string stage)
     {
-        return StageSkills.FirstOrDefault(skill =>
+        IReadOnlyList<StageSkillMapping> stageSkills = state.StageSkills.Count > 0 ? state.StageSkills : DefaultStageSkills;
+        return stageSkills.FirstOrDefault(skill =>
                    string.Equals(skill.Stage, stage, StringComparison.OrdinalIgnoreCase))
-               ?? StageSkills[0];
+               ?? stageSkills[0];
     }
 
     private static IReadOnlyList<string> ResolveMissingFields(
@@ -1193,9 +1529,10 @@ internal static class HireBotIntegrationEndpoints
         return missing;
     }
 
-    private static string ResolveCurrentStage(IReadOnlyDictionary<string, string?> structuredData)
+    private static string ResolveCurrentStage(HireBotState state, IReadOnlyDictionary<string, string?> structuredData)
     {
-        foreach (var stageSkill in StageSkills)
+        IReadOnlyList<StageSkillMapping> stageSkills = state.StageSkills.Count > 0 ? state.StageSkills : DefaultStageSkills;
+        foreach (var stageSkill in stageSkills)
         {
             if (ResolveMissingFields(stageSkill, structuredData).Count > 0)
             {
@@ -1206,9 +1543,10 @@ internal static class HireBotIntegrationEndpoints
         return HireStages.Package;
     }
 
-    private static bool IsCollectionReadyForFinalize(IReadOnlyDictionary<string, string?> structuredData)
+    private static bool IsCollectionReadyForFinalize(HireBotState state, IReadOnlyDictionary<string, string?> structuredData)
     {
-        return StageSkills.All(stageSkill => ResolveMissingFields(stageSkill, structuredData).Count == 0);
+        IReadOnlyList<StageSkillMapping> stageSkills = state.StageSkills.Count > 0 ? state.StageSkills : DefaultStageSkills;
+        return stageSkills.All(stageSkill => ResolveMissingFields(stageSkill, structuredData).Count == 0);
     }
 
     private static string ComputeDigest(string value)
@@ -1217,7 +1555,24 @@ internal static class HireBotIntegrationEndpoints
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant();
     }
 
-    private static Dictionary<string, byte[]> BuildArtifactFiles(HireBotState state, Session? session)
+    private static async Task<Dictionary<string, byte[]>> BuildArtifactFilesAsync(
+        HireBotState state,
+        Session? session,
+        GatewayConfig config,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        var runtimePackage = await TryReadRuntimeTemplatePackageAsync(state, config, logger, cancellationToken);
+        if (runtimePackage is not null)
+        {
+            return BuildRuntimeArtifactFiles(state, runtimePackage);
+        }
+
+        logger.LogWarning("回读沙箱真实模板产物失败，回退到状态快照交付包。HireId={HireId}, SandboxId={SandboxId}", state.HireId, state.SandboxId);
+        return BuildFallbackArtifactFiles(state, session);
+    }
+
+    private static Dictionary<string, byte[]> BuildFallbackArtifactFiles(HireBotState state, Session? session)
     {
         var result = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase)
         {
@@ -1233,10 +1588,18 @@ internal static class HireBotIntegrationEndpoints
                 state.CreatedAtUtc,
                 state.UpdatedAtUtc,
                 state.CurrentStage,
-                state.CollectionPhase
+                state.CollectionPhase,
+                state.DiscoverySkillId,
+                state.DiscoverySkillVersion,
+                state.DiscoverySkillHash,
+                state.TemplatePackageId,
+                state.TemplatePackageVersion,
+                state.TemplatePackageHash,
+                state.TemplatePackagePath
             }, JsonOptions)),
             ["conversation-timeline.json"] = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(state.Messages, JsonOptions)),
             ["collected-fields.json"] = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(state.CollectedFields, JsonOptions)),
+            ["source-materials.json"] = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(state.Materials, JsonOptions)),
             ["stage-preview.json"] = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(state.LatestPreview, JsonOptions)),
             ["audit-logs.json"] = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(state.AuditLogs, JsonOptions))
         };
@@ -1260,6 +1623,365 @@ internal static class HireBotIntegrationEndpoints
         return result;
     }
 
+    private static Dictionary<string, byte[]> BuildRuntimeArtifactFiles(
+        HireBotState state,
+        RuntimeTemplatePackageArtifacts runtimePackage)
+    {
+        var ontologyArtifact = new
+        {
+            contractVersion = "v1-sandbox-runtime",
+            artifactType = "ontology-slice",
+            generatedAt = DateTimeOffset.UtcNow,
+            hire = new
+            {
+                state.HireId,
+                state.TemplateId,
+                state.SandboxId,
+                state.SessionId,
+                state.OwnerSubject,
+                state.TenantId,
+                state.OperatorId,
+                state.CurrentStage,
+                state.CollectionPhase
+            },
+            templatePackage = new
+            {
+                runtimePackage.PackageId,
+                runtimePackage.PackageVersion,
+                runtimePackage.PackageHash,
+                runtimePackage.ManifestJson,
+                ontologySlices = runtimePackage.OntologySlices.Select(slice => new
+                {
+                    slice.Name,
+                    slice.RelativePath,
+                    slice.Type,
+                    slice.Required,
+                    contentHash = slice.SourceContentHash,
+                    content = slice.SourceContent
+                }),
+                optimizedOntologySlices = runtimePackage.OntologySlices.Select(slice => new
+                {
+                    slice.Name,
+                    slice.RelativePath,
+                    slice.Type,
+                    sourceContentHash = slice.SourceContentHash,
+                    optimizedContentHash = slice.OptimizedContentHash,
+                    optimizedContent = slice.OptimizedContent
+                })
+            },
+            discoverySkill = new
+            {
+                state.DiscoverySkillId,
+                state.DiscoverySkillVersion,
+                state.DiscoverySkillHash
+            },
+            x_ncrew_enrichment = new
+            {
+                sourceMaterials = BuildMaterialSummaries(state),
+                goal = new
+                {
+                    businessGoal = GetCollectedValue(state, "business_goal"),
+                    owner = GetCollectedValue(state, "owner"),
+                    successMetric = GetCollectedValue(state, "success_metric")
+                },
+                scenario = new
+                {
+                    userProfile = GetCollectedValue(state, "user_profile"),
+                    triggerEvent = GetCollectedValue(state, "trigger_event"),
+                    expectedOutcome = GetCollectedValue(state, "expected_outcome")
+                },
+                systems = new
+                {
+                    systemList = GetCollectedValue(state, "system_list"),
+                    permissionScope = GetCollectedValue(state, "permission_scope"),
+                    dataSources = GetCollectedValue(state, "data_sources")
+                },
+                risks = new
+                {
+                    blockers = GetCollectedValue(state, "blockers"),
+                    riskLevel = GetCollectedValue(state, "risk_level"),
+                    fallbackPlan = GetCollectedValue(state, "fallback_plan")
+                },
+                finalizeSource = "sandbox-template-package"
+            }
+        };
+
+        var skillArtifact = new
+        {
+            contractVersion = "v1-sandbox-runtime",
+            artifactType = "business-skill-package",
+            generatedAt = DateTimeOffset.UtcNow,
+            hire = new
+            {
+                state.HireId,
+                state.TemplateId,
+                state.SandboxId,
+                state.SessionId,
+                state.OwnerSubject,
+                state.TenantId,
+                state.OperatorId,
+                state.CurrentStage,
+                state.CollectionPhase
+            },
+            templatePackage = new
+            {
+                runtimePackage.PackageId,
+                runtimePackage.PackageVersion,
+                runtimePackage.PackageHash,
+                requiredSkills = runtimePackage.RequiredSkills.Select(skill => new
+                {
+                    skill.Name,
+                    skill.RelativePath,
+                    skill.Required,
+                    contentHash = skill.SourceContentHash,
+                    content = skill.SourceContent
+                }),
+                optimizedRequiredSkills = runtimePackage.RequiredSkills.Select(skill => new
+                {
+                    skill.Name,
+                    skill.RelativePath,
+                    sourceContentHash = skill.SourceContentHash,
+                    optimizedContentHash = skill.OptimizedContentHash,
+                    optimizedContent = skill.OptimizedContent
+                })
+            },
+            discoverySkill = new
+            {
+                state.DiscoverySkillId,
+                state.DiscoverySkillVersion,
+                state.DiscoverySkillHash,
+                stages = state.StageSkills.Select(rule => new
+                {
+                    rule.Stage,
+                    rule.SkillName,
+                    rule.Description,
+                    rule.RequiredFields
+                })
+            },
+            x_ncrew_enrichment = new
+            {
+                sourceMaterials = BuildMaterialSummaries(state),
+                package = new
+                {
+                    runbook = GetCollectedValue(state, "runbook"),
+                    acceptanceCriteria = GetCollectedValue(state, "acceptance_criteria"),
+                    deliveryWindow = GetCollectedValue(state, "delivery_window")
+                },
+                completion = state.StageSkills.Select(stageSkill =>
+                {
+                    var blockingFields = ResolveMissingFields(stageSkill, state.CollectedFields);
+                    var satisfiedFields = stageSkill.RequiredFields
+                        .Where(field => !blockingFields.Contains(field, StringComparer.OrdinalIgnoreCase))
+                        .ToArray();
+                    return new
+                    {
+                        stageSkill.Stage,
+                        requiredFieldCount = stageSkill.RequiredFields.Count,
+                        satisfiedFieldCount = satisfiedFields.Length,
+                        completionRate = stageSkill.RequiredFields.Count == 0
+                            ? 1.0
+                            : Math.Round((double)satisfiedFields.Length / stageSkill.RequiredFields.Count, 4),
+                        satisfiedFields,
+                        blockingFields,
+                        readyForNextStage = blockingFields.Count == 0
+                    };
+                }),
+                finalizeSource = "sandbox-template-package"
+            }
+        };
+
+        return new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["ontology-slice.contract.json"] = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(ontologyArtifact, JsonOptions)),
+            ["business-skill-package.contract.json"] = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(skillArtifact, JsonOptions))
+        };
+    }
+
+    private static IReadOnlyList<object> BuildMaterialSummaries(HireBotState state)
+    {
+        return state.Materials
+            .Select(material => new
+            {
+                material.Type,
+                material.Name,
+                material.Size,
+                material.MimeType,
+                material.ContentHash,
+                contentPreview = Preview(material.Content, 160),
+                material.Metadata
+            })
+            .Cast<object>()
+            .ToArray();
+    }
+
+    private static string? GetCollectedValue(HireBotState state, string fieldName)
+    {
+        return state.CollectedFields.TryGetValue(fieldName, out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value.Trim()
+            : null;
+    }
+
+    private static async Task<RuntimeTemplatePackageArtifacts?> TryReadRuntimeTemplatePackageAsync(
+        HireBotState state,
+        GatewayConfig config,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var connectionConfig = BuildConnectionConfig(config);
+            var readyTimeoutSeconds = ResolveSandboxReadyTimeoutSeconds(config);
+            await using var sandbox = await Sandbox.ConnectAsync(new SandboxConnectOptions
+            {
+                SandboxId = state.SandboxId,
+                ConnectionConfig = connectionConfig,
+                ReadyTimeoutSeconds = readyTimeoutSeconds
+            }, cancellationToken);
+
+            var snapshotManifestPath = $"{state.VolumePath}/template-package/template-package-manifest.json";
+            var snapshotManifestJson = await sandbox.Files.ReadFileAsync(snapshotManifestPath, null, cancellationToken);
+            var snapshotManifest = JsonSerializer.Deserialize<TemplatePackageSnapshotManifest>(snapshotManifestJson, JsonOptions);
+            if (snapshotManifest is null)
+            {
+                logger.LogWarning("template package snapshot manifest 解析为空。HireId={HireId}, Path={Path}", state.HireId, snapshotManifestPath);
+                return null;
+            }
+
+            var workspaceRoot = string.IsNullOrWhiteSpace(snapshotManifest.WorkspacePath)
+                ? (state.TemplatePackagePath ?? $"{SandboxWorkspacePath}/hirebot/template-package")
+                : snapshotManifest.WorkspacePath;
+            var snapshotRoot = $"{state.VolumePath}/template-package";
+            var manifestJson = await ReadSandboxTextWithFallbackAsync(
+                sandbox,
+                $"{workspaceRoot}/manifest.json",
+                $"{snapshotRoot}/manifest.json",
+                cancellationToken);
+
+            var ontologySlices = new List<RuntimeOntologySliceArtifact>();
+            foreach (var slice in snapshotManifest.OntologySlices ?? [])
+            {
+                var relativePath = NormalizeSkillRelativePath(slice.RelativePath);
+                if (string.IsNullOrWhiteSpace(relativePath))
+                {
+                    continue;
+                }
+
+                var sourceContent = await ReadSandboxTextWithFallbackAsync(
+                    sandbox,
+                    $"{snapshotRoot}/{relativePath}",
+                    $"{workspaceRoot}/{relativePath}",
+                    cancellationToken);
+                var optimizedContent = await ReadSandboxTextWithFallbackAsync(
+                    sandbox,
+                    $"{workspaceRoot}/{relativePath}",
+                    $"{snapshotRoot}/{relativePath}",
+                    cancellationToken);
+
+                ontologySlices.Add(new RuntimeOntologySliceArtifact(
+                    Name: FirstNonEmpty(slice.Name, Path.GetFileNameWithoutExtension(relativePath)),
+                    RelativePath: relativePath,
+                    Type: FirstNonEmpty(slice.Type, "digital_employee_slice"),
+                    Required: slice.Required,
+                    SourceContent: sourceContent,
+                    SourceContentHash: ComputeDigest(sourceContent),
+                    OptimizedContent: optimizedContent,
+                    OptimizedContentHash: ComputeDigest(optimizedContent)));
+            }
+
+            var requiredSkills = new List<RuntimeRequiredSkillArtifact>();
+            foreach (var skill in snapshotManifest.RequiredSkills ?? [])
+            {
+                var relativePath = NormalizeSkillRelativePath(skill.RelativePath);
+                if (string.IsNullOrWhiteSpace(relativePath))
+                {
+                    continue;
+                }
+
+                var sourceContent = await ReadSandboxTextWithFallbackAsync(
+                    sandbox,
+                    $"{snapshotRoot}/{relativePath}",
+                    $"{workspaceRoot}/{relativePath}",
+                    cancellationToken);
+                var optimizedContent = await ReadSandboxTextWithFallbackAsync(
+                    sandbox,
+                    $"{workspaceRoot}/{relativePath}",
+                    $"{snapshotRoot}/{relativePath}",
+                    cancellationToken);
+
+                requiredSkills.Add(new RuntimeRequiredSkillArtifact(
+                    Name: FirstNonEmpty(skill.Name, Path.GetFileNameWithoutExtension(relativePath)),
+                    RelativePath: relativePath,
+                    Required: skill.Required,
+                    SourceContent: sourceContent,
+                    SourceContentHash: ComputeDigest(sourceContent),
+                    OptimizedContent: optimizedContent,
+                    OptimizedContentHash: ComputeDigest(optimizedContent)));
+            }
+
+            return new RuntimeTemplatePackageArtifacts(
+                PackageId: FirstNonEmpty(snapshotManifest.PackageId, state.TemplatePackageId),
+                PackageVersion: FirstNonEmpty(snapshotManifest.PackageVersion, state.TemplatePackageVersion),
+                PackageHash: FirstNonEmpty(snapshotManifest.PackageHash, state.TemplatePackageHash),
+                ManifestJson: manifestJson,
+                OntologySlices: ontologySlices,
+                RequiredSkills: requiredSkills);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "回读沙箱模板包产物失败: HireId={HireId}, SandboxId={SandboxId}", state.HireId, state.SandboxId);
+            return null;
+        }
+    }
+
+    private static async Task<string> ReadSandboxTextWithFallbackAsync(
+        Sandbox sandbox,
+        string primaryPath,
+        string fallbackPath,
+        CancellationToken cancellationToken)
+    {
+        var primary = await TryReadSandboxTextAsync(sandbox, primaryPath, cancellationToken);
+        if (primary is not null)
+        {
+            return primary;
+        }
+
+        var fallback = await TryReadSandboxTextAsync(sandbox, fallbackPath, cancellationToken);
+        if (fallback is not null)
+        {
+            return fallback;
+        }
+
+        throw new InvalidOperationException($"Sandbox file not found: {primaryPath} (fallback: {fallbackPath})");
+    }
+
+    private static async Task<string?> TryReadSandboxTextAsync(
+        Sandbox sandbox,
+        string path,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await sandbox.Files.ReadFileAsync(path, null, cancellationToken);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string FirstNonEmpty(params string?[] candidates)
+    {
+        foreach (var candidate in candidates)
+        {
+            if (!string.IsNullOrWhiteSpace(candidate))
+            {
+                return candidate.Trim();
+            }
+        }
+
+        return string.Empty;
+    }
+
     private static string BuildHandoverMarkdown(HireBotState state)
     {
         var builder = new StringBuilder();
@@ -1270,6 +1992,8 @@ internal static class HireBotIntegrationEndpoints
         builder.AppendLine($"- Owner: {state.OwnerSubject}");
         builder.AppendLine($"- CollectionPhase: {state.CollectionPhase}");
         builder.AppendLine($"- CurrentStage: {state.CurrentStage}");
+        builder.AppendLine($"- DiscoverySkill: {state.DiscoverySkillId}@{state.DiscoverySkillVersion}");
+        builder.AppendLine($"- TemplatePackage: {state.TemplatePackageId}@{state.TemplatePackageVersion}");
         builder.AppendLine();
         builder.AppendLine("## 已收集字段");
         if (state.CollectedFields.Count == 0)
@@ -1284,6 +2008,20 @@ internal static class HireBotIntegrationEndpoints
                 builder.Append(pair.Key);
                 builder.Append(": ");
                 builder.AppendLine(pair.Value ?? string.Empty);
+            }
+        }
+
+        builder.AppendLine();
+        builder.AppendLine("## 资料输入");
+        if (state.Materials.Count == 0)
+        {
+            builder.AppendLine("- 暂无资料");
+        }
+        else
+        {
+            foreach (var material in state.Materials)
+            {
+                builder.AppendLine($"- [{material.Type}] {material.Name} {material.ContentHash}");
             }
         }
 
@@ -1335,32 +2073,61 @@ internal static class HireBotIntegrationEndpoints
                 state.Status,
                 state.CollectionPhase,
                 state.CurrentStage,
+                state.DiscoverySkillId,
+                state.DiscoverySkillVersion,
+                state.DiscoverySkillHash,
+                state.TemplatePackageId,
+                state.TemplatePackageVersion,
+                state.TemplatePackageHash,
+                state.TemplatePackagePath,
                 state.CollectedFields,
+                state.Materials,
                 state.UpdatedAtUtc
             };
 
             await sandbox.Files.CreateDirectoriesAsync(
                 [
-                    new CreateDirectoryEntry { Path = state.VolumePath, Mode = 755 }
+                    new CreateDirectoryEntry { Path = state.VolumePath, Mode = 755 },
+                    new CreateDirectoryEntry { Path = $"{state.VolumePath}/materials", Mode = 755 }
                 ],
                 cancellationToken);
 
-            await sandbox.Files.WriteFilesAsync(
-                [
-                    new WriteEntry
-                    {
-                        Path = $"{state.VolumePath}/conversation-state.json",
-                        Data = JsonSerializer.Serialize(data, JsonOptions),
-                        Mode = 644
-                    },
-                    new WriteEntry
-                    {
-                        Path = $"{state.VolumePath}/conversation-timeline.json",
-                        Data = JsonSerializer.Serialize(state.Messages, JsonOptions),
-                        Mode = 644
-                    }
-                ],
-                cancellationToken);
+            var entries = new List<WriteEntry>
+            {
+                new()
+                {
+                    Path = $"{state.VolumePath}/conversation-state.json",
+                    Data = JsonSerializer.Serialize(data, JsonOptions),
+                    Mode = 644
+                },
+                new()
+                {
+                    Path = $"{state.VolumePath}/conversation-timeline.json",
+                    Data = JsonSerializer.Serialize(state.Messages, JsonOptions),
+                    Mode = 644
+                },
+                new()
+                {
+                    Path = $"{state.VolumePath}/materials.json",
+                    Data = JsonSerializer.Serialize(state.Materials, JsonOptions),
+                    Mode = 644
+                }
+            };
+
+            for (var i = 0; i < state.Materials.Count; i++)
+            {
+                var material = state.Materials[i];
+                entries.Add(new WriteEntry
+                {
+                    Path = $"{state.VolumePath}/materials/{i + 1:000}-{SanitizePathSegment(material.Type)}-{SanitizePathSegment(material.Name)}.txt",
+                    Data = string.IsNullOrWhiteSpace(material.Content)
+                        ? JsonSerializer.Serialize(material, JsonOptions)
+                        : material.Content,
+                    Mode = 644
+                });
+            }
+
+            await sandbox.Files.WriteFilesAsync(entries, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -1368,6 +2135,286 @@ internal static class HireBotIntegrationEndpoints
         }
 
         await PersistSnapshotToDiskAsync(state, config, logger, cancellationToken);
+    }
+
+    private static string? ValidateSkillFiles(IReadOnlyList<SystemSkillFileUpload> files)
+    {
+        foreach (var file in files)
+        {
+            var relativePath = NormalizeSkillRelativePath(file.RelativePath);
+            if (string.IsNullOrWhiteSpace(relativePath))
+            {
+                return "skill file relativePath 不能为空";
+            }
+
+            if (relativePath.StartsWith("/", StringComparison.Ordinal) ||
+                relativePath.Contains("..", StringComparison.Ordinal) ||
+                relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries)
+                    .Any(segment => string.Equals(segment, "__MACOSX", StringComparison.OrdinalIgnoreCase) ||
+                                    segment.StartsWith("._", StringComparison.OrdinalIgnoreCase)))
+            {
+                return $"skill file relativePath 无效：{file.RelativePath}";
+            }
+        }
+
+        return null;
+    }
+
+    private static async Task PersistSystemSkillToSandboxAsync(
+        HireBotState state,
+        string skillDirectoryName,
+        SystemSkillUploadRequest request,
+        GatewayConfig config,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var connectionConfig = BuildConnectionConfig(config);
+            var readyTimeoutSeconds = ResolveSandboxReadyTimeoutSeconds(config);
+            await using var sandbox = await Sandbox.ConnectAsync(new SandboxConnectOptions
+            {
+                SandboxId = state.SandboxId,
+                ConnectionConfig = connectionConfig,
+                ReadyTimeoutSeconds = readyTimeoutSeconds
+            }, cancellationToken);
+
+            var workspaceSkillRoot = $"{SandboxWorkspacePath}/skills/{skillDirectoryName}";
+            var snapshotRoot = $"{state.VolumePath}/system-skills/{skillDirectoryName}";
+            await sandbox.Files.CreateDirectoriesAsync(
+                [
+                    new CreateDirectoryEntry { Path = $"{SandboxWorkspacePath}/skills", Mode = 755 },
+                    new CreateDirectoryEntry { Path = workspaceSkillRoot, Mode = 755 },
+                    new CreateDirectoryEntry { Path = snapshotRoot, Mode = 755 }
+                ],
+                cancellationToken);
+
+            var entries = new List<WriteEntry>();
+            foreach (var file in request.Files)
+            {
+                var relativePath = NormalizeSkillRelativePath(file.RelativePath);
+                var parentDirectory = Path.GetDirectoryName(relativePath)?.Replace('\\', '/');
+                if (!string.IsNullOrWhiteSpace(parentDirectory))
+                {
+                    await sandbox.Files.CreateDirectoriesAsync(
+                        [
+                            new CreateDirectoryEntry { Path = $"{workspaceSkillRoot}/{parentDirectory}", Mode = 755 },
+                            new CreateDirectoryEntry { Path = $"{snapshotRoot}/{parentDirectory}", Mode = 755 }
+                        ],
+                        cancellationToken);
+                }
+
+                entries.Add(new WriteEntry
+                {
+                    Path = $"{workspaceSkillRoot}/{relativePath}",
+                    Data = file.Content,
+                    Mode = 644
+                });
+                entries.Add(new WriteEntry
+                {
+                    Path = $"{snapshotRoot}/{relativePath}",
+                    Data = file.Content,
+                    Mode = 644
+                });
+            }
+
+            entries.Add(new WriteEntry
+            {
+                Path = $"{snapshotRoot}/system-skill-manifest.json",
+                Data = JsonSerializer.Serialize(new
+                {
+                    request.SkillId,
+                    request.SkillVersion,
+                    request.SkillHash,
+                    InstalledAtUtc = DateTimeOffset.UtcNow,
+                    WorkspacePath = workspaceSkillRoot,
+                    request.StageRules
+                }, JsonOptions),
+                Mode = 644
+            });
+
+            await sandbox.Files.WriteFilesAsync(entries, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "写入 system skill 到沙箱失败: HireId={HireId}, SandboxId={SandboxId}, SkillId={SkillId}", state.HireId, state.SandboxId, request.SkillId);
+            throw;
+        }
+    }
+
+    private static string NormalizeSkillRelativePath(string? path)
+    {
+        return string.IsNullOrWhiteSpace(path)
+            ? string.Empty
+            : path.Trim().Replace('\\', '/').TrimStart('/');
+    }
+
+    private static string? ValidateTemplatePackageUpload(TemplatePackageUploadRequest request)
+    {
+        foreach (var asset in EnumerateTemplateAssets(request))
+        {
+            var relativePath = NormalizeSkillRelativePath(asset.RelativePath);
+            if (string.IsNullOrWhiteSpace(relativePath))
+            {
+                return $"{asset.Kind} relativePath 不能为空";
+            }
+
+            if (relativePath.StartsWith("/", StringComparison.Ordinal) ||
+                relativePath.Contains("..", StringComparison.Ordinal) ||
+                relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries)
+                    .Any(segment => string.Equals(segment, "__MACOSX", StringComparison.OrdinalIgnoreCase) ||
+                                    segment.StartsWith("._", StringComparison.OrdinalIgnoreCase)))
+            {
+                return $"{asset.Kind} relativePath 无效：{asset.RelativePath}";
+            }
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<(string Kind, string RelativePath)> EnumerateTemplateAssets(TemplatePackageUploadRequest request)
+    {
+        foreach (var slice in request.OntologySlices ?? [])
+        {
+            yield return ("ontologySlice", slice.RelativePath);
+        }
+
+        foreach (var skill in request.RequiredSkills ?? [])
+        {
+            yield return ("requiredSkill", skill.RelativePath);
+        }
+    }
+
+    private static async Task PersistTemplatePackageToSandboxAsync(
+        HireBotState state,
+        string packageDirectoryName,
+        TemplatePackageUploadRequest request,
+        GatewayConfig config,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var connectionConfig = BuildConnectionConfig(config);
+            var readyTimeoutSeconds = ResolveSandboxReadyTimeoutSeconds(config);
+            await using var sandbox = await Sandbox.ConnectAsync(new SandboxConnectOptions
+            {
+                SandboxId = state.SandboxId,
+                ConnectionConfig = connectionConfig,
+                ReadyTimeoutSeconds = readyTimeoutSeconds
+            }, cancellationToken);
+
+            var workspaceRoot = $"{SandboxWorkspacePath}/hirebot/template-package";
+            var snapshotRoot = $"{state.VolumePath}/template-package";
+            await sandbox.Files.CreateDirectoriesAsync(
+                [
+                    new CreateDirectoryEntry { Path = $"{SandboxWorkspacePath}/hirebot", Mode = 755 },
+                    new CreateDirectoryEntry { Path = workspaceRoot, Mode = 755 },
+                    new CreateDirectoryEntry { Path = $"{workspaceRoot}/ontology", Mode = 755 },
+                    new CreateDirectoryEntry { Path = $"{workspaceRoot}/skills", Mode = 755 },
+                    new CreateDirectoryEntry { Path = snapshotRoot, Mode = 755 },
+                    new CreateDirectoryEntry { Path = $"{snapshotRoot}/ontology", Mode = 755 },
+                    new CreateDirectoryEntry { Path = $"{snapshotRoot}/skills", Mode = 755 }
+                ],
+                cancellationToken);
+
+            var entries = new List<WriteEntry>
+            {
+                new()
+                {
+                    Path = $"{workspaceRoot}/manifest.json",
+                    Data = request.ManifestJson,
+                    Mode = 644
+                },
+                new()
+                {
+                    Path = $"{snapshotRoot}/manifest.json",
+                    Data = request.ManifestJson,
+                    Mode = 644
+                },
+                new()
+                {
+                    Path = $"{snapshotRoot}/template-package-manifest.json",
+                    Data = JsonSerializer.Serialize(new
+                    {
+                        request.PackageId,
+                        request.PackageVersion,
+                        request.PackageHash,
+                        InstalledAtUtc = DateTimeOffset.UtcNow,
+                        WorkspacePath = workspaceRoot,
+                        PackageDirectoryName = packageDirectoryName,
+                        OntologySlices = request.OntologySlices.Select(slice => new
+                        {
+                            slice.Name,
+                            slice.RelativePath,
+                            slice.Type,
+                            slice.Required,
+                            slice.ContentHash
+                        }),
+                        RequiredSkills = request.RequiredSkills.Select(skill => new
+                        {
+                            skill.Name,
+                            skill.RelativePath,
+                            skill.Required,
+                            skill.ContentHash
+                        })
+                    }, JsonOptions),
+                    Mode = 644
+                }
+            };
+
+            foreach (var slice in request.OntologySlices ?? [])
+            {
+                await AddTemplateAssetEntriesAsync(sandbox, entries, $"{workspaceRoot}/ontology", $"{snapshotRoot}/ontology", slice.RelativePath, slice.Content, cancellationToken);
+            }
+
+            foreach (var skill in request.RequiredSkills ?? [])
+            {
+                await AddTemplateAssetEntriesAsync(sandbox, entries, $"{workspaceRoot}/skills", $"{snapshotRoot}/skills", skill.RelativePath, skill.Content, cancellationToken);
+            }
+
+            await sandbox.Files.WriteFilesAsync(entries, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "写入 template package 到沙箱失败: HireId={HireId}, SandboxId={SandboxId}, PackageId={PackageId}", state.HireId, state.SandboxId, request.PackageId);
+            throw;
+        }
+    }
+
+    private static async Task AddTemplateAssetEntriesAsync(
+        Sandbox sandbox,
+        List<WriteEntry> entries,
+        string workspaceRoot,
+        string snapshotRoot,
+        string relativePath,
+        string content,
+        CancellationToken cancellationToken)
+    {
+        var normalizedPath = NormalizeSkillRelativePath(relativePath);
+        var parentDirectory = Path.GetDirectoryName(normalizedPath)?.Replace('\\', '/');
+        if (!string.IsNullOrWhiteSpace(parentDirectory))
+        {
+            await sandbox.Files.CreateDirectoriesAsync(
+                [
+                    new CreateDirectoryEntry { Path = $"{workspaceRoot}/{parentDirectory}", Mode = 755 },
+                    new CreateDirectoryEntry { Path = $"{snapshotRoot}/{parentDirectory}", Mode = 755 }
+                ],
+                cancellationToken);
+        }
+
+        entries.Add(new WriteEntry
+        {
+            Path = $"{workspaceRoot}/{normalizedPath}",
+            Data = content,
+            Mode = 644
+        });
+        entries.Add(new WriteEntry
+        {
+            Path = $"{snapshotRoot}/{normalizedPath}",
+            Data = content,
+            Mode = 644
+        });
     }
 
     private static async Task PersistSnapshotToDiskAsync(
@@ -1469,6 +2516,15 @@ internal static class HireBotIntegrationEndpoints
         public Dictionary<string, string?> CollectedFields { get; } = new(StringComparer.OrdinalIgnoreCase);
         public StagePreview? LatestPreview { get; set; }
         public List<AuditLog> AuditLogs { get; } = [];
+        public string? DiscoverySkillId { get; set; }
+        public string? DiscoverySkillVersion { get; set; }
+        public string? DiscoverySkillHash { get; set; }
+        public string? TemplatePackageId { get; set; }
+        public string? TemplatePackageVersion { get; set; }
+        public string? TemplatePackageHash { get; set; }
+        public string? TemplatePackagePath { get; set; }
+        public List<StageSkillMapping> StageSkills { get; } = DefaultStageSkills.ToList();
+        public List<ConversationMaterial> Materials { get; } = [];
         public Dictionary<string, byte[]> ArtifactFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
         public byte[]? ArtifactArchive { get; set; }
         public string? ArtifactArchiveFileName { get; set; }
@@ -1498,6 +2554,15 @@ internal static class HireBotIntegrationEndpoints
         public Dictionary<string, string?> CollectedFields { get; init; } = new(StringComparer.OrdinalIgnoreCase);
         public StagePreview? LatestPreview { get; init; }
         public List<AuditLog> AuditLogs { get; init; } = [];
+        public string? DiscoverySkillId { get; init; }
+        public string? DiscoverySkillVersion { get; init; }
+        public string? DiscoverySkillHash { get; init; }
+        public string? TemplatePackageId { get; init; }
+        public string? TemplatePackageVersion { get; init; }
+        public string? TemplatePackageHash { get; init; }
+        public string? TemplatePackagePath { get; init; }
+        public List<StageSkillMapping> StageSkills { get; init; } = [];
+        public List<ConversationMaterial> Materials { get; init; } = [];
         public Dictionary<string, byte[]> ArtifactFiles { get; init; } = new(StringComparer.OrdinalIgnoreCase);
         public byte[]? ArtifactArchive { get; init; }
         public string? ArtifactArchiveFileName { get; init; }
@@ -1530,6 +2595,15 @@ internal static class HireBotIntegrationEndpoints
                     StringComparer.OrdinalIgnoreCase),
                 LatestPreview = state.LatestPreview,
                 AuditLogs = state.AuditLogs.ToList(),
+                DiscoverySkillId = state.DiscoverySkillId,
+                DiscoverySkillVersion = state.DiscoverySkillVersion,
+                DiscoverySkillHash = state.DiscoverySkillHash,
+                TemplatePackageId = state.TemplatePackageId,
+                TemplatePackageVersion = state.TemplatePackageVersion,
+                TemplatePackageHash = state.TemplatePackageHash,
+                TemplatePackagePath = state.TemplatePackagePath,
+                StageSkills = state.StageSkills.ToList(),
+                Materials = state.Materials.ToList(),
                 ArtifactFiles = state.ArtifactFiles.ToDictionary(
                     static pair => pair.Key,
                     static pair => pair.Value.ToArray(),
@@ -1561,6 +2635,13 @@ internal static class HireBotIntegrationEndpoints
                 CreatedAtUtc = CreatedAtUtc,
                 UpdatedAtUtc = UpdatedAtUtc,
                 LatestPreview = LatestPreview,
+                DiscoverySkillId = DiscoverySkillId,
+                DiscoverySkillVersion = DiscoverySkillVersion,
+                DiscoverySkillHash = DiscoverySkillHash,
+                TemplatePackageId = TemplatePackageId,
+                TemplatePackageVersion = TemplatePackageVersion,
+                TemplatePackageHash = TemplatePackageHash,
+                TemplatePackagePath = TemplatePackagePath,
                 ArtifactArchive = ArtifactArchive?.ToArray(),
                 ArtifactArchiveFileName = ArtifactArchiveFileName
             };
@@ -1578,6 +2659,17 @@ internal static class HireBotIntegrationEndpoints
             if (AuditLogs.Count > 0)
             {
                 state.AuditLogs.AddRange(AuditLogs);
+            }
+
+            if (StageSkills.Count > 0)
+            {
+                state.StageSkills.Clear();
+                state.StageSkills.AddRange(StageSkills);
+            }
+
+            if (Materials.Count > 0)
+            {
+                state.Materials.AddRange(Materials);
             }
 
             foreach (var pair in ArtifactFiles)
@@ -1613,10 +2705,68 @@ internal static class HireBotIntegrationEndpoints
     }
 
     private sealed record HireTemplateRequest(string TemplateId, string TenantId, string OperatorId, string? UseCase);
+    private sealed record SystemSkillUploadRequest(
+        string SkillId,
+        string SkillVersion,
+        string SkillHash,
+        IReadOnlyList<SystemSkillFileUpload> Files,
+        IReadOnlyList<SystemSkillStageRuleUpload> StageRules);
+    private sealed record SystemSkillFileUpload(
+        string RelativePath,
+        string ContentHash,
+        string Content);
+    private sealed record SystemSkillStageRuleUpload(
+        string Stage,
+        string SkillName,
+        string Description,
+        IReadOnlyList<string> RequiredFields);
+    private sealed record SystemSkillUploadResult(
+        string HireId,
+        string SandboxId,
+        string SkillId,
+        string SkillVersion,
+        string SkillHash,
+        string InstalledPath,
+        IReadOnlyList<StageSkillMapping> LoadedStageSkills);
+    private sealed record TemplatePackageUploadRequest(
+        string PackageId,
+        string PackageVersion,
+        string PackageHash,
+        string ManifestJson,
+        IReadOnlyList<TemplateOntologySliceUpload> OntologySlices,
+        IReadOnlyList<TemplateSkillUpload> RequiredSkills);
+    private sealed record TemplateOntologySliceUpload(
+        string Name,
+        string RelativePath,
+        string Type,
+        bool Required,
+        string ContentHash,
+        string Content);
+    private sealed record TemplateSkillUpload(
+        string Name,
+        string RelativePath,
+        bool Required,
+        string ContentHash,
+        string Content);
+    private sealed record TemplatePackageUploadResult(
+        string HireId,
+        string SandboxId,
+        string PackageId,
+        string PackageVersion,
+        string PackageHash,
+        string InstalledPath);
     private sealed record HireTemplateResult(string HireId, string SandboxId, string Status, string NextAction);
     private sealed record HireStatusResult(string HireId, string SandboxId, string Status, string? ErrorCode, string? ErrorMessage, string CollectionPhase, string CurrentStage);
     private sealed record StartConversationResult(string HireId, string SessionId, string CurrentStage, bool RequiresAudit, IReadOnlyList<StageSkillMapping> StageSkills);
-    private sealed record ConversationMessageRequest(string Content, IReadOnlyDictionary<string, string>? StructuredAnswers);
+    internal sealed record ConversationMaterial(
+        string Type,
+        string Name,
+        string? Content,
+        string? ContentHash,
+        long? Size,
+        string? MimeType,
+        IReadOnlyDictionary<string, string>? Metadata);
+    private sealed record ConversationMessageRequest(string Content, IReadOnlyDictionary<string, string>? StructuredAnswers, IReadOnlyList<ConversationMaterial>? Materials);
     private sealed record ConversationResult(string HireId, string SessionId, string CurrentStage, bool RequiresAudit, ConversationMessage AssistantMessage, StagePreview LatestPreview);
     private sealed record ConversationTimelineResult(string HireId, string SessionId, string CurrentStage, bool RequiresAudit, string CollectionPhase, IReadOnlyList<ConversationMessage> Messages, IReadOnlyList<StageSkillMapping> StageSkills);
     private sealed record AuditDecisionRequest(string Stage, string Decision, string? Comment, string? RollbackTargetStage);
@@ -1645,5 +2795,47 @@ internal static class HireBotIntegrationEndpoints
         string InputDigest,
         string OutputDigest,
         DateTimeOffset TimestampUtc);
+    private sealed record TemplatePackageSnapshotManifest(
+        string? PackageId,
+        string? PackageVersion,
+        string? PackageHash,
+        string? WorkspacePath,
+        IReadOnlyList<TemplatePackageSnapshotOntologySlice>? OntologySlices,
+        IReadOnlyList<TemplatePackageSnapshotRequiredSkill>? RequiredSkills);
+    private sealed record TemplatePackageSnapshotOntologySlice(
+        string? Name,
+        string? RelativePath,
+        string? Type,
+        bool Required,
+        string? ContentHash);
+    private sealed record TemplatePackageSnapshotRequiredSkill(
+        string? Name,
+        string? RelativePath,
+        bool Required,
+        string? ContentHash);
+    private sealed record RuntimeTemplatePackageArtifacts(
+        string PackageId,
+        string PackageVersion,
+        string PackageHash,
+        string ManifestJson,
+        IReadOnlyList<RuntimeOntologySliceArtifact> OntologySlices,
+        IReadOnlyList<RuntimeRequiredSkillArtifact> RequiredSkills);
+    private sealed record RuntimeOntologySliceArtifact(
+        string Name,
+        string RelativePath,
+        string Type,
+        bool Required,
+        string SourceContent,
+        string SourceContentHash,
+        string OptimizedContent,
+        string OptimizedContentHash);
+    private sealed record RuntimeRequiredSkillArtifact(
+        string Name,
+        string RelativePath,
+        bool Required,
+        string SourceContent,
+        string SourceContentHash,
+        string OptimizedContent,
+        string OptimizedContentHash);
 }
 

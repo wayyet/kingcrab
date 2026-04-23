@@ -33,6 +33,7 @@ internal sealed class OpenSandboxExecutionBackend : IExecutionBackend
             {
                 Command = request.Command,
                 Arguments = request.Arguments,
+                SandboxId = request.SandboxId,
                 LeaseKey = request.LeaseKey,
                 Environment = new Dictionary<string, string>(request.Environment, StringComparer.Ordinal),
                 WorkingDirectory = request.WorkingDirectory,

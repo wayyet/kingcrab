@@ -51,6 +51,9 @@ public sealed class Session
     /// <summary>Optional route-scoped tool allowlist applied in addition to preset filtering.</summary>
     public string[] RouteAllowedTools { get; set; } = [];
 
+    /// <summary>Optional execution binding that pins the session to an existing sandbox/runtime context.</summary>
+    public SessionExecutionBinding? ExecutionBinding { get; set; }
+
     /// <summary>Reasoning effort level for extended thinking (null/off, low, medium, high). Set via /think command.</summary>
     public string? ReasoningEffort { get; set; }
 
@@ -121,6 +124,13 @@ public sealed class Session
         => TotalInputTokens + TotalOutputTokens;
 }
 
+public sealed class SessionExecutionBinding
+{
+    public string? SandboxId { get; set; }
+    public string? WorkingDirectory { get; set; }
+    public string[] AllowedTools { get; set; } = [];
+}
+
 public enum SessionState : byte
 {
     Active,
@@ -148,6 +158,7 @@ public sealed record ToolInvocation
 /// AOT-compatible JSON serialization context for all core models.
 /// </summary>
 [JsonSerializable(typeof(Session))]
+[JsonSerializable(typeof(SessionExecutionBinding))]
 [JsonSerializable(typeof(ChatTurn))]
 [JsonSerializable(typeof(ToolInvocation))]
 [JsonSerializable(typeof(List<ToolInvocation>))]

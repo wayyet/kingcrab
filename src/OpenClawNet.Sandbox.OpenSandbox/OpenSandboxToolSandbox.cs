@@ -7,6 +7,7 @@ using OpenClaw.Core.Models;
 // using-alias lookup per the C# spec). Using a distinct alias name sidesteps the
 // collision cleanly, without the original global:: workaround on every reference.
 using SdkSandbox = OpenSandbox.Sandbox;
+using SandboxConnectOptions = OpenSandbox.SandboxConnectOptions;
 using SandboxCreateOptions = OpenSandbox.SandboxCreateOptions;
 using OpenSandbox.Config;
 using OpenSandbox.Core;
@@ -41,12 +42,15 @@ public sealed class OpenSandboxToolSandbox : IToolSandbox, IAsyncDisposable
         if (string.IsNullOrWhiteSpace(request.Command))
             throw new ToolSandboxException("Error: Sandbox command is required.");
 
-        if (string.IsNullOrWhiteSpace(request.Template))
-            throw new ToolSandboxException("Error: Sandbox template is required.");
-
         var ttl = request.TimeToLiveSeconds is > 0
             ? request.TimeToLiveSeconds.Value
             : _options.DefaultTTL;
+
+        if (!string.IsNullOrWhiteSpace(request.SandboxId))
+            return await ExecuteBoundSandboxAsync(request, ttl, cancellationToken);
+
+        if (string.IsNullOrWhiteSpace(request.Template))
+            throw new ToolSandboxException("Error: Sandbox template is required.");
 
         await EvictExpiredLeasesAsync(cancellationToken);
 
@@ -119,6 +123,28 @@ public sealed class OpenSandboxToolSandbox : IToolSandbox, IAsyncDisposable
             // Freshly created — SDK already waited for Ready state; skip Renew.
             var recovered = await RunCommandAsync(recreated.Sandbox, request, ttl, renewBeforeRun: false, cancellationToken);
             return recovered;
+        }
+    }
+
+    private async Task<SandboxResult> ExecuteBoundSandboxAsync(
+        SandboxExecutionRequest request,
+        int ttl,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var sandbox = await SdkSandbox.ConnectAsync(new SandboxConnectOptions
+            {
+                SandboxId = request.SandboxId!,
+                ConnectionConfig = _connectionConfig,
+                ReadyTimeoutSeconds = Math.Max(_options.ReadyTimeoutSeconds, 60)
+            }, cancellationToken);
+
+            return await RunCommandAsync(sandbox, request, ttl, renewBeforeRun: true, cancellationToken);
+        }
+        catch (SandboxGoneException)
+        {
+            throw new ToolSandboxException($"Error: Bound sandbox '{request.SandboxId}' is unavailable.");
         }
     }
 

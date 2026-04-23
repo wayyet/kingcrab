@@ -121,6 +121,50 @@ public sealed class OpenClawToolExecutorTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_WithExecutionBinding_UsesBoundSandboxAndWorkingDirectory()
+    {
+        var tool = new SandboxCapableEchoTool(ToolSandboxMode.Prefer, "local-result");
+        var sandbox = Substitute.For<IToolSandbox>();
+        sandbox.ExecuteAsync(Arg.Any<SandboxExecutionRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new SandboxResult
+            {
+                ExitCode = 0,
+                Stdout = "sandbox-result",
+                Stderr = ""
+            });
+
+        var executor = CreateExecutor(
+            [tool],
+            sandbox,
+            CreateSandboxedGatewayConfig("sandbox_echo", ToolSandboxMode.Prefer));
+
+        var session = CreateSession();
+        session.ExecutionBinding = new SessionExecutionBinding
+        {
+            SandboxId = "hire-sb-1",
+            WorkingDirectory = "/workspace",
+            AllowedTools = ["sandbox_echo"]
+        };
+
+        var result = await executor.ExecuteAsync(
+            "sandbox_echo",
+            """{"value":"hi"}""",
+            callId: null,
+            session,
+            CreateTurnContext(),
+            isStreaming: false,
+            approvalCallback: null,
+            CancellationToken.None);
+
+        Assert.Equal("formatted:sandbox-result", result.ResultText);
+        await sandbox.Received(1).ExecuteAsync(
+            Arg.Is<SandboxExecutionRequest>(request =>
+                request.SandboxId == "hire-sb-1" &&
+                request.WorkingDirectory == "/workspace"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task ExecuteAsync_SandboxPreferWhenProviderUnavailable_FallsBackToLocalExecution()
     {
         var tool = new SandboxCapableEchoTool(ToolSandboxMode.Prefer, "local-result");
@@ -239,6 +283,38 @@ public sealed class OpenClawToolExecutorTests
             CancellationToken.None);
 
         Assert.Contains("denied by hook", result.ResultText, StringComparison.OrdinalIgnoreCase);
+        await sandbox.DidNotReceiveWithAnyArgs().ExecuteAsync(default!, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenExecutionBindingRestrictsTools_DeniesDisallowedTool()
+    {
+        var tool = new SandboxCapableEchoTool(ToolSandboxMode.Prefer, "local-result");
+        var sandbox = Substitute.For<IToolSandbox>();
+        var executor = CreateExecutor(
+            [tool],
+            sandbox,
+            CreateSandboxedGatewayConfig("sandbox_echo", ToolSandboxMode.Prefer));
+
+        var session = CreateSession();
+        session.ExecutionBinding = new SessionExecutionBinding
+        {
+            SandboxId = "hire-sb-1",
+            WorkingDirectory = "/workspace",
+            AllowedTools = ["shell"]
+        };
+
+        var result = await executor.ExecuteAsync(
+            "sandbox_echo",
+            """{"value":"hi"}""",
+            callId: null,
+            session,
+            CreateTurnContext(),
+            isStreaming: false,
+            approvalCallback: null,
+            CancellationToken.None);
+
+        Assert.Contains("not allowed", result.ResultText, StringComparison.OrdinalIgnoreCase);
         await sandbox.DidNotReceiveWithAnyArgs().ExecuteAsync(default!, CancellationToken.None);
     }
 

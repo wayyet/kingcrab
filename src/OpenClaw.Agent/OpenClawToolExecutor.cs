@@ -331,7 +331,22 @@ public sealed class OpenClawToolExecutor
         if (session.RouteAllowedTools is { Length: > 0 })
             return session.RouteAllowedTools.Contains(toolName, StringComparer.OrdinalIgnoreCase);
 
+        if (session.ExecutionBinding?.AllowedTools is { Length: > 0 })
+            return session.ExecutionBinding.AllowedTools.Contains(toolName, StringComparer.OrdinalIgnoreCase);
+
         return true;
+    }
+
+    private static void ApplyExecutionBinding(Session session, SandboxExecutionRequest request)
+    {
+        if (session.ExecutionBinding is null)
+            return;
+
+        if (!string.IsNullOrWhiteSpace(session.ExecutionBinding.SandboxId))
+            request.SandboxId ??= session.ExecutionBinding.SandboxId;
+
+        if (!string.IsNullOrWhiteSpace(session.ExecutionBinding.WorkingDirectory))
+            request.WorkingDirectory ??= session.ExecutionBinding.WorkingDirectory;
     }
 
     private async Task<string> ExecuteStreamingToolCollectAsync(
@@ -430,6 +445,7 @@ public sealed class OpenClawToolExecutor
         try
         {
             var sandboxRequest = sandboxCapableTool.CreateSandboxRequest(argsJson);
+            ApplyExecutionBinding(session, sandboxRequest);
             sandboxRequest.LeaseKey ??= $"{session.Id}:{tool.Name}";
             sandboxRequest.Template ??= template;
             sandboxRequest.TimeToLiveSeconds = ToolSandboxPolicy.ResolveTimeToLiveSeconds(
@@ -443,6 +459,7 @@ public sealed class OpenClawToolExecutor
                 BackendName = backendName,
                 Command = sandboxRequest.Command,
                 Arguments = sandboxRequest.Arguments,
+                SandboxId = sandboxRequest.SandboxId,
                 LeaseKey = sandboxRequest.LeaseKey,
                 Environment = new Dictionary<string, string>(sandboxRequest.Environment, StringComparer.Ordinal),
                 WorkingDirectory = sandboxRequest.WorkingDirectory,

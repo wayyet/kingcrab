@@ -13,6 +13,7 @@ public sealed class SandboxExecutionRequest
     public string? WorkingDirectory { get; set; }
     public IDictionary<string, string> Environment { get; set; } = new Dictionary<string, string>(StringComparer.Ordinal);
     public string[] Arguments { get; set; } = [];
+    public string? SandboxId { get; set; }
     public string? LeaseKey { get; set; }
     public string? Template { get; set; }
     public int? TimeToLiveSeconds { get; set; }
