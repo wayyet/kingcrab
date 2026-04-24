@@ -435,6 +435,7 @@ public static class SkillLoader
         => new()
         {
             ClarifyWhenScoreGapBelow = ReadInt32(element, "clarify_when_score_gap_below", 2),
+            PreferExplicitUserArtifactRequests = ReadBoolean(element, "prefer_explicit_user_artifact_requests"),
             ScoreDimensions = element.TryGetProperty("score_dimensions", out var scoreDimensions)
                 ? ParseProjectionScoreDimensions(scoreDimensions)
                 : [],

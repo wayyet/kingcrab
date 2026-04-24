@@ -124,7 +124,8 @@ public class MafAgentRuntimeTests
                 """
                 {
                   "mapping_policy": {
-                    "unresolved_item_policy": "block_or_escalate"
+                                        "unresolved_item_policy": "block_or_escalate",
+                                        "prompt_assumption_policy": "disallow_unmapped_terms"
                   },
                   "prompt_projection": {
                     "allowed_terms": ["skills_config"],
@@ -133,7 +134,14 @@ public class MafAgentRuntimeTests
                     "reasoning_paths": ["skills_config -> source_precedence"],
                     "source_digest": ["Primary source: SkillLoader.cs"]
                   },
-                  "delivery_artifacts": [],
+                                    "delivery_artifacts": [
+                                        {
+                                            "artifact_name": "TaskExecutionPromptPolicy.md",
+                                            "artifact_type": "prompt_fragment",
+                                            "path": "artifacts/TaskExecutionPromptPolicy.md",
+                                            "status": "planned"
+                                        }
+                                    ],
                   "dropped_items": [],
                   "open_questions": []
                 }
@@ -162,6 +170,9 @@ public class MafAgentRuntimeTests
             Assert.Contains("[Projection Route]", prompt);
             Assert.Contains("Selected topic: task-execution", prompt);
             Assert.Contains("Do not invert source precedence.", prompt);
+            Assert.Contains("Prompt constraint: Do not use unmapped terms or invent terminology beyond this projection.", prompt);
+            Assert.Contains("Delivery artifacts:", prompt);
+            Assert.Contains("TaskExecutionPromptPolicy.md (prompt_fragment) -> artifacts/TaskExecutionPromptPolicy.md [planned]", prompt);
         }
         finally
         {
@@ -237,7 +248,7 @@ public class MafAgentRuntimeTests
 
         try
         {
-            var relativePath = Path.Combine("task-execution", "task-execution.prompt-constraint.projection.json").Replace('\\', '/');
+            var relativePath = Path.Combine("task-execution", $"task-execution.{SkillProjectionViewKeys.PromptConstraint}.projection.json").Replace('\\', '/');
 
             File.WriteAllText(
                 Path.Combine(producerOneRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)),
@@ -314,7 +325,7 @@ public class MafAgentRuntimeTests
                 {
                     PreferReadyOnly = true,
                     BlockOnOpenQuestions = true,
-                    FallbackOrderByTargetView = ["prompt-constraint"]
+                    FallbackOrderByTargetView = [SkillProjectionViewKeys.PromptConstraint]
                 },
                 TopicScoring = new ProjectionTopicScoring
                 {
@@ -354,7 +365,7 @@ public class MafAgentRuntimeTests
                     [
                         new ProjectionViewSignals
                         {
-                            TargetView = "prompt-constraint",
+                            TargetView = SkillProjectionViewKeys.PromptConstraint,
                             ExplicitOutputSignals = explicitArtifactSignals ?? ["prompt policy"],
                             StrongSignals = ["review guidance", "allowed terms"],
                             SupportingSignals = ["guidance", "task execution"],
@@ -367,12 +378,12 @@ public class MafAgentRuntimeTests
                     new ProjectionTopicRecord
                     {
                         DomainSlug = "task-execution",
-                        DefaultTargetView = "prompt-constraint",
+                        DefaultTargetView = SkillProjectionViewKeys.PromptConstraint,
                         Views =
                         [
                             new ProjectionViewRecord
                             {
-                                TargetView = "prompt-constraint",
+                                TargetView = SkillProjectionViewKeys.PromptConstraint,
                                 Status = "READY",
                                 Path = relativePath
                             }

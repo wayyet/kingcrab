@@ -200,7 +200,7 @@ public class SkillLoaderTests
                 try
                 {
                         File.WriteAllText(Path.Combine(contractRoot, "contract-index.json"),
-                                """
+                            $$"""
                                 {
                                     "producer_skill": "ncrew-ontology",
                                     "producer_priority": 42,
@@ -230,7 +230,7 @@ public class SkillLoaderTests
                                         ],
                                         "views": [
                                             {
-                                                "target_view": "prompt-constraint",
+                                                "target_view": "{{SkillProjectionViewKeys.PromptConstraint}}",
                                                 "explicit_output_signals": ["prompt policy"],
                                                 "strong_signals": ["review guidance"],
                                                 "supporting_signals": ["review"],
@@ -242,12 +242,12 @@ public class SkillLoaderTests
                                     "topics": [
                                         {
                                             "domain_slug": "task-execution",
-                                            "default_target_view": "prompt-constraint",
+                                            "default_target_view": "{{SkillProjectionViewKeys.PromptConstraint}}",
                                             "views": [
                                                 {
-                                                    "target_view": "prompt-constraint",
+                                                    "target_view": "{{SkillProjectionViewKeys.PromptConstraint}}",
                                                     "status": "READY",
-                                                    "path": "task-execution/task-execution.prompt-constraint.projection.json"
+                                                    "path": "task-execution/task-execution.{{SkillProjectionViewKeys.PromptConstraint}}.projection.json"
                                                 }
                                             ]
                                         }
@@ -724,7 +724,7 @@ public class SkillProjectionResolverTests
 
         try
         {
-            var relativePath = Path.Combine("task-execution", "task-execution.prompt-constraint.projection.json");
+            var relativePath = ProjectionRelativePath(SkillProjectionViewKeys.PromptConstraint);
             var projectionDir = Path.Combine(tempDir, "task-execution");
             Directory.CreateDirectory(projectionDir);
 
@@ -743,7 +743,14 @@ public class SkillProjectionResolverTests
                     "reasoning_paths": ["skills_config -> skill_definition"],
                     "source_digest": ["Primary source: SkillLoader.cs"]
                   },
-                  "delivery_artifacts": [],
+                                    "delivery_artifacts": [
+                                        {
+                                            "artifact_name": "TaskExecutionPromptPolicy.md",
+                                            "artifact_type": "prompt_fragment",
+                                            "path": "artifacts/TaskExecutionPromptPolicy.md",
+                                            "status": "planned"
+                                        }
+                                    ],
                   "dropped_items": [],
                   "open_questions": []
                 }
@@ -864,6 +871,9 @@ public class SkillProjectionResolverTests
             Assert.Contains("Allowed terms:", patch);
             Assert.Contains("skills_config", patch);
             Assert.Contains("Do not invent new routing rules.", patch);
+            Assert.Contains("Prompt constraint: Do not use unmapped terms or invent terminology beyond this projection.", patch);
+            Assert.Contains("Delivery artifacts:", patch);
+            Assert.Contains("TaskExecutionPromptPolicy.md (prompt_fragment) -> artifacts/TaskExecutionPromptPolicy.md [planned]", patch);
         }
         finally
         {
@@ -1007,7 +1017,8 @@ public class SkillProjectionResolverTests
                             DefaultSelectionPolicy = new ProjectionSelectionPolicy
                             {
                                 PreferReadyOnly = true,
-                                BlockOnOpenQuestions = true
+                                BlockOnOpenQuestions = true,
+                                FallbackOrderByTargetView = ["prompt-constraint"]
                             },
                             Topics =
                             [
@@ -1052,7 +1063,8 @@ public class SkillProjectionResolverTests
                             DefaultSelectionPolicy = new ProjectionSelectionPolicy
                             {
                                 PreferReadyOnly = true,
-                                BlockOnOpenQuestions = false
+                                BlockOnOpenQuestions = false,
+                                FallbackOrderByTargetView = ["prompt-constraint"]
                             },
                             Topics =
                             [
@@ -1274,6 +1286,1130 @@ public class SkillProjectionResolverTests
         }
     }
 
+    [Fact]
+    public void ResolveForRequest_WithExplicitArtifactRequest_PrefersMatchingTargetView()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"openclaw-projection-tests-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(tempDir, "task-execution"));
+
+        try
+        {
+            var promptConstraintPath = ProjectionRelativePath(SkillProjectionViewKeys.PromptConstraint).Replace('\\', '/');
+            var jsonSchemaPath = ProjectionRelativePath(SkillProjectionViewKeys.JsonSchema).Replace('\\', '/');
+
+            File.WriteAllText(
+                Path.Combine(tempDir, promptConstraintPath.Replace('/', Path.DirectorySeparatorChar)),
+                """
+                {
+                  "prompt_projection": {
+                    "allowed_terms": ["prompt_constraint"]
+                  },
+                  "delivery_artifacts": [],
+                  "dropped_items": [],
+                  "open_questions": []
+                }
+                """);
+
+            File.WriteAllText(
+                Path.Combine(tempDir, jsonSchemaPath.Replace('/', Path.DirectorySeparatorChar)),
+                """
+                {
+                  "prompt_projection": {
+                    "allowed_terms": ["json_schema"]
+                  },
+                  "delivery_artifacts": [],
+                  "dropped_items": [],
+                  "open_questions": []
+                }
+                """);
+
+            var skill = new SkillDefinition
+            {
+                Name = "software-developer",
+                Description = "Developer skill",
+                Instructions = "Base skill instructions.",
+                Location = "/skills/software-developer",
+                ProjectionContracts =
+                [
+                    new SkillProjectionContractSet
+                    {
+                        RootPath = tempDir,
+                        Index = new ProjectionContractIndex
+                        {
+                            DefaultSelectionPolicy = new ProjectionSelectionPolicy
+                            {
+                                PreferReadyOnly = true,
+                                BlockOnOpenQuestions = true
+                            },
+                            TopicScoring = new ProjectionTopicScoring
+                            {
+                                ClarifyWhenScoreGapBelow = 2,
+                                ScoreDimensions =
+                                [
+                                    new ProjectionScoreDimension { Dimension = "primary_intent_match", Score = 5 },
+                                    new ProjectionScoreDimension { Dimension = "strong_keyword_match", Score = 3 },
+                                    new ProjectionScoreDimension { Dimension = "supporting_keyword_match", Score = 1 }
+                                ],
+                                Topics =
+                                [
+                                    new ProjectionTopicSignals
+                                    {
+                                        DomainSlug = "task-execution",
+                                        PrimaryIntentSignals = ["review guidance"],
+                                        SupportingSignals = ["guidance"],
+                                        ExplicitArtifactSignals = [],
+                                        DemoteWhenCompetingTopicSignals = []
+                                    }
+                                ]
+                            },
+                            TargetViewScoring = new ProjectionTargetViewScoring
+                            {
+                                ClarifyWhenScoreGapBelow = 1,
+                                PreferExplicitUserArtifactRequests = true,
+                                ScoreDimensions =
+                                [
+                                    new ProjectionScoreDimension { Dimension = "explicit_output_match", Score = 5 },
+                                    new ProjectionScoreDimension { Dimension = "strong_signal_match", Score = 3 },
+                                    new ProjectionScoreDimension { Dimension = "supporting_signal_match", Score = 1 },
+                                    new ProjectionScoreDimension { Dimension = "cross_view_conflict_penalty", Score = -2 },
+                                    new ProjectionScoreDimension { Dimension = "topic_default_view_bonus", Score = 1 },
+                                    new ProjectionScoreDimension { Dimension = "explicit_user_artifact_request_bonus", Score = 4 }
+                                ],
+                                Views =
+                                [
+                                    new ProjectionViewSignals
+                                    {
+                                        TargetView = "prompt-constraint",
+                                        ExplicitOutputSignals = [],
+                                        StrongSignals = [],
+                                        SupportingSignals = [],
+                                        DemoteWhenCompetingViewSignals = []
+                                    },
+                                    new ProjectionViewSignals
+                                    {
+                                        TargetView = "json-schema",
+                                        ExplicitOutputSignals = [],
+                                        StrongSignals = [],
+                                        SupportingSignals = [],
+                                        DemoteWhenCompetingViewSignals = []
+                                    }
+                                ]
+                            },
+                            Topics =
+                            [
+                                new ProjectionTopicRecord
+                                {
+                                    DomainSlug = "task-execution",
+                                    DefaultTargetView = "prompt-constraint",
+                                    Views =
+                                    [
+                                        new ProjectionViewRecord
+                                        {
+                                            TargetView = "prompt-constraint",
+                                            Status = "READY",
+                                            Path = promptConstraintPath
+                                        },
+                                        new ProjectionViewRecord
+                                        {
+                                            TargetView = "json-schema",
+                                            Status = "READY",
+                                            Path = jsonSchemaPath
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ]
+            };
+
+            var resolution = SkillProjectionResolver.ResolveForRequest(skill, "Please provide the json schema for this review guidance.", new TestLogger());
+
+            Assert.False(resolution.IsBlocked);
+            Assert.Equal("json-schema", resolution.SelectedTargetView);
+            Assert.NotNull(resolution.Projection);
+            Assert.Contains("json_schema", resolution.Projection.PromptProjection.AllowedTerms);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ResolveForRequest_WithChineseArtifactRequest_PrefersMatchingTargetView()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"openclaw-projection-tests-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(tempDir, "task-execution"));
+
+        try
+        {
+            var promptConstraintPath = ProjectionRelativePath(SkillProjectionViewKeys.PromptConstraint).Replace('\\', '/');
+            var jsonSchemaPath = ProjectionRelativePath(SkillProjectionViewKeys.JsonSchema).Replace('\\', '/');
+
+            File.WriteAllText(
+                Path.Combine(tempDir, promptConstraintPath.Replace('/', Path.DirectorySeparatorChar)),
+                """
+                {
+                  "prompt_projection": {
+                    "allowed_terms": ["prompt_constraint"]
+                  },
+                  "delivery_artifacts": [],
+                  "dropped_items": [],
+                  "open_questions": []
+                }
+                """);
+
+            File.WriteAllText(
+                Path.Combine(tempDir, jsonSchemaPath.Replace('/', Path.DirectorySeparatorChar)),
+                """
+                {
+                  "prompt_projection": {
+                    "allowed_terms": ["json_schema"]
+                  },
+                  "delivery_artifacts": [],
+                  "dropped_items": [],
+                  "open_questions": []
+                }
+                """);
+
+            var skill = new SkillDefinition
+            {
+                Name = "software-developer",
+                Description = "Developer skill",
+                Instructions = "Base skill instructions.",
+                Location = "/skills/software-developer",
+                ProjectionContracts =
+                [
+                    new SkillProjectionContractSet
+                    {
+                        RootPath = tempDir,
+                        Index = new ProjectionContractIndex
+                        {
+                            DefaultSelectionPolicy = new ProjectionSelectionPolicy
+                            {
+                                PreferReadyOnly = true,
+                                BlockOnOpenQuestions = true
+                            },
+                            TopicScoring = new ProjectionTopicScoring
+                            {
+                                ClarifyWhenScoreGapBelow = 2,
+                                ScoreDimensions =
+                                [
+                                    new ProjectionScoreDimension { Dimension = "primary_intent_match", Score = 5 },
+                                    new ProjectionScoreDimension { Dimension = "strong_keyword_match", Score = 3 },
+                                    new ProjectionScoreDimension { Dimension = "supporting_keyword_match", Score = 1 }
+                                ],
+                                Topics =
+                                [
+                                    new ProjectionTopicSignals
+                                    {
+                                        DomainSlug = "task-execution",
+                                        PrimaryIntentSignals = ["review guidance"],
+                                        SupportingSignals = ["guidance"],
+                                        ExplicitArtifactSignals = [],
+                                        DemoteWhenCompetingTopicSignals = []
+                                    }
+                                ]
+                            },
+                            TargetViewScoring = new ProjectionTargetViewScoring
+                            {
+                                ClarifyWhenScoreGapBelow = 1,
+                                PreferExplicitUserArtifactRequests = true,
+                                ScoreDimensions =
+                                [
+                                    new ProjectionScoreDimension { Dimension = "explicit_output_match", Score = 5 },
+                                    new ProjectionScoreDimension { Dimension = "strong_signal_match", Score = 3 },
+                                    new ProjectionScoreDimension { Dimension = "supporting_signal_match", Score = 1 },
+                                    new ProjectionScoreDimension { Dimension = "cross_view_conflict_penalty", Score = -2 },
+                                    new ProjectionScoreDimension { Dimension = "topic_default_view_bonus", Score = 1 },
+                                    new ProjectionScoreDimension { Dimension = "explicit_user_artifact_request_bonus", Score = 4 }
+                                ],
+                                Views =
+                                [
+                                    new ProjectionViewSignals
+                                    {
+                                        TargetView = "prompt-constraint",
+                                        ExplicitOutputSignals = [],
+                                        StrongSignals = [],
+                                        SupportingSignals = [],
+                                        DemoteWhenCompetingViewSignals = []
+                                    },
+                                    new ProjectionViewSignals
+                                    {
+                                        TargetView = "json-schema",
+                                        ExplicitOutputSignals = [],
+                                        StrongSignals = [],
+                                        SupportingSignals = [],
+                                        DemoteWhenCompetingViewSignals = []
+                                    }
+                                ]
+                            },
+                            Topics =
+                            [
+                                new ProjectionTopicRecord
+                                {
+                                    DomainSlug = "task-execution",
+                                    DefaultTargetView = "prompt-constraint",
+                                    Views =
+                                    [
+                                        new ProjectionViewRecord
+                                        {
+                                            TargetView = "prompt-constraint",
+                                            Status = "READY",
+                                            Path = promptConstraintPath
+                                        },
+                                        new ProjectionViewRecord
+                                        {
+                                            TargetView = "json-schema",
+                                            Status = "READY",
+                                            Path = jsonSchemaPath
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ]
+            };
+
+            var resolution = SkillProjectionResolver.ResolveForRequest(skill, "请提供这份 review guidance 的 JSON Schema 文件。", new TestLogger());
+
+            Assert.False(resolution.IsBlocked);
+            Assert.Equal("json-schema", resolution.SelectedTargetView);
+            Assert.NotNull(resolution.Projection);
+            Assert.Contains("json_schema", resolution.Projection.PromptProjection.AllowedTerms);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ResolveForRequest_WithStableChinesePromptConstraintTerm_PrefersPromptConstraintView()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"openclaw-projection-tests-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(tempDir, "task-execution"));
+
+        try
+        {
+            var domainModelPath = ProjectionRelativePath(SkillProjectionViewKeys.DomainModel).Replace('\\', '/');
+            var promptConstraintPath = ProjectionRelativePath(SkillProjectionViewKeys.PromptConstraint).Replace('\\', '/');
+
+            File.WriteAllText(
+                Path.Combine(tempDir, domainModelPath.Replace('/', Path.DirectorySeparatorChar)),
+                """
+                {
+                  "prompt_projection": {
+                    "allowed_terms": ["domain_model"]
+                  },
+                  "delivery_artifacts": [],
+                  "dropped_items": [],
+                  "open_questions": []
+                }
+                """);
+
+            File.WriteAllText(
+                Path.Combine(tempDir, promptConstraintPath.Replace('/', Path.DirectorySeparatorChar)),
+                """
+                {
+                  "prompt_projection": {
+                    "allowed_terms": ["prompt_constraint"]
+                  },
+                  "delivery_artifacts": [],
+                  "dropped_items": [],
+                  "open_questions": []
+                }
+                """);
+
+            var skill = new SkillDefinition
+            {
+                Name = "software-developer",
+                Description = "Developer skill",
+                Instructions = "Base skill instructions.",
+                Location = "/skills/software-developer",
+                ProjectionContracts =
+                [
+                    new SkillProjectionContractSet
+                    {
+                        RootPath = tempDir,
+                        Index = new ProjectionContractIndex
+                        {
+                            DefaultSelectionPolicy = new ProjectionSelectionPolicy
+                            {
+                                PreferReadyOnly = true,
+                                BlockOnOpenQuestions = true
+                            },
+                            TopicScoring = new ProjectionTopicScoring
+                            {
+                                ClarifyWhenScoreGapBelow = 2,
+                                ScoreDimensions =
+                                [
+                                    new ProjectionScoreDimension { Dimension = "primary_intent_match", Score = 5 },
+                                    new ProjectionScoreDimension { Dimension = "strong_keyword_match", Score = 3 },
+                                    new ProjectionScoreDimension { Dimension = "supporting_keyword_match", Score = 1 }
+                                ],
+                                Topics =
+                                [
+                                    new ProjectionTopicSignals
+                                    {
+                                        DomainSlug = "task-execution",
+                                        PrimaryIntentSignals = ["review guidance"],
+                                        SupportingSignals = ["guidance"],
+                                        ExplicitArtifactSignals = [],
+                                        DemoteWhenCompetingTopicSignals = []
+                                    }
+                                ]
+                            },
+                            TargetViewScoring = new ProjectionTargetViewScoring
+                            {
+                                ClarifyWhenScoreGapBelow = 1,
+                                PreferExplicitUserArtifactRequests = true,
+                                ScoreDimensions =
+                                [
+                                    new ProjectionScoreDimension { Dimension = "explicit_output_match", Score = 5 },
+                                    new ProjectionScoreDimension { Dimension = "strong_signal_match", Score = 3 },
+                                    new ProjectionScoreDimension { Dimension = "supporting_signal_match", Score = 1 },
+                                    new ProjectionScoreDimension { Dimension = "cross_view_conflict_penalty", Score = -2 },
+                                    new ProjectionScoreDimension { Dimension = "topic_default_view_bonus", Score = 1 },
+                                    new ProjectionScoreDimension { Dimension = "explicit_user_artifact_request_bonus", Score = 4 }
+                                ],
+                                Views =
+                                [
+                                    new ProjectionViewSignals
+                                    {
+                                        TargetView = "domain-model",
+                                        ExplicitOutputSignals = [],
+                                        StrongSignals = [],
+                                        SupportingSignals = [],
+                                        DemoteWhenCompetingViewSignals = []
+                                    },
+                                    new ProjectionViewSignals
+                                    {
+                                        TargetView = "prompt-constraint",
+                                        ExplicitOutputSignals = [],
+                                        StrongSignals = [],
+                                        SupportingSignals = [],
+                                        DemoteWhenCompetingViewSignals = []
+                                    }
+                                ]
+                            },
+                            Topics =
+                            [
+                                new ProjectionTopicRecord
+                                {
+                                    DomainSlug = "task-execution",
+                                    DefaultTargetView = "domain-model",
+                                    Views =
+                                    [
+                                        new ProjectionViewRecord
+                                        {
+                                            TargetView = "domain-model",
+                                            Status = "READY",
+                                            Path = domainModelPath
+                                        },
+                                        new ProjectionViewRecord
+                                        {
+                                            TargetView = "prompt-constraint",
+                                            Status = "READY",
+                                            Path = promptConstraintPath
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ]
+            };
+
+            var resolution = SkillProjectionResolver.ResolveForRequest(skill, "请提供这份 review guidance 的提示词约束。", new TestLogger());
+
+            Assert.False(resolution.IsBlocked);
+            Assert.Equal("prompt-constraint", resolution.SelectedTargetView);
+            Assert.NotNull(resolution.Projection);
+            Assert.Contains("prompt_constraint", resolution.Projection.PromptProjection.AllowedTerms);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ResolveForRequest_WithGenericSchemaWord_DoesNotTriggerJsonSchemaPreference()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"openclaw-projection-tests-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(tempDir, "task-execution"));
+
+        try
+        {
+            var promptConstraintPath = ProjectionRelativePath(SkillProjectionViewKeys.PromptConstraint).Replace('\\', '/');
+            var jsonSchemaPath = ProjectionRelativePath(SkillProjectionViewKeys.JsonSchema).Replace('\\', '/');
+
+            File.WriteAllText(
+                Path.Combine(tempDir, promptConstraintPath.Replace('/', Path.DirectorySeparatorChar)),
+                """
+                {
+                  "prompt_projection": {
+                    "allowed_terms": ["prompt_constraint"]
+                  },
+                  "delivery_artifacts": [],
+                  "dropped_items": [],
+                  "open_questions": []
+                }
+                """);
+
+            File.WriteAllText(
+                Path.Combine(tempDir, jsonSchemaPath.Replace('/', Path.DirectorySeparatorChar)),
+                """
+                {
+                  "prompt_projection": {
+                    "allowed_terms": ["json_schema"]
+                  },
+                  "delivery_artifacts": [],
+                  "dropped_items": [],
+                  "open_questions": []
+                }
+                """);
+
+            var skill = new SkillDefinition
+            {
+                Name = "software-developer",
+                Description = "Developer skill",
+                Instructions = "Base skill instructions.",
+                Location = "/skills/software-developer",
+                ProjectionContracts =
+                [
+                    new SkillProjectionContractSet
+                    {
+                        RootPath = tempDir,
+                        Index = new ProjectionContractIndex
+                        {
+                            DefaultSelectionPolicy = new ProjectionSelectionPolicy
+                            {
+                                PreferReadyOnly = true,
+                                BlockOnOpenQuestions = true
+                            },
+                            TopicScoring = new ProjectionTopicScoring
+                            {
+                                ClarifyWhenScoreGapBelow = 2,
+                                ScoreDimensions =
+                                [
+                                    new ProjectionScoreDimension { Dimension = "primary_intent_match", Score = 5 },
+                                    new ProjectionScoreDimension { Dimension = "strong_keyword_match", Score = 3 },
+                                    new ProjectionScoreDimension { Dimension = "supporting_keyword_match", Score = 1 }
+                                ],
+                                Topics =
+                                [
+                                    new ProjectionTopicSignals
+                                    {
+                                        DomainSlug = "task-execution",
+                                        PrimaryIntentSignals = ["review guidance"],
+                                        SupportingSignals = ["guidance"],
+                                        ExplicitArtifactSignals = [],
+                                        DemoteWhenCompetingTopicSignals = []
+                                    }
+                                ]
+                            },
+                            TargetViewScoring = new ProjectionTargetViewScoring
+                            {
+                                ClarifyWhenScoreGapBelow = 1,
+                                PreferExplicitUserArtifactRequests = true,
+                                ScoreDimensions =
+                                [
+                                    new ProjectionScoreDimension { Dimension = "explicit_output_match", Score = 5 },
+                                    new ProjectionScoreDimension { Dimension = "strong_signal_match", Score = 3 },
+                                    new ProjectionScoreDimension { Dimension = "supporting_signal_match", Score = 1 },
+                                    new ProjectionScoreDimension { Dimension = "cross_view_conflict_penalty", Score = -2 },
+                                    new ProjectionScoreDimension { Dimension = "topic_default_view_bonus", Score = 1 },
+                                    new ProjectionScoreDimension { Dimension = "explicit_user_artifact_request_bonus", Score = 4 }
+                                ],
+                                Views =
+                                [
+                                    new ProjectionViewSignals
+                                    {
+                                        TargetView = "prompt-constraint",
+                                        ExplicitOutputSignals = [],
+                                        StrongSignals = [],
+                                        SupportingSignals = [],
+                                        DemoteWhenCompetingViewSignals = []
+                                    },
+                                    new ProjectionViewSignals
+                                    {
+                                        TargetView = "json-schema",
+                                        ExplicitOutputSignals = [],
+                                        StrongSignals = [],
+                                        SupportingSignals = [],
+                                        DemoteWhenCompetingViewSignals = []
+                                    }
+                                ]
+                            },
+                            Topics =
+                            [
+                                new ProjectionTopicRecord
+                                {
+                                    DomainSlug = "task-execution",
+                                    DefaultTargetView = "prompt-constraint",
+                                    Views =
+                                    [
+                                        new ProjectionViewRecord
+                                        {
+                                            TargetView = "prompt-constraint",
+                                            Status = "READY",
+                                            Path = promptConstraintPath
+                                        },
+                                        new ProjectionViewRecord
+                                        {
+                                            TargetView = "json-schema",
+                                            Status = "READY",
+                                            Path = jsonSchemaPath
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ]
+            };
+
+            var resolution = SkillProjectionResolver.ResolveForRequest(skill, "Please provide the schema for this review guidance.", new TestLogger());
+
+            Assert.False(resolution.IsBlocked);
+            Assert.Equal("prompt-constraint", resolution.SelectedTargetView);
+            Assert.NotNull(resolution.Projection);
+            Assert.Contains("prompt_constraint", resolution.Projection.PromptProjection.AllowedTerms);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ResolveForRequest_WithNonCanonicalChineseArtifactWord_DoesNotTriggerJsonSchemaPreference()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"openclaw-projection-tests-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(tempDir, "task-execution"));
+
+        try
+        {
+            var promptConstraintPath = ProjectionRelativePath(SkillProjectionViewKeys.PromptConstraint).Replace('\\', '/');
+            var jsonSchemaPath = ProjectionRelativePath(SkillProjectionViewKeys.JsonSchema).Replace('\\', '/');
+
+            File.WriteAllText(
+                Path.Combine(tempDir, promptConstraintPath.Replace('/', Path.DirectorySeparatorChar)),
+                """
+                {
+                  "prompt_projection": {
+                    "allowed_terms": ["prompt_constraint"]
+                  },
+                  "delivery_artifacts": [],
+                  "dropped_items": [],
+                  "open_questions": []
+                }
+                """);
+
+            File.WriteAllText(
+                Path.Combine(tempDir, jsonSchemaPath.Replace('/', Path.DirectorySeparatorChar)),
+                """
+                {
+                  "prompt_projection": {
+                    "allowed_terms": ["json_schema"]
+                  },
+                  "delivery_artifacts": [],
+                  "dropped_items": [],
+                  "open_questions": []
+                }
+                """);
+
+            var skill = new SkillDefinition
+            {
+                Name = "software-developer",
+                Description = "Developer skill",
+                Instructions = "Base skill instructions.",
+                Location = "/skills/software-developer",
+                ProjectionContracts =
+                [
+                    new SkillProjectionContractSet
+                    {
+                        RootPath = tempDir,
+                        Index = new ProjectionContractIndex
+                        {
+                            DefaultSelectionPolicy = new ProjectionSelectionPolicy
+                            {
+                                PreferReadyOnly = true,
+                                BlockOnOpenQuestions = true
+                            },
+                            TopicScoring = new ProjectionTopicScoring
+                            {
+                                ClarifyWhenScoreGapBelow = 2,
+                                ScoreDimensions =
+                                [
+                                    new ProjectionScoreDimension { Dimension = "primary_intent_match", Score = 5 },
+                                    new ProjectionScoreDimension { Dimension = "strong_keyword_match", Score = 3 },
+                                    new ProjectionScoreDimension { Dimension = "supporting_keyword_match", Score = 1 }
+                                ],
+                                Topics =
+                                [
+                                    new ProjectionTopicSignals
+                                    {
+                                        DomainSlug = "task-execution",
+                                        PrimaryIntentSignals = ["review guidance"],
+                                        SupportingSignals = ["guidance"],
+                                        ExplicitArtifactSignals = [],
+                                        DemoteWhenCompetingTopicSignals = []
+                                    }
+                                ]
+                            },
+                            TargetViewScoring = new ProjectionTargetViewScoring
+                            {
+                                ClarifyWhenScoreGapBelow = 1,
+                                PreferExplicitUserArtifactRequests = true,
+                                ScoreDimensions =
+                                [
+                                    new ProjectionScoreDimension { Dimension = "explicit_output_match", Score = 5 },
+                                    new ProjectionScoreDimension { Dimension = "strong_signal_match", Score = 3 },
+                                    new ProjectionScoreDimension { Dimension = "supporting_signal_match", Score = 1 },
+                                    new ProjectionScoreDimension { Dimension = "cross_view_conflict_penalty", Score = -2 },
+                                    new ProjectionScoreDimension { Dimension = "topic_default_view_bonus", Score = 1 },
+                                    new ProjectionScoreDimension { Dimension = "explicit_user_artifact_request_bonus", Score = 4 }
+                                ],
+                                Views =
+                                [
+                                    new ProjectionViewSignals
+                                    {
+                                        TargetView = "prompt-constraint",
+                                        ExplicitOutputSignals = [],
+                                        StrongSignals = [],
+                                        SupportingSignals = [],
+                                        DemoteWhenCompetingViewSignals = []
+                                    },
+                                    new ProjectionViewSignals
+                                    {
+                                        TargetView = "json-schema",
+                                        ExplicitOutputSignals = [],
+                                        StrongSignals = [],
+                                        SupportingSignals = [],
+                                        DemoteWhenCompetingViewSignals = []
+                                    }
+                                ]
+                            },
+                            Topics =
+                            [
+                                new ProjectionTopicRecord
+                                {
+                                    DomainSlug = "task-execution",
+                                    DefaultTargetView = "prompt-constraint",
+                                    Views =
+                                    [
+                                        new ProjectionViewRecord
+                                        {
+                                            TargetView = "prompt-constraint",
+                                            Status = "READY",
+                                            Path = promptConstraintPath
+                                        },
+                                        new ProjectionViewRecord
+                                        {
+                                            TargetView = "json-schema",
+                                            Status = "READY",
+                                            Path = jsonSchemaPath
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ]
+            };
+
+            var resolution = SkillProjectionResolver.ResolveForRequest(skill, "请给我这份 review guidance 的 json 模式。", new TestLogger());
+
+            Assert.False(resolution.IsBlocked);
+            Assert.Equal("prompt-constraint", resolution.SelectedTargetView);
+            Assert.NotNull(resolution.Projection);
+            Assert.Contains("prompt_constraint", resolution.Projection.PromptProjection.AllowedTerms);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ResolveForRequest_WithBroadChineseConstraintPhrase_DoesNotTriggerPromptConstraintPreference()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"openclaw-projection-tests-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(tempDir, "task-execution"));
+
+        try
+        {
+            var domainModelPath = ProjectionRelativePath(SkillProjectionViewKeys.DomainModel).Replace('\\', '/');
+            var promptConstraintPath = ProjectionRelativePath(SkillProjectionViewKeys.PromptConstraint).Replace('\\', '/');
+
+            File.WriteAllText(
+                Path.Combine(tempDir, domainModelPath.Replace('/', Path.DirectorySeparatorChar)),
+                """
+                {
+                  "prompt_projection": {
+                    "allowed_terms": ["domain_model"]
+                  },
+                  "delivery_artifacts": [],
+                  "dropped_items": [],
+                  "open_questions": []
+                }
+                """);
+
+            File.WriteAllText(
+                Path.Combine(tempDir, promptConstraintPath.Replace('/', Path.DirectorySeparatorChar)),
+                """
+                {
+                  "prompt_projection": {
+                    "allowed_terms": ["prompt_constraint"]
+                  },
+                  "delivery_artifacts": [],
+                  "dropped_items": [],
+                  "open_questions": []
+                }
+                """);
+
+            var skill = new SkillDefinition
+            {
+                Name = "software-developer",
+                Description = "Developer skill",
+                Instructions = "Base skill instructions.",
+                Location = "/skills/software-developer",
+                ProjectionContracts =
+                [
+                    new SkillProjectionContractSet
+                    {
+                        RootPath = tempDir,
+                        Index = new ProjectionContractIndex
+                        {
+                            DefaultSelectionPolicy = new ProjectionSelectionPolicy
+                            {
+                                PreferReadyOnly = true,
+                                BlockOnOpenQuestions = true
+                            },
+                            TopicScoring = new ProjectionTopicScoring
+                            {
+                                ClarifyWhenScoreGapBelow = 2,
+                                ScoreDimensions =
+                                [
+                                    new ProjectionScoreDimension { Dimension = "primary_intent_match", Score = 5 },
+                                    new ProjectionScoreDimension { Dimension = "strong_keyword_match", Score = 3 },
+                                    new ProjectionScoreDimension { Dimension = "supporting_keyword_match", Score = 1 }
+                                ],
+                                Topics =
+                                [
+                                    new ProjectionTopicSignals
+                                    {
+                                        DomainSlug = "task-execution",
+                                        PrimaryIntentSignals = ["review guidance"],
+                                        SupportingSignals = ["guidance"],
+                                        ExplicitArtifactSignals = [],
+                                        DemoteWhenCompetingTopicSignals = []
+                                    }
+                                ],
+                            },
+                            TargetViewScoring = new ProjectionTargetViewScoring
+                            {
+                                ClarifyWhenScoreGapBelow = 1,
+                                PreferExplicitUserArtifactRequests = true,
+                                ScoreDimensions =
+                                [
+                                    new ProjectionScoreDimension { Dimension = "explicit_output_match", Score = 5 },
+                                    new ProjectionScoreDimension { Dimension = "strong_signal_match", Score = 3 },
+                                    new ProjectionScoreDimension { Dimension = "supporting_signal_match", Score = 1 },
+                                    new ProjectionScoreDimension { Dimension = "cross_view_conflict_penalty", Score = -2 },
+                                    new ProjectionScoreDimension { Dimension = "topic_default_view_bonus", Score = 1 },
+                                    new ProjectionScoreDimension { Dimension = "explicit_user_artifact_request_bonus", Score = 4 }
+                                ],
+                                Views =
+                                [
+                                    new ProjectionViewSignals
+                                    {
+                                        TargetView = "domain-model",
+                                        ExplicitOutputSignals = [],
+                                        StrongSignals = [],
+                                        SupportingSignals = [],
+                                        DemoteWhenCompetingViewSignals = []
+                                    },
+                                    new ProjectionViewSignals
+                                    {
+                                        TargetView = "prompt-constraint",
+                                        ExplicitOutputSignals = [],
+                                        StrongSignals = [],
+                                        SupportingSignals = [],
+                                        DemoteWhenCompetingViewSignals = []
+                                    }
+                                ]
+                            },
+                            Topics =
+                            [
+                                new ProjectionTopicRecord
+                                {
+                                    DomainSlug = "task-execution",
+                                    DefaultTargetView = "domain-model",
+                                    Views =
+                                    [
+                                        new ProjectionViewRecord
+                                        {
+                                            TargetView = "domain-model",
+                                            Status = "READY",
+                                            Path = domainModelPath
+                                        },
+                                        new ProjectionViewRecord
+                                        {
+                                            TargetView = "prompt-constraint",
+                                            Status = "READY",
+                                            Path = promptConstraintPath
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ]
+            };
+
+            var resolution = SkillProjectionResolver.ResolveForRequest(skill, "请提供这份 review guidance 的提示约束。", new TestLogger());
+
+            Assert.False(resolution.IsBlocked);
+            Assert.Equal("domain-model", resolution.SelectedTargetView);
+            Assert.NotNull(resolution.Projection);
+            Assert.Contains("domain_model", resolution.Projection.PromptProjection.AllowedTerms);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ResolveForRequest_WithStableChineseWorkflowContractTerm_PrefersWorkflowContractView()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"openclaw-projection-tests-{Guid.NewGuid():N}");
+
+        try
+        {
+            WriteProjectionDocument(tempDir, ProjectionRelativePath(SkillProjectionViewKeys.DomainModel), "domain_model");
+            WriteProjectionDocument(tempDir, ProjectionRelativePath(SkillProjectionViewKeys.WorkflowContract), "workflow_contract");
+
+            var skill = CreateExplicitArtifactPreferenceSkill(
+                tempDir,
+                "domain-model",
+                ("domain-model", "domain_model", "task-execution/task-execution.domain-model.projection.json"),
+                ("workflow-contract", "workflow_contract", "task-execution/task-execution.workflow-contract.projection.json"));
+
+            var resolution = SkillProjectionResolver.ResolveForRequest(skill, "请提供这份 review guidance 的工作流契约。", new TestLogger());
+
+            Assert.False(resolution.IsBlocked);
+            Assert.Equal("workflow-contract", resolution.SelectedTargetView);
+            Assert.NotNull(resolution.Projection);
+            Assert.Contains("workflow_contract", resolution.Projection.PromptProjection.AllowedTerms);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ResolveForRequest_WithBroadChineseWorkflowPhrase_DoesNotTriggerWorkflowContractPreference()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"openclaw-projection-tests-{Guid.NewGuid():N}");
+
+        try
+        {
+            WriteProjectionDocument(tempDir, ProjectionRelativePath(SkillProjectionViewKeys.DomainModel), "domain_model");
+            WriteProjectionDocument(tempDir, ProjectionRelativePath(SkillProjectionViewKeys.WorkflowContract), "workflow_contract");
+
+            var skill = CreateExplicitArtifactPreferenceSkill(
+                tempDir,
+                "domain-model",
+                ("domain-model", "domain_model", "task-execution/task-execution.domain-model.projection.json"),
+                ("workflow-contract", "workflow_contract", "task-execution/task-execution.workflow-contract.projection.json"));
+
+            var resolution = SkillProjectionResolver.ResolveForRequest(skill, "请提供这份 review guidance 的工作流。", new TestLogger());
+
+            Assert.False(resolution.IsBlocked);
+            Assert.Equal("domain-model", resolution.SelectedTargetView);
+            Assert.NotNull(resolution.Projection);
+            Assert.Contains("domain_model", resolution.Projection.PromptProjection.AllowedTerms);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ResolveForRequest_WithStableChineseDomainModelTerm_PrefersDomainModelView()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"openclaw-projection-tests-{Guid.NewGuid():N}");
+
+        try
+        {
+            WriteProjectionDocument(tempDir, ProjectionRelativePath(SkillProjectionViewKeys.DomainModel), "domain_model");
+            WriteProjectionDocument(tempDir, ProjectionRelativePath(SkillProjectionViewKeys.WorkflowContract), "workflow_contract");
+
+            var skill = CreateExplicitArtifactPreferenceSkill(
+                tempDir,
+                "workflow-contract",
+                ("workflow-contract", "workflow_contract", "task-execution/task-execution.workflow-contract.projection.json"),
+                ("domain-model", "domain_model", "task-execution/task-execution.domain-model.projection.json"));
+
+            var resolution = SkillProjectionResolver.ResolveForRequest(skill, "请提供这份 review guidance 的领域模型。", new TestLogger());
+
+            Assert.False(resolution.IsBlocked);
+            Assert.Equal("domain-model", resolution.SelectedTargetView);
+            Assert.NotNull(resolution.Projection);
+            Assert.Contains("domain_model", resolution.Projection.PromptProjection.AllowedTerms);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ResolveForRequest_WithBroadChineseModelPhrase_DoesNotTriggerDomainModelPreference()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"openclaw-projection-tests-{Guid.NewGuid():N}");
+
+        try
+        {
+            WriteProjectionDocument(tempDir, ProjectionRelativePath(SkillProjectionViewKeys.DomainModel), "domain_model");
+            WriteProjectionDocument(tempDir, ProjectionRelativePath(SkillProjectionViewKeys.WorkflowContract), "workflow_contract");
+
+            var skill = CreateExplicitArtifactPreferenceSkill(
+                tempDir,
+                "workflow-contract",
+                ("workflow-contract", "workflow_contract", "task-execution/task-execution.workflow-contract.projection.json"),
+                ("domain-model", "domain_model", "task-execution/task-execution.domain-model.projection.json"));
+
+            var resolution = SkillProjectionResolver.ResolveForRequest(skill, "请提供这份 review guidance 的模型。", new TestLogger());
+
+            Assert.False(resolution.IsBlocked);
+            Assert.Equal(SkillProjectionViewKeys.WorkflowContract, resolution.SelectedTargetView);
+            Assert.NotNull(resolution.Projection);
+            Assert.Contains("workflow_contract", resolution.Projection.PromptProjection.AllowedTerms);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    private static SkillDefinition CreateExplicitArtifactPreferenceSkill(
+        string rootPath,
+        string defaultTargetView,
+        params (string TargetView, string AllowedTerm, string RelativePath)[] views)
+        => new()
+        {
+            Name = "software-developer",
+            Description = "Developer skill",
+            Instructions = "Base skill instructions.",
+            Location = "/skills/software-developer",
+            ProjectionContracts =
+            [
+                new SkillProjectionContractSet
+                {
+                    RootPath = rootPath,
+                    Index = new ProjectionContractIndex
+                    {
+                        DefaultSelectionPolicy = new ProjectionSelectionPolicy
+                        {
+                            PreferReadyOnly = true,
+                            BlockOnOpenQuestions = true
+                        },
+                        TopicScoring = new ProjectionTopicScoring
+                        {
+                            ClarifyWhenScoreGapBelow = 2,
+                            ScoreDimensions =
+                            [
+                                new ProjectionScoreDimension { Dimension = "primary_intent_match", Score = 5 },
+                                new ProjectionScoreDimension { Dimension = "strong_keyword_match", Score = 3 },
+                                new ProjectionScoreDimension { Dimension = "supporting_keyword_match", Score = 1 }
+                            ],
+                            Topics =
+                            [
+                                new ProjectionTopicSignals
+                                {
+                                    DomainSlug = "task-execution",
+                                    PrimaryIntentSignals = ["review guidance"],
+                                    SupportingSignals = ["guidance"],
+                                    ExplicitArtifactSignals = [],
+                                    DemoteWhenCompetingTopicSignals = []
+                                }
+                            ]
+                        },
+                        TargetViewScoring = new ProjectionTargetViewScoring
+                        {
+                            ClarifyWhenScoreGapBelow = 1,
+                            PreferExplicitUserArtifactRequests = true,
+                            ScoreDimensions =
+                            [
+                                new ProjectionScoreDimension { Dimension = "explicit_output_match", Score = 5 },
+                                new ProjectionScoreDimension { Dimension = "strong_signal_match", Score = 3 },
+                                new ProjectionScoreDimension { Dimension = "supporting_signal_match", Score = 1 },
+                                new ProjectionScoreDimension { Dimension = "cross_view_conflict_penalty", Score = -2 },
+                                new ProjectionScoreDimension { Dimension = "topic_default_view_bonus", Score = 1 },
+                                new ProjectionScoreDimension { Dimension = "explicit_user_artifact_request_bonus", Score = 4 }
+                            ],
+                            Views =
+                            [
+                                ..views.Select(view => new ProjectionViewSignals
+                                {
+                                    TargetView = view.TargetView,
+                                    ExplicitOutputSignals = [],
+                                    StrongSignals = [],
+                                    SupportingSignals = [],
+                                    DemoteWhenCompetingViewSignals = []
+                                })
+                            ]
+                        },
+                        Topics =
+                        [
+                            new ProjectionTopicRecord
+                            {
+                                DomainSlug = "task-execution",
+                                DefaultTargetView = defaultTargetView,
+                                Views =
+                                [
+                                    ..views.Select(view => new ProjectionViewRecord
+                                    {
+                                        TargetView = view.TargetView,
+                                        Status = "READY",
+                                        Path = view.RelativePath
+                                    })
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ]
+        };
+
+    private static void WriteProjectionDocument(string rootPath, string relativePath, string allowedTerm)
+    {
+        var fullPath = Path.Combine(rootPath, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        File.WriteAllText(
+            fullPath,
+            $$"""
+            {
+              "prompt_projection": {
+                "allowed_terms": ["{{allowedTerm}}"]
+              },
+              "delivery_artifacts": [],
+              "dropped_items": [],
+              "open_questions": []
+            }
+            """);
+    }
+
     private static SkillProjectionContractSet CreateProjectionContractSet(
         string rootPath,
         string relativePath,
@@ -1291,7 +2427,7 @@ public class SkillProjectionResolverTests
                 {
                     PreferReadyOnly = true,
                     BlockOnOpenQuestions = true,
-                    FallbackOrderByTargetView = ["prompt-constraint"]
+                    FallbackOrderByTargetView = [SkillProjectionViewKeys.PromptConstraint]
                 },
                 TopicScoring = new ProjectionTopicScoring
                 {
@@ -1331,7 +2467,7 @@ public class SkillProjectionResolverTests
                     [
                         new ProjectionViewSignals
                         {
-                            TargetView = "prompt-constraint",
+                            TargetView = SkillProjectionViewKeys.PromptConstraint,
                             ExplicitOutputSignals = explicitOutputSignals,
                             StrongSignals = primaryIntentSignals,
                             SupportingSignals = ["guidance"],
@@ -1344,12 +2480,12 @@ public class SkillProjectionResolverTests
                     new ProjectionTopicRecord
                     {
                         DomainSlug = "task-execution",
-                        DefaultTargetView = "prompt-constraint",
+                        DefaultTargetView = SkillProjectionViewKeys.PromptConstraint,
                         Views =
                         [
                             new ProjectionViewRecord
                             {
-                                TargetView = "prompt-constraint",
+                                TargetView = SkillProjectionViewKeys.PromptConstraint,
                                 Status = "READY",
                                 Path = relativePath
                             }
@@ -1358,6 +2494,9 @@ public class SkillProjectionResolverTests
                 ]
             }
         };
+
+    private static string ProjectionRelativePath(string targetView)
+        => Path.Combine("task-execution", $"task-execution.{targetView}.projection.json");
 }
 
 /// <summary>Minimal ILogger for tests.</summary>

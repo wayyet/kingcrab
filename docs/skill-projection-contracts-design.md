@@ -247,11 +247,21 @@ topic 评分来自 `TopicScoring`，主要维度包括：
 view 评分来自 `TargetViewScoring`，主要维度包括：
 
 - `explicit_output_match`
+- `explicit_user_artifact_request_bonus`
 - `strong_signal_match`
 - `supporting_signal_match`
 - `cross_view_conflict_penalty`
 - `topic_default_view_bonus`
 - `within_topic_overrides`
+
+当 `prefer_explicit_user_artifact_requests == true` 时，resolver 会先检查 request 是否显式提到交付产物词，再按内置 `target_view -> artifact terms` 映射为对应 view 增加固定 bonus。当前内置映射包括：
+
+- `json-schema` -> `json schema`, `schema file`, `schema definition`, `json schema 文件`, `schema 文件`, `schema 定义`
+- `workflow-contract` -> `workflow contract`, `工作流契约`
+- `domain-model` -> `domain model`, `领域模型`
+- `prompt-constraint` -> `prompt policy`, `prompt constraint`, `提示词策略`, `提示词约束`
+
+这里仍然只接受较具体且一对一语义稳定的产物词，不会因为用户只说“交付产物”这类泛称，或者使用 `json 模式`、`域模型`、`提示约束` 这类不够稳定的中文说法，就给某个 view 加分。
 
 如果前两名 view 的 score gap 太小，也会直接阻断而不猜测。
 

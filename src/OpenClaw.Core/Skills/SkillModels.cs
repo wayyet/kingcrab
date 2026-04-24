@@ -149,6 +149,7 @@ public sealed class ProjectionTopicScoring
 public sealed class ProjectionTargetViewScoring
 {
     public int ClarifyWhenScoreGapBelow { get; init; } = 2;
+    public bool PreferExplicitUserArtifactRequests { get; init; }
     public IReadOnlyList<ProjectionScoreDimension> ScoreDimensions { get; init; } = [];
     public IReadOnlyList<ProjectionViewSignals> Views { get; init; } = [];
     public IReadOnlyList<ProjectionTopicViewOverride> WithinTopicOverrides { get; init; } = [];

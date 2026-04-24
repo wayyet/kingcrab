@@ -73,7 +73,7 @@
 - `producer_precedence: int`
   说明：`producer_priority` 的兼容别名
 - `default_selection_policy: object`
-  说明：当前只消费其中两个布尔字段
+  说明：当前消费其中两个布尔字段和一个 fallback 顺序字段
 - `topic_scoring: object`
   说明：topic 评分配置
 - `target_view_scoring: object`
@@ -249,6 +249,7 @@
 ```json
 "target_view_scoring": {
   "clarify_when_score_gap_below": 2,
+  "prefer_explicit_user_artifact_requests": true,
   "score_dimensions": [...],
   "views": [...],
   "within_topic_overrides": [...]
@@ -261,15 +262,18 @@
   状态：`Runtime-consumed`
   默认值：`2`
   说明：top1-view 与 top2-view 分差小于该值时阻断
+- `prefer_explicit_user_artifact_requests: bool`
+  状态：`Runtime-consumed`
+  默认值：`false`
+  说明：为真时，如果 request 明确提到某类交付产物，resolver 会按 `target_view` 的内置产物词映射为匹配 view 追加固定 bonus；该映射同时支持精确英文词和少量一对一语义稳定的中文词，但不会把泛词（如单独的“交付产物”或裸 `schema`），也不会把只是在短语里出现的宽词（如单独依赖“约束”语义的说法）视为显式命中
 - `score_dimensions: array`
   状态：`Runtime-consumed`
+  说明：可包含 `explicit_user_artifact_request_bonus` 这一维；若未显式配置，runtime 默认回退为 `4`
 - `views: array`
   状态：`Runtime-consumed`
 - `within_topic_overrides: array`
   状态：`Runtime-consumed`
 - `selection_rule: string`
-  状态：`Advisory-only`
-- `prefer_explicit_user_artifact_requests: bool`
   状态：`Advisory-only`
 
 `views` 项结构：
@@ -415,7 +419,7 @@
 - `prompt_projection: object`
   说明：prompt patch 的核心输入
 - `delivery_artifacts: array`
-  说明：仅解析结构，目前不直接参与 route scoring
+  说明：会被解析为结构化对象，并追加到 prompt patch；当前不直接参与 route scoring 或 blocking checks
 - `dropped_items: (string | object)[]`
   说明：runtime 会归一化为可显示文本，再追加到 prompt patch
 - `open_questions: (string | object)[]`
@@ -441,7 +445,7 @@
   说明：如果值为 `block_or_escalate` 且有 `open_questions`，则阻断
 - `prompt_assumption_policy: string`
   必填：否
-  说明：会被解析，但当前只进入内存模型，不直接驱动阻断
+  说明：会被解析，并映射成显式 `Prompt constraint` 追加到 `[Projection Route]` prompt patch；当前不直接驱动阻断或 route 选择
 
 样例中还可能存在以下字段，但当前代码不读取：
 
@@ -508,9 +512,9 @@
 - `status: string`
   必填：否
   状态：`Runtime-consumed`
-  说明：当前仅解析到内存模型
+  说明：当前会追加到 prompt patch 的 `Delivery artifacts` 段落中
 
-注意：当前 runtime 会解析 `delivery_artifacts`，但不会把它们加入 prompt patch，也不会直接用它们做阻断判断。
+注意：当前 runtime 会把 `delivery_artifacts` 追加到 prompt patch 的 `Delivery artifacts` 段落，但仍不会直接用它们做 route 选择或阻断判断。
 
 ### 4.6 dropped_items
 
@@ -539,11 +543,97 @@
   - 若存在 `question`，runtime 会优先输出问题文本，并附带 `impact` / `required_input`
   - 阻断判断只看归一化后的数组是否非空
 
-## 5. 运行时实际使用到的字段清单
+## 5. 剩余未实现字段维护指南
+
+到当前为止，`prompt_assumption_policy` 与 `delivery_artifacts` 都已经进入 `[Projection Route]` prompt patch，剩余未实现字段基本都属于真正未接线的字段。这些字段不再适合按“半实现 / 未实现”来管理，而更适合按是否值得进入 runtime 行为来维护。
+
+### 5.1 建议继续保留为 advisory metadata
+
+这类字段更适合作为 schema 元数据、作者说明或 producer 侧语义承载。当前不建议把它们接入 consumer runtime，因为它们对 route selection、blocking checks 或 prompt patch 的直接收益较低。
+
+`contract-index.json`：
+
+- `consumer_skill`
+- `topic_conflict_resolution`
+- `selection_algorithm`
+
+`topic_scoring`：
+
+- `selection_rule`
+
+`topic_scoring.score_dimensions[]`：
+
+- `description`
+
+`target_view_scoring`：
+
+- `selection_rule`
+
+`target_view_scoring.within_topic_overrides[].bonuses[]`：
+
+- `reason`
+
+`*.projection.json` 顶层：
+
+- `$schema`
+- `template_type`
+- `projection_version`
+- `projection`
+- `concept_mappings`
+- `relation_mappings`
+- `constraint_mappings`
+- `meta`
+
+推荐维护方式：
+
+- 允许它们继续存在于 schema 和样例中
+- 不要在 consumer runtime 行为说明里暗示这些字段已经生效
+- 如果要使用这些字段，优先考虑编辑器提示、离线验证、生成器或文档工具，而不是直接接入 resolver
+
+### 5.2 可作为候选实现的字段
+
+这类字段离当前 runtime 的 route 选择逻辑比较近，后续如果确实要增强 deterministic routing，可以考虑优先实现它们。
+
+`default_selection_policy`：
+
+- `multi_view_resolution_hints`
+
+`target_view_scoring`：
+
+- 当前无
+
+推荐实现前先明确三件事：
+
+- 该字段是用于加分、打破歧义，还是只用于生成 clarification hint
+- 该字段应进入 `SelectView(...)` 的 scoring 逻辑，还是只进入 prompt patch / diagnostics
+- 该字段的默认行为是什么，缺失时是否必须严格回退到当前实现
+
+如果没有这三点的清晰定义，建议继续保持 advisory 状态。
+
+### 5.3 不建议在 consumer runtime 实现的字段
+
+这类字段更像 producer 侧 projection 生成策略，而不是 consumer 侧 projection 使用策略。如果把它们接进当前 runtime，会模糊 producer / consumer 的职责边界。
+
+`mapping_policy`：
+
+- `preserve_source_trace`
+- `preserve_constraints`
+- `relation_flattening_policy`
+- `dropped_item_policy`
+
+不建议实现的原因：
+
+- 当前 runtime 消费的是已经生成好的 projection contract，而不是重新参与 projection 构造
+- 这些字段的自然归属更接近 producer 生成器、schema 校验器或 projection authoring 工具
+- 一旦在 resolver 中实现它们，runtime 很容易从“选择和约束 route”扩张成“重新解释 projection 生成语义”
+
+因此，除非未来明确调整架构边界，否则建议继续把它们保留为 producer-side metadata。
+
+## 6. 运行时实际使用到的字段清单
 
 如果只关注当前 runtime 真正依赖的字段，可以压缩成下面这份最小集合。
 
-### 5.1 contract-index.json 最小 runtime 集合
+### 6.1 contract-index.json 最小 runtime 集合
 
 ```json
 {
@@ -574,8 +664,10 @@
   },
   "target_view_scoring": {
     "clarify_when_score_gap_below": 2,
+    "prefer_explicit_user_artifact_requests": true,
     "score_dimensions": [
       { "dimension": "explicit_output_match", "score": 5 },
+      { "dimension": "explicit_user_artifact_request_bonus", "score": 4 },
       { "dimension": "strong_signal_match", "score": 3 },
       { "dimension": "supporting_signal_match", "score": 1 },
       { "dimension": "cross_view_conflict_penalty", "score": -2 },
@@ -608,7 +700,7 @@
 }
 ```
 
-### 5.2 *.projection.json 最小 runtime 集合
+### 6.2 *.projection.json 最小 runtime 集合
 
 ```json
 {
@@ -629,7 +721,7 @@
 }
 ```
 
-## 6. 当前忽略字段的处理原则
+## 7. 当前忽略字段的处理原则
 
 当前实现遵循“宽输入，窄消费”的策略：
 
@@ -642,9 +734,9 @@
 - 样例可以带比 runtime 更多的人类说明字段
 - 但如果要让字段真正参与运行时行为，必须先在代码里显式接线
 
-## 7. 推荐维护规则
+## 8. 推荐维护规则
 
-### 7.1 contract-index.json
+### 8.1 contract-index.json
 
 推荐至少保持以下字段完整：
 
@@ -656,7 +748,7 @@
 - `target_view_scoring`
 - `topics`
 
-### 7.2 *.projection.json
+### 8.2 *.projection.json
 
 推荐至少保持以下字段完整：
 
@@ -664,7 +756,7 @@
 - `prompt_projection`
 - `open_questions`
 
-### 7.3 多 producer 场景
+### 8.3 多 producer 场景
 
 如果同一个 consumer skill 绑定多个 producer：
 
@@ -672,7 +764,7 @@
 - 只有在希望兼容旧字段名时，才使用 `producer_precedence`
 - precedence 只用于同分 tie-break，不要拿它替代 topic/view scoring
 
-## 8. 新增第 4 个 Topic 的可复制模板
+## 9. 新增第 4 个 Topic 的可复制模板
 
 如果要在现有 `skill-loading`、`task-execution`、`tool-orchestration` 之外新增第 4 个 topic，最小闭环是三部分：
 
@@ -682,7 +774,7 @@
 
 下面这份模板刻意只保留当前 runtime 真正依赖的字段，适合作为最小起点。
 
-### 8.1 contract-index.json 模板片段
+### 9.1 contract-index.json 模板片段
 
 把下面三段内容并入现有 `contract-index.json`。
 
@@ -757,7 +849,7 @@
 - `target_view_scoring.views` 里也有对应 view 的评分定义
 - 磁盘上存在与 `path` 对应的真实 projection 文件
 
-### 8.2 真实目录结构模板
+### 9.2 真实目录结构模板
 
 新增 topic 后，目录形态至少如下：
 
@@ -777,7 +869,7 @@ src/OpenClaw.Gateway/skills/software-developer/contracts/projections/ncrew-ontol
     new-topic.prompt-constraint.projection.json
 ```
 
-### 8.3 `*.projection.json` 最小模板
+### 9.3 `*.projection.json` 最小模板
 
 新 topic 的第一个 projection 文件可以直接从下面这个最小模板起步：
 
@@ -809,7 +901,7 @@ src/OpenClaw.Gateway/skills/software-developer/contracts/projections/ncrew-ontol
 }
 ```
 
-### 8.4 最小检查清单
+### 9.4 最小检查清单
 
 新增第 4 个 topic 后，至少检查下面 5 点：
 
@@ -819,11 +911,11 @@ src/OpenClaw.Gateway/skills/software-developer/contracts/projections/ncrew-ontol
 4. 新建 `*.projection.json` 的 `$schema` 指向 `docs/skill-projection-document.schema.json`
 5. 编辑器对 `contract-index.json` 和新建 projection 文件都没有诊断错误
 
-## 9. 如何验证 `$schema`
+## 10. 如何验证 `$schema`
 
 维护这两类 JSON 文件时，建议把 `$schema` 验证拆成三步。
 
-### 9.1 先验证引用目标是否正确
+### 10.1 先验证引用目标是否正确
 
 - 真实 `contract-index.json` 应引用 `docs/skill-projection-contract-index.schema.json`
 - 真实 `*.projection.json` 应引用 `docs/skill-projection-document.schema.json`
@@ -831,7 +923,7 @@ src/OpenClaw.Gateway/skills/software-developer/contracts/projections/ncrew-ontol
 
 如果是新增 producer 目录，应优先检查相对路径层级是否正确，因为这类错误最容易在复制现有文件时引入。
 
-### 9.2 再验证编辑器诊断
+### 10.2 再验证编辑器诊断
 
 最小维护要求是：
 
@@ -841,7 +933,7 @@ src/OpenClaw.Gateway/skills/software-developer/contracts/projections/ncrew-ontol
 
 如果编辑器诊断已经报错，不要继续假设 runtime 会兜底，因为 loader / resolver 的行为是“宽输入，窄消费”，不代表所有错误都能在运行时被明确提示。
 
-### 9.3 最后做显式 schema 校验
+### 10.3 最后做显式 schema 校验
 
 当前仓库内建议直接用统一命令完成这一步，而不是依赖环境外 JSON Schema 工具。
 
@@ -880,7 +972,7 @@ c:/python314/python.exe .\scripts\validate-skill-projection-document.py
 - 编辑器诊断为零
 - 至少抽查一个真实 `contract-index.json` 和一个真实 `*.projection.json`
 
-## 10. 结论
+## 11. 结论
 
 到当前为止，这套 schema 可以概括为一句话：
 

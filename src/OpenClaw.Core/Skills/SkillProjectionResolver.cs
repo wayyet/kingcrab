@@ -81,11 +81,16 @@ public static class SkillProjectionResolver
         sb.AppendLine($"Selected target view: {resolution.SelectedTargetView}");
         sb.AppendLine($"Projection source: {resolution.ProjectionFilePath}");
 
+        var promptConstraint = BuildPromptAssumptionConstraint(resolution.Projection.MappingPolicy.PromptAssumptionPolicy);
+        if (!string.IsNullOrWhiteSpace(promptConstraint))
+            sb.AppendLine($"Prompt constraint: {promptConstraint}");
+
         AppendList(sb, "Allowed terms", resolution.Projection.PromptProjection.AllowedTerms);
         AppendList(sb, "Forbidden assumptions", resolution.Projection.PromptProjection.ForbiddenAssumptions);
         AppendList(sb, "Required clarifications", resolution.Projection.PromptProjection.RequiredClarifications);
         AppendList(sb, "Reasoning paths", resolution.Projection.PromptProjection.ReasoningPaths);
         AppendList(sb, "Source digest", resolution.Projection.PromptProjection.SourceDigest);
+        AppendList(sb, "Delivery artifacts", resolution.Projection.DeliveryArtifacts.Select(FormatDeliveryArtifact).ToArray());
 
         if (resolution.Projection.DroppedItems.Count > 0)
             AppendList(sb, "Dropped items", resolution.Projection.DroppedItems);
@@ -278,6 +283,7 @@ public static class SkillProjectionResolver
         var supportingSignalMatch = GetDimensionScore(dimensionScores, "supporting_signal_match", 1);
         var crossViewPenalty = GetDimensionScore(dimensionScores, "cross_view_conflict_penalty", -2);
         var defaultViewBonus = GetDimensionScore(dimensionScores, "topic_default_view_bonus", 1);
+        var explicitArtifactRequestBonus = GetDimensionScore(dimensionScores, "explicit_user_artifact_request_bonus", 4);
         var threshold = index.TargetViewScoring?.ClarifyWhenScoreGapBelow ?? 2;
 
         var viewSignals = index.TargetViewScoring?.Views.ToDictionary(view => view.TargetView, StringComparer.OrdinalIgnoreCase)
@@ -299,6 +305,12 @@ public static class SkillProjectionResolver
                     score += CountMatches(requestText, signals.SupportingSignals) * supportingSignalMatch;
                     if (HasAnyMatch(requestText, signals.DemoteWhenCompetingViewSignals))
                         score += crossViewPenalty;
+                }
+
+                if (index.TargetViewScoring?.PreferExplicitUserArtifactRequests == true &&
+                    HasExplicitArtifactRequestForView(requestText, view.TargetView))
+                {
+                    score += explicitArtifactRequestBonus;
                 }
 
                 if (view.TargetView.Equals(topic.DefaultTargetView, StringComparison.OrdinalIgnoreCase))
@@ -450,6 +462,24 @@ public static class SkillProjectionResolver
             sb.AppendLine($"- {item}");
     }
 
+    private static string FormatDeliveryArtifact(ProjectionDeliveryArtifact artifact)
+    {
+        var statusSuffix = string.IsNullOrWhiteSpace(artifact.Status)
+            ? string.Empty
+            : $" [{artifact.Status}]";
+        return $"{artifact.ArtifactName} ({artifact.ArtifactType}) -> {artifact.Path}{statusSuffix}";
+    }
+
+    private static string? BuildPromptAssumptionConstraint(string? policy)
+        => policy?.Trim().ToLowerInvariant() switch
+        {
+            "disallow_unmapped_terms" => "Do not use unmapped terms or invent terminology beyond this projection.",
+            "warn_on_unmapped_terms" => "If you use terms not mapped by this projection, explicitly warn that they are unmapped assumptions.",
+            "allow_unmapped_terms" => "Unmapped terms are allowed, but prefer mapped terminology when available.",
+            null or "" => null,
+            _ => $"Follow prompt assumption policy '{policy}' when introducing terms not mapped by this projection."
+        };
+
     private static Dictionary<string, int> ToScoreMap(IReadOnlyList<ProjectionScoreDimension>? dimensions)
         => dimensions?.ToDictionary(item => item.Dimension, item => item.Score, StringComparer.OrdinalIgnoreCase)
             ?? new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -462,6 +492,10 @@ public static class SkillProjectionResolver
 
     private static bool HasAnyMatch(string requestText, IReadOnlyList<string> signals)
         => signals.Any(signal => ContainsPhrase(requestText, signal));
+
+    private static bool HasExplicitArtifactRequestForView(string requestText, string targetView)
+        => SkillProjectionArtifactTerms.GetExplicitArtifactTerms(targetView)
+            .Any(signal => ContainsPhrase(requestText, signal));
 
     private static bool ContainsPhrase(string requestText, string signal)
         => !string.IsNullOrWhiteSpace(signal) && requestText.Contains(signal.Trim().ToLowerInvariant(), StringComparison.Ordinal);
