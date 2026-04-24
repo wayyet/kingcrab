@@ -2471,3 +2471,286 @@
             saveBtn.addEventListener('click', saveJob);
         })();
         // ---
+
+        // ─── Digital Employee Management ──────────────────────────────────────
+        (function () {
+            const overlay   = document.getElementById('de-overlay');
+            const openBtn   = document.getElementById('de-panel-btn');
+            const closeBtn  = document.getElementById('de-close-btn');
+            const statusBar = document.getElementById('de-panel-status');
+
+            // Tabs
+            const tabList     = document.getElementById('de-tab-list');
+            const tabSkillPkg = document.getElementById('de-tab-skill-pkg');
+            const tabPkg      = document.getElementById('de-tab-pkg');
+            const panelList   = document.getElementById('de-panel-list');
+            const panelSkillPkg = document.getElementById('de-panel-skill-pkg');
+            const panelPkg    = document.getElementById('de-panel-pkg');
+
+            // Skills list tab
+            const skillListEl = document.getElementById('de-skill-list');
+            const refreshBtn  = document.getElementById('de-refresh-btn');
+
+            // Skill ZIP upload tab
+            const skillDropzone     = document.getElementById('de-skill-dropzone');
+            const skillPkgInput     = document.getElementById('de-skill-pkg-file-input');
+            const skillPkgFilename  = document.getElementById('de-skill-pkg-filename');
+            const skillPkgUploadBtn = document.getElementById('de-skill-pkg-upload-btn');
+            const skillPkgResult    = document.getElementById('de-skill-pkg-result');
+            let   skillPkgFile      = null;
+
+            // Package upload tab
+            const pkgDropzone  = document.getElementById('de-pkg-dropzone');
+            const pkgFileInput = document.getElementById('de-pkg-file-input');
+            const pkgFilename  = document.getElementById('de-pkg-filename');
+            const pkgUploadBtn = document.getElementById('de-pkg-upload-btn');
+            const pkgResult    = document.getElementById('de-pkg-result');
+            let   pkgFile      = null;
+
+            // ── Utilities ─────────────────────────────────────────────────
+            function escHtml(s) {
+                return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            }
+
+            function showStatus(msg, isErr) {
+                statusBar.textContent = msg;
+                statusBar.className = 'mcp-panel-status ' + (isErr ? 'err' : 'ok');
+                statusBar.style.display = 'block';
+            }
+
+            function hideStatus() { statusBar.style.display = 'none'; }
+
+            function switchTab(tab) {
+                tabList.classList.toggle('active', tab === 'list');
+                tabSkillPkg.classList.toggle('active', tab === 'skill-pkg');
+                tabPkg.classList.toggle('active', tab === 'pkg');
+                panelList.style.display     = tab === 'list'      ? '' : 'none';
+                panelSkillPkg.style.display = tab === 'skill-pkg' ? '' : 'none';
+                panelPkg.style.display      = tab === 'pkg'       ? '' : 'none';
+                hideStatus();
+            }
+
+            // ── Skills List ───────────────────────────────────────────────
+            async function loadSkills() {
+                skillListEl.innerHTML = '<div class="de-skill-loading mcp-hint">加载中…</div>';
+                try {
+                    const headers = await getAuthHeaders();
+                    const resp = await fetch(getBasePath() + '/admin/skills', { headers });
+                    if (!resp.ok) {
+                        skillListEl.innerHTML = '<div class="de-skill-loading mcp-hint de-skill-err">加载失败（HTTP ' + resp.status + '）</div>';
+                        return;
+                    }
+                    const data = await resp.json();
+                    renderSkillList(data.skills || []);
+                } catch (e) {
+                    skillListEl.innerHTML = '<div class="de-skill-loading mcp-hint de-skill-err">加载失败：' + escHtml(e.message) + '</div>';
+                }
+            }
+
+            function renderSkillList(skills) {
+                if (!skills.length) {
+                    skillListEl.innerHTML = '<div class="de-skill-loading mcp-hint">暂无已安装的技能</div>';
+                    return;
+                }
+                skillListEl.innerHTML = skills.map(s => {
+                    const emoji    = s.emoji || '🔧';
+                    const src      = s.source || 'builtin';
+                    const isWs     = !!s.isUserInstalled;
+                    const srcLabel = src === 'workspace' ? '用户安装' : src === 'plugin' ? '插件' : '内置';
+                    const srcCls   = src === 'workspace' ? 'workspace' : src === 'plugin' ? 'plugin' : 'builtin';
+                    const delBtn   = isWs
+                        ? `<button class="mcp-icon-btn danger de-skill-del-btn" data-skill="${escHtml(s.name)}" title="删除技能 ${escHtml(s.name)}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg></button>`
+                        : '';
+                    return `<div class="de-skill-card">
+                        <div class="de-skill-emoji">${emoji}</div>
+                        <div class="de-skill-info">
+                            <div class="de-skill-name">${escHtml(s.name)}</div>
+                            ${s.description ? `<div class="de-skill-desc">${escHtml(s.description)}</div>` : ''}
+                        </div>
+                        <span class="de-skill-badge ${srcCls}">${srcLabel}</span>
+                        ${delBtn}
+                    </div>`;
+                }).join('');
+
+                skillListEl.querySelectorAll('.de-skill-del-btn').forEach(btn => {
+                    btn.addEventListener('click', async () => {
+                        const name = btn.dataset.skill;
+                        if (!confirm(`确定删除技能 "${name}"？此操作不可撤销。`)) return;
+                        btn.disabled = true;
+                        try {
+                            const headers = await getAuthHeaders();
+                            const resp = await fetch(getBasePath() + '/admin/skills/' + encodeURIComponent(name), {
+                                method: 'DELETE',
+                                headers
+                            });
+                            const d = await resp.json().catch(() => null);
+                            if (resp.ok && d && d.success) {
+                                showStatus('✅ 已删除技能 "' + name + '"，当前共 ' + d.totalLoaded + ' 个技能', false);
+                                await loadSkills();
+                            } else {
+                                showStatus('❌ 删除失败：' + ((d && d.error) || 'HTTP ' + resp.status), true);
+                                btn.disabled = false;
+                            }
+                        } catch (e) {
+                            showStatus('❌ 删除失败：' + e.message, true);
+                            btn.disabled = false;
+                        }
+                    });
+                });
+            }
+
+            // ── Skill ZIP Upload ──────────────────────────────────────────
+            function setSkillPkgFile(file) {
+                if (!file) return;
+                skillPkgFile = file;
+                skillPkgFilename.textContent = file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)';
+                skillPkgFilename.style.display = 'block';
+                skillPkgUploadBtn.disabled = false;
+                skillPkgResult.style.display = 'none';
+            }
+
+            skillPkgInput.addEventListener('change', () => {
+                if (skillPkgInput.files.length) setSkillPkgFile(skillPkgInput.files[0]);
+            });
+
+            skillDropzone.addEventListener('dragover', e => { e.preventDefault(); skillDropzone.classList.add('de-drag-over'); });
+            skillDropzone.addEventListener('dragleave', () => skillDropzone.classList.remove('de-drag-over'));
+            skillDropzone.addEventListener('drop', e => {
+                e.preventDefault();
+                skillDropzone.classList.remove('de-drag-over');
+                if (e.dataTransfer.files.length) setSkillPkgFile(e.dataTransfer.files[0]);
+            });
+
+            skillPkgUploadBtn.addEventListener('click', async () => {
+                if (!skillPkgFile) return;
+                skillPkgUploadBtn.disabled = true;
+                skillPkgUploadBtn.textContent = '上传中…';
+                skillPkgResult.style.display = 'none';
+                hideStatus();
+                try {
+                    const headers = await getAuthHeaders();
+                    const formData = new FormData();
+                    formData.append('file', skillPkgFile);
+                    const resp = await fetch(getBasePath() + '/admin/skills/upload', {
+                        method: 'POST',
+                        headers,
+                        body: formData
+                    });
+                    const data = await resp.json().catch(() => null);
+                    if (resp.ok && data && data.success) {
+                        skillPkgResult.innerHTML =
+                            '<strong>技能安装成功</strong><br>当前技能总数：' + (data.totalLoaded ?? 0) +
+                            (data.loadedNames && data.loadedNames.length
+                                ? '<br><span style="font-size:.78rem;opacity:.7">' + data.loadedNames.map(escHtml).join('、') + '</span>'
+                                : '');
+                        skillPkgResult.className = 'de-result-box ok';
+                        skillPkgResult.style.display = 'block';
+                        showStatus('✅ 技能安装成功', false);
+                        panelList.dataset.dirty = '1';
+                    } else {
+                        const msg = (data && data.error) || ('HTTP ' + resp.status);
+                        skillPkgResult.innerHTML = '<strong>安装失败：</strong>' + escHtml(msg);
+                        skillPkgResult.className = 'de-result-box err';
+                        skillPkgResult.style.display = 'block';
+                        showStatus('❌ 安装失败：' + msg, true);
+                    }
+                } catch (e) {
+                    showStatus('❌ 请求失败：' + e.message, true);
+                } finally {
+                    skillPkgUploadBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> 上传技能';
+                    skillPkgUploadBtn.disabled = !skillPkgFile;
+                }
+            });
+
+            // ── Package Upload ────────────────────────────────────────────
+            function setPkgFile(file) {
+                if (!file) return;
+                pkgFile = file;
+                pkgFilename.textContent = file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)';
+                pkgFilename.style.display = 'block';
+                pkgUploadBtn.disabled = false;
+                pkgResult.style.display = 'none';
+            }
+
+            pkgFileInput.addEventListener('change', () => {
+                if (pkgFileInput.files.length) setPkgFile(pkgFileInput.files[0]);
+            });
+
+            pkgDropzone.addEventListener('dragover', e => { e.preventDefault(); pkgDropzone.classList.add('de-drag-over'); });
+            pkgDropzone.addEventListener('dragleave', () => pkgDropzone.classList.remove('de-drag-over'));
+            pkgDropzone.addEventListener('drop', e => {
+                e.preventDefault();
+                pkgDropzone.classList.remove('de-drag-over');
+                if (e.dataTransfer.files.length) setPkgFile(e.dataTransfer.files[0]);
+            });
+
+            pkgUploadBtn.addEventListener('click', async () => {
+                if (!pkgFile) return;
+                pkgUploadBtn.disabled = true;
+                pkgUploadBtn.textContent = '上传中…';
+                pkgResult.style.display = 'none';
+                hideStatus();
+                try {
+                    const headers = await getAuthHeaders();
+                    const formData = new FormData();
+                    formData.append('file', pkgFile);
+                    const resp = await fetch(getBasePath() + '/admin/digital-employee/upload', {
+                        method: 'POST',
+                        headers,
+                        body: formData
+                    });
+                    const data = await resp.json().catch(() => null);
+                    if (resp.ok && data && data.success) {
+                        const lines = [];
+                        if (data.name) lines.push('<strong>模板名称：</strong>' + escHtml(data.name));
+                        lines.push('<strong>安装技能数：</strong>' + (data.skillsInstalled ?? 0));
+                        if (data.totalSkillsLoaded != null) lines.push('<strong>当前技能总数：</strong>' + data.totalSkillsLoaded);
+                        if (data.installedFiles && data.installedFiles.length) {
+                            lines.push('<strong>写入文件：</strong>');
+                            lines.push('<ul class="de-file-list">' +
+                                data.installedFiles.map(f => '<li>' + escHtml(f) + '</li>').join('') +
+                                '</ul>');
+                        }
+                        pkgResult.innerHTML = lines.join('<br>');
+                        pkgResult.className = 'de-result-box ok';
+                        pkgResult.style.display = 'block';
+                        showStatus('✅ 数字员工模板安装成功', false);
+                        panelList.dataset.dirty = '1';
+                    } else {
+                        const msg = (data && data.error) || ('HTTP ' + resp.status);
+                        pkgResult.innerHTML = '<strong>安装失败：</strong>' + escHtml(msg);
+                        pkgResult.className = 'de-result-box err';
+                        pkgResult.style.display = 'block';
+                        showStatus('❌ 安装失败：' + msg, true);
+                    }
+                } catch (e) {
+                    showStatus('❌ 请求失败：' + e.message, true);
+                } finally {
+                    pkgUploadBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> 上传并安装';
+                    pkgUploadBtn.disabled = !pkgFile;
+                }
+            });
+
+            // ── Event Wiring ──────────────────────────────────────────────
+            openBtn.addEventListener('click', async () => {
+                overlay.classList.add('open');
+                hideStatus();
+                switchTab('list');
+                await loadSkills();
+            });
+
+            closeBtn.addEventListener('click', () => overlay.classList.remove('open'));
+            overlay.addEventListener('click', e => { if (e.target === overlay) overlay.classList.remove('open'); });
+            refreshBtn.addEventListener('click', () => loadSkills());
+
+            tabList.addEventListener('click', async () => {
+                switchTab('list');
+                if (panelList.dataset.dirty || !skillListEl.querySelector('.de-skill-card')) {
+                    delete panelList.dataset.dirty;
+                    await loadSkills();
+                }
+            });
+            tabSkillPkg.addEventListener('click', () => switchTab('skill-pkg'));
+            tabPkg.addEventListener('click', () => switchTab('pkg'));
+        })();
+        // ---

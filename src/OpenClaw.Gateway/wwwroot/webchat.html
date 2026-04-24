@@ -98,6 +98,12 @@
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                 定时任务
             </button>
+
+            <!-- Digital Employee button -->
+            <button id="de-panel-btn" class="nav-btn" title="数字员工管理">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+                数字员工
+            </button>
         </div>
     </div>
 
@@ -343,6 +349,99 @@
             </div>
 
             <div id="cron-panel-status" class="mcp-panel-status" style="display:none"></div>
+        </div>
+    </div>
+
+    <!-- Digital Employee Management Modal -->
+    <div id="de-overlay" class="mcp-overlay" role="dialog" aria-modal="true" aria-label="数字员工管理">
+        <div class="mcp-panel">
+            <div class="mcp-panel-header">
+                <div class="mcp-panel-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+                    数字员工管理
+                </div>
+                <button id="de-close-btn" class="mcp-close-btn" title="关闭" aria-label="关闭数字员工面板">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+
+            <div class="mcp-panel-body">
+                <!-- Tabs -->
+                <div class="ch-tabs">
+                    <button class="ch-tab active" id="de-tab-list" data-tab="list">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+                        技能列表
+                    </button>
+                    <button class="ch-tab" id="de-tab-skill-pkg" data-tab="skill-pkg">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                        上传技能
+                    </button>
+                    <button class="ch-tab" id="de-tab-pkg" data-tab="pkg">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+                        上传模板包
+                    </button>
+                </div>
+
+                <!-- Tab: skills list -->
+                <div id="de-panel-list" class="de-tab-panel">
+                    <div class="mcp-form-actions" style="justify-content:flex-start;margin-bottom:10px">
+                        <button id="de-refresh-btn" class="nav-btn" title="刷新技能列表">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                            刷新
+                        </button>
+                    </div>
+                    <div id="de-skill-list" class="de-skill-list">
+                        <div class="de-skill-loading mcp-hint">加载中…</div>
+                    </div>
+                </div>
+
+                <!-- Tab: upload skill ZIP -->
+                <div id="de-panel-skill-pkg" class="de-tab-panel" style="display:none">
+                    <div class="mcp-hint" style="margin-bottom:12px">
+                        上传包含 <code>SKILL.md</code>（带 <code>name:</code> frontmatter）的技能 ZIP 包，
+                        系统自动提取技能名并安装到工作区，上传后立即热重载。最大 10 MB。
+                    </div>
+                    <div class="de-upload-zone" id="de-skill-dropzone">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        <div class="de-upload-label">将技能 .zip 拖拽到此处，或</div>
+                        <label class="nav-btn primary de-file-label" for="de-skill-pkg-file-input">选择文件</label>
+                        <input type="file" id="de-skill-pkg-file-input" accept=".zip,application/zip" style="display:none">
+                        <div id="de-skill-pkg-filename" class="de-selected-file" style="display:none"></div>
+                    </div>
+                    <div class="mcp-form-actions" style="margin-top:12px">
+                        <button id="de-skill-pkg-upload-btn" class="nav-btn primary" disabled>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                            上传技能
+                        </button>
+                    </div>
+                    <div id="de-skill-pkg-result" class="de-result-box" style="display:none"></div>
+                </div>
+
+                <!-- Tab: upload full digital employee package ZIP -->
+                <div id="de-panel-pkg" class="de-tab-panel" style="display:none">
+                    <div class="mcp-hint" style="margin-bottom:12px">
+                        上传符合 NCrew 规范的数字员工模板压缩包（.zip），系统将自动提取
+                        配置文件（AGENTS.md / SOUL.md / IDENTITY.md / MEMORY.md）、技能包和本体切片到工作区。
+                        <br>最大 30 MB。技能立即热重载；配置文件重启后生效。
+                    </div>
+                    <div class="de-upload-zone" id="de-pkg-dropzone">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        <div class="de-upload-label">将 .zip 文件拖拽到此处，或</div>
+                        <label class="nav-btn primary de-file-label" for="de-pkg-file-input">选择文件</label>
+                        <input type="file" id="de-pkg-file-input" accept=".zip,application/zip" style="display:none">
+                        <div id="de-pkg-filename" class="de-selected-file" style="display:none"></div>
+                    </div>
+                    <div class="mcp-form-actions" style="margin-top:12px">
+                        <button id="de-pkg-upload-btn" class="nav-btn primary" disabled>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                            上传并安装
+                        </button>
+                    </div>
+                    <div id="de-pkg-result" class="de-result-box" style="display:none"></div>
+                </div>
+            </div>
+
+            <div id="de-panel-status" class="mcp-panel-status" style="display:none"></div>
         </div>
     </div>
 
