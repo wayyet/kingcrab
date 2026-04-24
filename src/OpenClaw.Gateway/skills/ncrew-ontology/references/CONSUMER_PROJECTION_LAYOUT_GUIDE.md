@@ -268,22 +268,26 @@ skill 名已经在路径里，重复写进文件名只会增加噪音。
 
 ## 对 consumer skill 的最小要求
 
-如果一个 skill 采用这套目录规范，建议它在自己的 `SKILL.md` 中至少补上：
+如果一个 skill 采用这套目录规范，建议它在自己的 `SKILL.md` 中只补稳定事实和消费边界，不要把 `contract-index.json` 里的 topic 评分、target view 评分、冲突规则或请求映射示例再手写一遍。
 
-1. projection 所在目录根路径。
-2. 支持的 `projection_type` 列表。
-3. 默认读取的主题目录或选择规则。
-4. 遇到多份 projection 时的优先级规则。
+建议至少补上：
+
+1. projection contract 的发现入口或目录根路径。
+2. 人工评审时的读取顺序。
+3. 当前 skill 实际消费的字段或 view 边界。
+4. blocked route、`open_questions` 和 `dropped_items` 的处理原则。
 
 可直接写成：
 
 ```md
 ## Projection Contracts
 
-- 当前 skill 从 `contracts/projections/ncrew-ontology/` 读取 projection。
-- 每个主题使用 `<domain-slug>/<domain-slug>.<projection-type-short>.projection.json` 命名。
-- 仅消费 `prompt_constraint_projection` 和 `workflow_contract_projection`。
-- 如果同一主题存在多份 projection，优先选择 REVIEW 结论为 READY 的稳定文件。
+This skill may be augmented by bound `ncrew-ontology` projection contracts discovered under `contracts/projections/**/contract-index.json`.
+
+- Projection discovery and route selection are handled by runtime rather than by manual rules in this file.
+- For human review, read `contract-index.json` first, then the selected topic's `README.md` and `REVIEW.md`, and then the chosen `*.projection.json` file.
+- Only consume the projection fields and target views this skill actually supports.
+- If route selection is blocked or ambiguous, or if `open_questions` is non-empty, surface that limitation instead of guessing.
 ```
 
 ---

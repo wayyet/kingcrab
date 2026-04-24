@@ -128,23 +128,36 @@
 
 ## 其他 Skill 的最小写法
 
-如果你要让另一个 skill 正式消费 projection，建议至少在它自己的 SKILL.md 里写清楚三件事：
+如果你要让另一个 skill 正式消费 projection，建议它在自己的 SKILL.md 里只写稳定的消费原则，不要重复抄写 topic 评分、target view 评分、冲突规则或请求示例。真正会变化的路由逻辑应留在 `contract-index.json` 和各 topic 自己的 contract 文档里。
 
-1. 这个 skill 接受哪类 projection 作为输入。
-2. 它会消费 projection 的哪些字段。
-3. 遇到未映射项、warning 或 open questions 时怎么处理。
+SKILL.md 至少应写清楚四件事：
+
+1. 这个 skill 的 projection contract 由 runtime 或约定路径发现，而不是靠本文件手工路由。
+2. 人工评审时先读哪里，再读哪里。
+3. 它会消费 projection 的哪些字段。
+4. 遇到 blocked route、未映射项或 `open_questions` 时怎么处理。
 
 可以直接照下面这个结构写：
 
 ```md
-## Projection Input
+## Projection Contracts
 
-当用户提供 ncrew-ontology 生成的 projection 文件时：
+This skill may be augmented by bound `ncrew-ontology` projection contracts discovered under `contracts/projections/**/contract-index.json`.
 
-- 先读取 projection_type、target_format、target_runtime，确认当前 skill 是否支持。
-- 只消费 concept_mappings、relation_mappings、constraint_mappings、prompt_projection 和 delivery_artifacts 中与当前目标一致的部分。
-- 如果 mapping_policy 要求 block_or_escalate，或 open_questions 非空，不直接生成最终产物，先输出澄清或评审结论。
-- 不补造 dropped_items 中已裁掉的内容。
+- Projection discovery, route selection, and prompt patching are handled by runtime rather than by manual rules in this file.
+- For human review, read `contract-index.json` first, then the selected topic's `README.md` and `REVIEW.md`, and then the chosen `*.projection.json` file.
+
+### Projection Consumption
+
+- Read the selected projection before planning implementation details.
+- Only consume fields relevant to the current target, especially `concept_mappings`, `relation_mappings`, `constraint_mappings`, `prompt_projection`, `delivery_artifacts`, `mapping_policy`, `open_questions`, and `dropped_items`.
+- Treat the selected projection as authoritative for terminology, clarifications, dropped scope, and blocking conditions.
+
+### Blocking Rules
+
+- If route selection is blocked, ambiguous, or does not safely cover the request, surface that limitation instead of guessing.
+- If `mapping_policy` requires `block_or_escalate`, or `open_questions` is non-empty, do not finalize the output before surfacing the issue.
+- Do not recreate items listed in `dropped_items`.
 ```
 
 ---
