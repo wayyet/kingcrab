@@ -18,8 +18,8 @@
 
 评审核对顺序：
 
-1. 当前主题是否已经先在 `ncrew-ontology` 中收缩成最小 slice，且 slice 已通过 `TEMPLATE.schema.json` 或 `validate-slice` 校验。
+1. 当前主题是否已经先在 `ncrew-ontology` 中收缩成最小 slice，且 slice 已按所在层级通过校验：在 `ncrew-ontology` 技能根目录使用 `validate-slice`，在仓库根目录使用 `validate-ontology-slice`。
 2. 本次 projection 是否已经明确选定单一主视图，而不是把 `domain-model`、`json-schema`、`prompt-constraint`、`workflow-contract` 的要求混写在一起。
 3. `PROJECTION_TEMPLATE.json` 是否由 `ncrew-ontology` 按映射规范填写完成，且 `concepts`、`relations`、`constraints` 都有显式映射而不是靠隐式推断。
-4. projection 是否已经通过 `validate-projection.ps1` 或 `validate-projection.py`，并确认关键字段完整、结构合法、编辑器诊断为零。
+4. projection 是否已经按所在层级通过校验：在 `ncrew-ontology` 技能根目录使用 `validate-projection.ps1` / `validate-projection.py`，在仓库根目录使用 `validate-ontology-projection.ps1` / `validate-ontology-projection.py`；并确认关键字段完整、结构合法、编辑器诊断为零。
 5. projection 是否只在通过校验后才落入 consumer skill 的 `contracts/projections` 目录，且 `contract-index.json`、路由提示和相关说明已经同步更新。

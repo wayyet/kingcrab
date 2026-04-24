@@ -4,7 +4,7 @@
 
 1. 从 `ncrew-ontology` skill 出发，为当前业务问题构建一个最小可验证的本体切片。
 2. 把这个切片投影成具体 consumer skill 可消费的 projection contracts。
-3. 在目标业务 Skill 的 runtime 中，把这些 contracts 真正接到任务域选择、交付视图（target view）选择、projection load 和 blocking checks 上。
+3. 在目标业务 Skill 的 runtime 中，把这些 contracts 真正接到任务域选择、交付视图选择、projection load 和 blocking checks 上。
 
 这不是一个抽象的 ontology 教程，而是对当前仓库里已经存在的 producer -> consumer -> runtime 闭环的工程化整理。
 
@@ -105,7 +105,8 @@ producer 侧的判断标准是：
 
 - `templates/TEMPLATE.json`
 - `templates/TEMPLATE.schema.json`
-- `scripts/validate-slice.ps1`
+- `src/OpenClaw.Gateway/skills/ncrew-ontology/scripts/validate-slice.ps1` / `validate-slice.py`：技能根目录内真实校验器
+- `scripts/validate-ontology-slice.ps1` / `validate-ontology-slice.py`：仓库根目录包装入口
 - `examples/ready|warning|invalid`
 
 这一步的目标是两件事：
@@ -317,7 +318,7 @@ consumer 侧应再确保：
 producer 侧至少应做到：
 
 - 用 `templates/TEMPLATE.json` 或对应 Markdown 模板固化 slice。
-- 用 `TEMPLATE.schema.json` 或 `validate-slice` 脚本完成结构校验。
+- 用 `TEMPLATE.schema.json` 对应校验，或按所在层级选择脚本入口：在 `ncrew-ontology` 技能根目录使用 `validate-slice`，在仓库根目录使用 `validate-ontology-slice`。
 - 把 conflicts、ambiguities、uncertainties 显式写出来，而不是留给 projection 阶段临时猜测。
 
 这一步通过后，才能说“当前主题已经具备投影前提”。
@@ -384,7 +385,7 @@ projection 写完后，不应直接落到 consumer skill 目录中。先过结�
 - 必填映射区块没有缺项。
 - 编辑器诊断和本地校验脚本结果一致。
 
-在当前仓库中，这一步应优先使用 `validate-projection.ps1` 或 `validate-projection.py`。如有需要，也可以配合 review mode 判断它现在更接近 `READY` 还是 `WARNING`。
+在当前仓库中，这一步应按所在层级选择入口：在 `ncrew-ontology` 技能根目录优先使用 `validate-projection.ps1` 或 `validate-projection.py`；如果从仓库根目录执行，则使用 `validate-ontology-projection.ps1` 或 `validate-ontology-projection.py`。如有需要，也可以在技能根目录配合 review mode 判断它现在更接近 `READY` 还是 `WARNING`。
 
 这一步的目的不是证明 projection “已经完美”，而是确保它至少已经从“草稿猜想”变成“结构合法、可继续 review、可进入 consumer contract”的产物。
 

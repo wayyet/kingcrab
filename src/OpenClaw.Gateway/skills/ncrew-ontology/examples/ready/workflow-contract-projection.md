@@ -16,11 +16,15 @@
 ..\..\scripts\validate-projection.ps1 .\workflow-contract-projection.json -ReviewMode
 ```
 
+上面的命令适用于当前目录位于 `ncrew-ontology` 技能根目录内，调用的是支持 `-ReviewMode` 的真实校验器。
+
 如果从仓库根目录执行：
 
 ```powershell
 .\scripts\validate-ontology-projection.ps1 .\src\OpenClaw.Gateway\skills\ncrew-ontology\examples\ready\workflow-contract-projection.json
 ```
+
+仓库根目录包装入口只承载普通结构校验，不暴露 `-ReviewMode`。
 
 评审时，建议先对照 [sample.json](sample.json) 理解源 slice，再看 [workflow-contract-projection.json](workflow-contract-projection.json) 如何把配置对象、技能定义集合、来源层级、关系边和 gating 约束变成工作流契约。对任何改过的 projection 文件，都应继续用 [../../templates/PROJECTION_TEMPLATE.schema.json](../../templates/PROJECTION_TEMPLATE.schema.json) 做结构校验。
 

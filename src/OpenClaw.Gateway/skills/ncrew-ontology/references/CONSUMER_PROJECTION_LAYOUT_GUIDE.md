@@ -5,7 +5,7 @@
 它要解决的不是“projection 是什么”，而是另外两个更具体的问题：
 
 - projection 文件应该放在哪里，团队最不容易混乱。
-- projection 文件应该怎么命名，才能一眼看出它服务谁、表达什么、属于哪类 target view。
+- projection 文件应该怎么命名，才能一眼看出它服务谁、表达什么、属于哪类交付视图。
 
 ---
 
@@ -134,7 +134,7 @@ src/OpenClaw.Gateway/skills/daily-news-digest/
 
 推荐分工：
 
-- skill 名：放在 skill 根目录路径里。
+- skill 名：放在技能根目录路径里。
 - producer skill 名：放在 `contracts/projections/<producer-skill>/` 这一层。
 - domain/topic：放在 `<domain-slug>/` 目录和文件名前缀里。
 - projection type：放在文件名中间。
@@ -167,7 +167,7 @@ contracts/
         content-safety.domain-model.projection.json
 ```
 
-如果同一主题下存在多类 target view，也放在同一主题目录里并列：
+如果同一主题下存在多类交付视图，也放在同一主题目录里并列：
 
 ```text
 contracts/

@@ -18,7 +18,7 @@
 这些资产在设计上已经表达了：
 
 - 如何从用户请求中推断 topic
-- 如何从 topic 中继续推断 target view
+- 如何从 topic 中继续推断交付视图
 - 哪些 projection 是 `READY`
 - 哪些 projection 因 open questions 或 unresolved item policy 需要阻断
 
@@ -27,7 +27,7 @@
 直接结果是：
 
 - projection contracts 不能被自动发现和绑定
-- skill runtime 不能按用户请求动态切 topic / target view
+- skill runtime 不能按用户请求动态切 topic / 交付视图
 - projection 的 blocking checks 不会影响运行时 skill 可见性
 - 多 producer contract 无法并存
 
@@ -36,13 +36,13 @@
 本轮设计的目标分为四步：
 
 1. 把 projection contract 变成 skill runtime 的真实输入，而不是手工阅读材料。
-2. 采用最小接线方案，把 `topic selection -> target view selection -> projection load -> blocking checks` 接到现有 runtime。
+2. 采用最小接线方案，把 `topic selection -> 交付视图选择 -> projection load -> blocking checks` 接到现有 runtime。
 3. 支持 loader 自动发现 skill 目录下的 projection contract index，而不是在测试里手工构造。
 4. 把单 producer 单入口限制升级为多 producer 列表，并在同分场景下支持显式 precedence。
 
 约束条件也很明确：
 
-- topic / target view 的选择依赖当前 user message，因此不能在 reload 时静态固化。
+- topic / 交付视图的选择依赖当前 user message，因此不能在 reload 时静态固化。
 - 改造应尽量复用现有 `SkillDefinition`、`SkillLoader`、`SkillPromptBuilder`、`MafAgentRuntime`。
 - 如果无法安全选出 route，必须阻断或隐藏该 skill，而不是伪造 projection。
 
@@ -67,7 +67,7 @@
 
 - skill reload 只能看到 skill 文件，不知道当前用户请求
 - projection route 是 request-dependent 的，而不是 skill-static 的
-- topic / target view 的模糊度必须在当前 turn 决定
+- topic / 交付视图的模糊度必须在当前 turn 决定
 
 因此设计选择为：
 

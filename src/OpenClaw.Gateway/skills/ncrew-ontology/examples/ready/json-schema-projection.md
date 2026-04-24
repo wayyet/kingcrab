@@ -16,11 +16,15 @@
 ..\..\scripts\validate-projection.ps1 .\json-schema-projection.json -ReviewMode
 ```
 
+上面的命令适用于当前目录位于 `ncrew-ontology` 技能根目录内，调用的是支持 `-ReviewMode` 的真实校验器。
+
 如果从仓库根目录执行：
 
 ```powershell
 .\scripts\validate-ontology-projection.ps1 .\src\OpenClaw.Gateway\skills\ncrew-ontology\examples\ready\json-schema-projection.json
 ```
+
+仓库根目录包装入口只承载普通结构校验，不暴露 `-ReviewMode`。
 
 评审时，建议先对照 [sample.json](sample.json) 理解源 slice，再看 [json-schema-projection.json](json-schema-projection.json) 如何把核心概念收敛成 schema 定义、把关系转成依赖规则、把约束转成 schema rule。对任何改过的 projection 文件，都应继续用 [../../templates/PROJECTION_TEMPLATE.schema.json](../../templates/PROJECTION_TEMPLATE.schema.json) 做结构校验。
 

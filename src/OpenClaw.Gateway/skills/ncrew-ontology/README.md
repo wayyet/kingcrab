@@ -63,6 +63,9 @@
   - `validate-slice.py`：Python 版本真实校验器，支持 `--review-mode`。
   - `validate-projection.ps1`：projection 真实校验器，支持 `-ReviewMode`。
   - `validate-projection.py`：projection 的 Python 版本真实校验器，支持 `--review-mode`。
+- 仓库根目录 `scripts/`
+  - `validate-ontology-slice.ps1/.py`：slice 的包装入口，适合从仓库根目录或任意当前目录直接发起普通结构校验。
+  - `validate-ontology-projection.ps1/.py`：projection 的包装入口，适合从仓库根目录或任意当前目录直接发起普通结构校验。
 
 ---
 
@@ -90,7 +93,7 @@
 5. 再把结果落到 `templates/TEMPLATE.json` 对应结构。
 6. 需要形成下游交付物时，复制 `templates/PROJECTION_TEMPLATE.json` 填写 projection。
 7. 用 `templates/PROJECTION_TEMPLATE.schema.json` 校验 projection 文件结构。
-8. 最后使用 `templates/TEMPLATE.schema.json` 或 `scripts/validate-slice.ps1` 做 slice 校验。
+8. 最后做 slice 校验：如果当前目录就是本技能根目录，使用 `scripts/validate-slice.ps1` / `scripts/validate-slice.py`；如果从仓库根目录执行，使用仓库根目录 `scripts/validate-ontology-slice.ps1` / `scripts/validate-ontology-slice.py`。
 
 ### 路径二：直接生成工程化产物
 
@@ -99,8 +102,8 @@
 3. 遇到字段拿不准时，回看 `references/FIELD_GUIDE.md`。
 4. 需要面向代码生成或提示词编排时，按 `references/DOWNSTREAM_MAPPING_GUIDE.md` 做投影。
 5. 复制 `templates/PROJECTION_TEMPLATE.json`，形成可交付的 projection 文件。
-6. 使用 `templates/PROJECTION_TEMPLATE.schema.json` 做 projection 结构校验。
-7. 使用 `templates/TEMPLATE.schema.json` 做 slice 结构校验。
+6. 做 projection 结构校验：如果当前目录就是本技能根目录，使用 `scripts/validate-projection.ps1` / `scripts/validate-projection.py`；如果从仓库根目录执行，使用仓库根目录 `scripts/validate-ontology-projection.ps1` / `scripts/validate-ontology-projection.py`。
+7. 做 slice 结构校验：如果当前目录就是本技能根目录，使用 `scripts/validate-slice.ps1` / `scripts/validate-slice.py`；如果从仓库根目录执行，使用仓库根目录 `scripts/validate-ontology-slice.ps1` / `scripts/validate-ontology-slice.py`。
 
 ### 路径三：按三态样例做团队对齐
 
@@ -118,10 +121,10 @@
 
 如果目标是把 slice 真正交付成 consumer skill 可加载的 projection contract，而不是只停留在 producer 侧文档，可直接按下面顺序执行：
 
-1. 先在 `ncrew-ontology` 中收缩当前主题，产出最小可验证 slice，并先让 slice 通过 `TEMPLATE.schema.json` 或 `validate-slice` 校验。
+1. 先在 `ncrew-ontology` 中收缩当前主题，产出最小可验证 slice，并先让 slice 通过对应校验器校验：在技能根目录使用 `validate-slice`，在仓库根目录使用 `validate-ontology-slice`。
 2. 先决定本次只面向哪一种主交付视图：`domain-model`、`json-schema`、`prompt-constraint` 或 `workflow-contract`。
 3. 基于已通过校验的 slice，由 `ncrew-ontology` 按映射规范填充 `PROJECTION_TEMPLATE.json`，把 `concepts`、`relations`、`constraints` 显式映射到 projection。
-4. 使用 `validate-projection.ps1` 或 `validate-projection.py` 验证 projection，确保结构、关键字段和本地诊断全部通过。
+4. 验证 projection 时按所在层级选择入口：在技能根目录使用 `validate-projection.ps1` / `validate-projection.py`，在仓库根目录使用 `validate-ontology-projection.ps1` / `validate-ontology-projection.py`，确保结构、关键字段和本地诊断全部通过。
 5. projection 验证通过后，再将产物放入 consumer skill 的 `contracts/projections` 目录，并同步更新 `contract-index.json`、view 路由和必要的 routing hints。
 
 ---
@@ -166,8 +169,10 @@
 - 想看 projection 失败的短入口：用 `examples/invalid/invalid-projection.entry.md`
 - 想看 projection 为什么是 FAIL：用 `examples/invalid/invalid-projection.md`
 - 想单独分享“该不该用这套规范”的判定入口：看 `references/DECISION_GUIDE.md`
-- 想一条命令校验样例或自定义 slice：用 `scripts/validate-slice.ps1` 或 `scripts/validate-slice.py`
-- 想一条命令校验样例或自定义 projection：用 `scripts/validate-projection.ps1` 或 `scripts/validate-projection.py`
+- 想在技能根目录一条命令校验样例或自定义 slice：用 `scripts/validate-slice.ps1` 或 `scripts/validate-slice.py`
+- 想在仓库根目录或任意当前目录一条命令校验 slice：用仓库根目录 `scripts/validate-ontology-slice.ps1` 或 `scripts/validate-ontology-slice.py`
+- 想在技能根目录一条命令校验样例或自定义 projection：用 `scripts/validate-projection.ps1` 或 `scripts/validate-projection.py`
+- 想在仓库根目录或任意当前目录一条命令校验 projection：用仓库根目录 `scripts/validate-ontology-projection.ps1` 或 `scripts/validate-ontology-projection.py`
 
 ---
 
@@ -208,6 +213,8 @@
 `scripts/validate-slice.ps1 -ReviewMode` 会在结构校验结果后，额外输出一个启发式判定：`READY / WARNING / FAIL`。
 
 Python 版本 `scripts/validate-slice.py --review-mode` 提供同等的结构校验与启发式 review 输出，适合没有 PowerShell 或更偏 Python 工作流的环境。
+
+仓库根目录包装脚本 `scripts/validate-ontology-slice.ps1/.py` 只承载普通结构校验入口，不暴露 `ReviewMode` / `--review-mode`。
 
 当前启发式结论含义：
 

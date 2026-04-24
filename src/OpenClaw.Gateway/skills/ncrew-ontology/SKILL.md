@@ -120,7 +120,7 @@ meta: 生成信息
 - `source_ids` 能回到 `sources`
 - 概念、关系、约束引用不悬空
 - 冲突、歧义、不确定项已显式记录
-- 能通过 `templates/TEMPLATE.schema.json` 或 `scripts/validate-slice.ps1`
+- 能通过 `{baseDir}/templates/TEMPLATE.schema.json` 对应校验，或直接运行 `{baseDir}/scripts/validate-slice.ps1` / `{baseDir}/scripts/validate-slice.py`；如果从仓库根目录执行，则使用 `scripts/validate-ontology-slice.ps1` / `scripts/validate-ontology-slice.py`
 
 ## Quality Rules
 
@@ -160,9 +160,21 @@ meta: 生成信息
 - `{baseDir}/references/CONSUMER_PROJECTION_LAYOUT_GUIDE.md`：consumer skill 专用 projection 目录与命名规范
 - `{baseDir}/references/SCHEMA_MIGRATION.md`：slice 与 projection 的 schema 版本迁移说明
 - `{baseDir}/examples/ready/sample.json`：READY 基线样例
-- `{baseDir}/scripts/validate-slice.ps1`：本地校验入口
+- `{baseDir}/scripts/validate-slice.ps1`：skill 目录内真实 PowerShell 校验器，支持 `-SchemaPath` 与 `-ReviewMode`
+- `{baseDir}/scripts/validate-slice.py`：skill 目录内真实 Python 校验器，支持 `--schema-path` 与 `--review-mode`
+- `scripts/validate-ontology-slice.ps1`：仓库根目录 PowerShell 包装入口，适合从任意当前目录直接校验，支持 `Paths` 与 `-SchemaPath`
+- `scripts/validate-ontology-slice.py`：仓库根目录 Python 包装入口，适合从任意当前目录直接校验，支持 `paths` 与 `--schema-path`
 - `{baseDir}/README.md`：规范包总览
 
 ## Instruction Scope
 
-该 skill 作用于工作区内的 ontology 相关文件、模板、样例和本地校验脚本。可读取和生成 `templates/`、`references/`、`examples/`、`scripts/` 下的内容，并以 `scripts/validate-slice.ps1` 做结构校验或 review 辅助。它不会自动发明缺失 ontology，也不会在没有来源的情况下把经验性描述写成本体结论。
+该 skill 作用于工作区内的 ontology 相关文件、模板、样例和本地校验脚本。可读取和生成 `templates/`、`references/`、`examples/`、`scripts/` 下的内容。
+
+进行结构校验时，优先按所在层级选择入口：
+
+- 在 skill 目录内直接工作时，使用 `{baseDir}/scripts/validate-slice.ps1` 或 `{baseDir}/scripts/validate-slice.py`
+- 需要从仓库根目录或任意当前目录直接校验时，使用 `scripts/validate-ontology-slice.ps1` 或 `scripts/validate-ontology-slice.py`
+- review 辅助模式仅真实校验器支持：PowerShell 使用 `-ReviewMode`，Python 使用 `--review-mode`
+- 两类入口默认都落到 `templates/TEMPLATE.schema.json`，默认样例都是 `examples/ready/sample.json`
+
+它不会自动发明缺失 ontology，也不会在没有来源的情况下把经验性描述写成本体结论。

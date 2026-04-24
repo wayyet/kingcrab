@@ -57,7 +57,7 @@
 - 定义 producer 元数据
 - 定义默认 selection policy
 - 定义 topic scoring
-- 定义 target view scoring
+- 定义交付视图评分
 - 列出每个 topic 下有哪些 candidate views
 
 ### 3.2 顶层字段
@@ -77,7 +77,7 @@
 - `topic_scoring: object`
   说明：topic 评分配置
 - `target_view_scoring: object`
-  说明：target view 评分配置
+  说明：交付视图评分配置
 - `topics: array`
   说明：topic 到 views 的实际 route 清单
 
@@ -394,7 +394,7 @@
 
 ### 4.1 文件职责
 
-`*.projection.json` 是单个 topic + target view 的实际 payload 文件。
+`*.projection.json` 是单个 topic + 交付视图的实际 payload 文件。
 
 当前 runtime 在 route 已选定后再加载该文件，并提取：
 
@@ -675,7 +675,7 @@
 如果要在现有 `skill-loading`、`task-execution`、`tool-orchestration` 之外新增第 4 个 topic，最小闭环是三部分：
 
 1. 在 `contract-index.json` 中补 topic 路由定义
-2. 在 `contract-index.json` 中补 topic / target view 的评分信号
+2. 在 `contract-index.json` 中补 topic / 交付视图的评分信号
 3. 在新 topic 目录下至少放一个真实 `*.projection.json`
 
 下面这份模板刻意只保留当前 runtime 真正依赖的字段，适合作为最小起点。

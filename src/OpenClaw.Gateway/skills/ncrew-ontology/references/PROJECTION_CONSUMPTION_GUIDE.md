@@ -143,7 +143,7 @@
 
 - 先读取 projection_type、target_format、target_runtime，确认当前 skill 是否支持。
 - 只消费 concept_mappings、relation_mappings、constraint_mappings、prompt_projection 和 delivery_artifacts 中与当前目标一致的部分。
-- 如果 mapping_policy 要求 block_or_escalate，或 open_questions 非空，不直接生成最终产物，先输出澄清或 review 结论。
+- 如果 mapping_policy 要求 block_or_escalate，或 open_questions 非空，不直接生成最终产物，先输出澄清或评审结论。
 - 不补造 dropped_items 中已裁掉的内容。
 ```
 
@@ -184,9 +184,9 @@
 下面几种情况，不应把 projection 当成稳定输入继续用：
 
 - projection 结构未通过 schema 校验。
-- projection 的 review 结论仍是 WARNING，但当前任务需要最终定稿产物。
-- `open_questions` 为空并不代表安全，但如果 `source_digest` 明确带 conflict 或 warning，仍应先 review。
-- 目标 skill 实际需要的是另一类 target view，例如当前只有 prompt projection，却想直接生成 workflow contract。
+- projection 的评审结论仍是 WARNING，但当前任务需要最终定稿产物。
+- `open_questions` 为空并不代表安全，但如果 `source_digest` 明确带 conflict 或 warning，仍应先做评审。
+- 目标 skill 实际需要的是另一类交付视图，例如当前只有 prompt projection，却想直接生成 workflow contract。
 
 这时应回到 slice 或 projection 层先修正，不要在消费 skill 内静默修补。
 

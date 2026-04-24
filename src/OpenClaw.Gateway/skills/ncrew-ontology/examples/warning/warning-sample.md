@@ -19,11 +19,15 @@
 ..\..\scripts\validate-slice.ps1 .\warning-sample.json
 ```
 
+上面的命令适用于当前目录位于 `ncrew-ontology` 技能根目录内，调用的是技能目录下的真实校验器；如果需要启发式评审结论，可改用 `-ReviewMode`。
+
 如果从仓库根目录执行：
 
 ```powershell
 .\scripts\validate-ontology-slice.ps1 .\src\OpenClaw.Gateway\skills\ncrew-ontology\examples\warning\warning-sample.json
 ```
+
+仓库根目录包装入口只承载普通结构校验，不暴露 `-ReviewMode`。
 
 ---
 

@@ -69,9 +69,9 @@
 业务 skill 作为 consumer，不再重新解释 ontology，而是围绕自身任务面组织 contract，并完成以下工作：
 
 - 定义任务域。
-- 定义各任务域下可选的 target view。
+- 定义各任务域下可选的交付视图。
 - 承载经 producer 生成并通过校验的 projection 文件。
-- 在运行时根据用户请求选择 topic 与 target view，并加载相应 projection。
+- 在运行时根据用户请求选择 topic 与交付视图，并加载相应 projection。
 
 因此，consumer 侧承担的是“任务执行入口消费”职责。
 
@@ -81,7 +81,7 @@
 
 - 发现并绑定 projection contracts。
 - 按请求选择 topic。
-- 按 topic 选择 target view。
+- 按 topic 选择交付视图。
 - 加载对应 projection。
 - 在不满足条件时执行阻断。
 - 在路由成功时生成 projection prompt patch 并注入 skill instructions。
@@ -100,7 +100,7 @@
 
 - producer / consumer 元数据
 - topic scoring
-- target view scoring
+- 交付视图评分
 - topic 与 view 的组织关系
 - default selection policy
 - 冲突处理规则
@@ -112,14 +112,14 @@
 
 相关设计文档已经明确，projection route 是 request-dependent 的，无法在 reload 时静态固化。因此，路由决策必须在每个 turn 中按当前用户请求动态执行。
 
-这一定义使整个机制具备了请求级适配能力，也保证 topic 与 target view 选择能够严格围绕当前任务上下文展开。
+这一定义使整个机制具备了请求级适配能力，也保证 topic 与交付视图选择能够严格围绕当前任务上下文展开。
 
 ### 3. 阻断机制成为正式治理手段
 
 在当前设计中，如果出现以下情况，系统应阻断而不是猜测：
 
 - topic 选择不明确。
-- target view 选择不明确。
+- 交付视图选择不明确。
 - projection 文件缺失或解析失败。
 - 视图状态不是 `READY`。
 - 存在 `open questions` 且策略要求阻断。
@@ -156,7 +156,7 @@
 
 ### 3. 路由治理
 
-通过 topic scoring、target view scoring、冲突惩罚项、gap 阈值和 producer precedence 等规则，将原本依赖经验的选择过程显式化、规则化。
+通过 topic scoring、交付视图评分、冲突惩罚项、gap 阈值和 producer precedence 等规则，将原本依赖经验的选择过程显式化、规则化。
 
 ### 4. 风险治理
 

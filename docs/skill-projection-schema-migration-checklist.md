@@ -54,6 +54,8 @@
 
 只要变更涉及 producer 产出，就先确保 producer 层通过模板校验：
 
+下面示例使用的是仓库根目录包装入口；如果你当前就在 `src/OpenClaw.Gateway/skills/ncrew-ontology/` 技能根目录，也可以改用对应的真实校验器 `validate-slice` / `validate-projection`。
+
 ```powershell
 # slice
 .\scripts\validate-ontology-slice.ps1

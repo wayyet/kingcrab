@@ -16,11 +16,15 @@
 ..\..\scripts\validate-projection.ps1 .\sample-projection.json -ReviewMode
 ```
 
+上面的命令适用于当前目录位于 `ncrew-ontology` 技能根目录内，调用的是支持 `-ReviewMode` 的真实校验器。
+
 如果从仓库根目录执行：
 
 ```powershell
 .\scripts\validate-ontology-projection.ps1 .\src\OpenClaw.Gateway\skills\ncrew-ontology\examples\ready\sample-projection.json
 ```
+
+仓库根目录包装入口只承载普通结构校验，不暴露 `-ReviewMode`。
 
 评审时，建议先从 [sample.json](sample.json) 入手理解它对应的源 slice，再对照 [sample-projection.json](sample-projection.json) 查看哪些内容被保留、哪些被投影出去、以及哪些内容被有意不输出。对任何改过的 projection 文件，都应使用 [../../templates/PROJECTION_TEMPLATE.schema.json](../../templates/PROJECTION_TEMPLATE.schema.json) 做校验。
 
