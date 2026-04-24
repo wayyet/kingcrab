@@ -21,6 +21,10 @@
   - `TEMPLATE.schema.json`：严格 JSON Schema。
   - `PROJECTION_TEMPLATE.json`：下游 codegen / prompt orchestration 投影模板。
   - `PROJECTION_TEMPLATE.schema.json`：projection 文件校验规则。
+  - `CONSUMER_SKILL_PROJECTION_SECTION.md`：consumer skill 复用的最小 `Projection Contracts` 段落模板。
+  - `CONSUMER_SKILL_SCAFFOLD.md`：创建新 consumer skill 时可直接复制的最小完整骨架。
+  - `NEW_CONSUMER_SKILL_CHECKLIST.md`：复制 scaffold 后用于替换占位符和删减不适用字段的创建清单。
+  - `EXAMPLE_CONSUMER_SKILL.md`：已经替换完占位符、删减完字段的完整 consumer skill 示例。
 - `references/`
   - `FIELD_GUIDE.md`：字段语义说明。
   - `REVIEW_CHECKLIST.md`：同时覆盖 slice 和 projection 两层评审标准。
@@ -134,6 +138,10 @@
 - 只想先讨论概念边界：用 `templates/TEMPLATE.md`
 - 想输出给程序、流水线或下游 projection：用 `templates/TEMPLATE.json`
 - 想把 slice 投影成 projection / codegen / prompt orchestration 输入：用 `templates/PROJECTION_TEMPLATE.json`
+- 想给 consumer skill 复用最小 `Projection Contracts` 段落：用 `templates/CONSUMER_SKILL_PROJECTION_SECTION.md`
+- 想新建一个可消费 projection 的 consumer skill：用 `templates/CONSUMER_SKILL_SCAFFOLD.md`
+- 想检查新 consumer skill 复制 scaffold 后还有哪些占位符和字段需要清理：用 `templates/NEW_CONSUMER_SKILL_CHECKLIST.md`
+- 想直接参考一份已经完成占位符替换和字段删减的最终样板：用 `templates/EXAMPLE_CONSUMER_SKILL.md`
 - 想检查结果合不合法：用 `templates/TEMPLATE.schema.json`
 - 想检查 projection 结构是否合法：用 `templates/PROJECTION_TEMPLATE.schema.json`
 - 想直接从一个合法 projection 样例开始改：用 `examples/ready/sample-projection.json`

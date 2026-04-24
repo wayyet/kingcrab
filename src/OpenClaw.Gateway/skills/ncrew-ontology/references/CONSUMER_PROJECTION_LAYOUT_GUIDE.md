@@ -277,18 +277,7 @@ skill 名已经在路径里，重复写进文件名只会增加噪音。
 3. 当前 skill 实际消费的字段或 view 边界。
 4. blocked route、`open_questions` 和 `dropped_items` 的处理原则。
 
-可直接写成：
-
-```md
-## Projection Contracts
-
-This skill may be augmented by bound `ncrew-ontology` projection contracts discovered under `contracts/projections/**/contract-index.json`.
-
-- Projection discovery and route selection are handled by runtime rather than by manual rules in this file.
-- For human review, read `contract-index.json` first, then the selected topic's `README.md` and `REVIEW.md`, and then the chosen `*.projection.json` file.
-- Only consume the projection fields and target views this skill actually supports.
-- If route selection is blocked or ambiguous, or if `open_questions` is non-empty, surface that limitation instead of guessing.
-```
+默认直接复用 `templates/CONSUMER_SKILL_PROJECTION_SECTION.md`，并只在 consumer `SKILL.md` 中补当前技能自己的字段边界、target view 边界或本地绑定路径。
 
 ---
 

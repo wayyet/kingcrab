@@ -137,28 +137,7 @@ SKILL.md 至少应写清楚四件事：
 3. 它会消费 projection 的哪些字段。
 4. 遇到 blocked route、未映射项或 `open_questions` 时怎么处理。
 
-可以直接照下面这个结构写：
-
-```md
-## Projection Contracts
-
-This skill may be augmented by bound `ncrew-ontology` projection contracts discovered under `contracts/projections/**/contract-index.json`.
-
-- Projection discovery, route selection, and prompt patching are handled by runtime rather than by manual rules in this file.
-- For human review, read `contract-index.json` first, then the selected topic's `README.md` and `REVIEW.md`, and then the chosen `*.projection.json` file.
-
-### Projection Consumption
-
-- Read the selected projection before planning implementation details.
-- Only consume fields relevant to the current target, especially `concept_mappings`, `relation_mappings`, `constraint_mappings`, `prompt_projection`, `delivery_artifacts`, `mapping_policy`, `open_questions`, and `dropped_items`.
-- Treat the selected projection as authoritative for terminology, clarifications, dropped scope, and blocking conditions.
-
-### Blocking Rules
-
-- If route selection is blocked, ambiguous, or does not safely cover the request, surface that limitation instead of guessing.
-- If `mapping_policy` requires `block_or_escalate`, or `open_questions` is non-empty, do not finalize the output before surfacing the issue.
-- Do not recreate items listed in `dropped_items`.
-```
+默认直接复用 `templates/CONSUMER_SKILL_PROJECTION_SECTION.md`，再只补当前 consumer skill 的本地约束，而不是在每个 `SKILL.md` 里手写一份新版本。
 
 ---
 
