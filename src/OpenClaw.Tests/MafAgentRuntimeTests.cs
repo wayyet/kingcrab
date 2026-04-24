@@ -313,7 +313,8 @@ public class MafAgentRuntimeTests
                 DefaultSelectionPolicy = new ProjectionSelectionPolicy
                 {
                     PreferReadyOnly = true,
-                    BlockOnOpenQuestions = true
+                    BlockOnOpenQuestions = true,
+                    FallbackOrderByTargetView = ["prompt-constraint"]
                 },
                 TopicScoring = new ProjectionTopicScoring
                 {

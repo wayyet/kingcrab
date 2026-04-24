@@ -154,10 +154,12 @@
 - `block_on_open_questions: bool`
   默认值：`false`
   说明：projection 若存在 `open_questions`，直接阻断
+- `fallback_order_by_target_view: string[]`
+  默认值：空数组
+  说明：当 request text 对所有 topic 和 view 都没有产生正向信号命中时，runtime 会按该顺序查找可用 target view，作为显式 fallback route；若未配置或找不到可用 view，则仍保持原有阻断行为
 
 当前样例存在但 runtime 不消费的字段：
 
-- `fallback_order_by_target_view: string[]`
 - `multi_view_resolution_hints: string[]`
 
 ### 3.6 topic_scoring

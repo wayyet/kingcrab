@@ -136,6 +136,7 @@ public sealed class ProjectionSelectionPolicy
 {
     public bool PreferReadyOnly { get; init; }
     public bool BlockOnOpenQuestions { get; init; }
+    public IReadOnlyList<string> FallbackOrderByTargetView { get; init; } = [];
 }
 
 public sealed class ProjectionTopicScoring

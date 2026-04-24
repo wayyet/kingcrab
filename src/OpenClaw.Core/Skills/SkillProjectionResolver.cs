@@ -113,32 +113,53 @@ public static class SkillProjectionResolver
         var selectedTopic = SelectTopic(index, requestText);
         if (selectedTopic is null)
         {
-            return ProjectionRouteAttempt.Ambiguous(
-                "Projection topic selection is ambiguous for this request.");
+            if (!TryResolveNoSignalFallback(index, out selectedTopic))
+            {
+                return ProjectionRouteAttempt.Ambiguous(
+                    "Projection topic selection is ambiguous for this request.");
+            }
+
+            logger.LogDebug(
+                "Projection routing for skill '{SkillName}' used fallback topic '{Topic}' because request text matched no projection signals.",
+                skillName,
+                selectedTopic!.Item.DomainSlug);
         }
 
-        var selectedView = SelectView(index, selectedTopic.Item, requestText);
+        var resolvedTopic = selectedTopic!;
+
+        var selectedView = SelectView(index, resolvedTopic.Item, requestText);
         if (selectedView is null)
         {
-            return ProjectionRouteAttempt.Ambiguous(
-                $"Projection target view selection is ambiguous for topic '{selectedTopic.Item.DomainSlug}'.");
+            if (!(resolvedTopic.Score == 0 && TryResolveFallbackView(index, resolvedTopic.Item, out selectedView)))
+            {
+                return ProjectionRouteAttempt.Ambiguous(
+                    $"Projection target view selection is ambiguous for topic '{resolvedTopic.Item.DomainSlug}'.");
+            }
+
+            logger.LogDebug(
+                "Projection routing for skill '{SkillName}' used fallback target view '{TargetView}' for topic '{Topic}'.",
+                skillName,
+                selectedView!.Item.TargetView,
+                resolvedTopic.Item.DomainSlug);
         }
 
-        var totalScore = selectedTopic.Score + selectedView.Score;
+        var resolvedView = selectedView!;
+
+        var totalScore = resolvedTopic.Score + resolvedView.Score;
         if (index.DefaultSelectionPolicy.PreferReadyOnly &&
-            !selectedView.Item.Status.Equals("READY", StringComparison.OrdinalIgnoreCase))
+            !resolvedView.Item.Status.Equals("READY", StringComparison.OrdinalIgnoreCase))
         {
             return ProjectionRouteAttempt.Blocked(
-                Block(skillName, $"Projection '{selectedTopic.Item.DomainSlug}/{selectedView.Item.TargetView}' is not READY."),
+                Block(skillName, $"Projection '{resolvedTopic.Item.DomainSlug}/{resolvedView.Item.TargetView}' is not READY."),
                 totalScore);
         }
 
-        var projectionPath = Path.Combine(contract.RootPath, selectedView.Item.Path.Replace('/', Path.DirectorySeparatorChar));
+        var projectionPath = Path.Combine(contract.RootPath, resolvedView.Item.Path.Replace('/', Path.DirectorySeparatorChar));
         if (!File.Exists(projectionPath))
         {
             logger.LogWarning("Projection file not found for skill '{SkillName}' at {ProjectionPath}", skillName, projectionPath);
             return ProjectionRouteAttempt.Blocked(
-                Block(skillName, $"Projection file '{selectedView.Item.Path}' was not found."),
+                Block(skillName, $"Projection file '{resolvedView.Item.Path}' was not found."),
                 totalScore);
         }
 
@@ -151,21 +172,21 @@ public static class SkillProjectionResolver
         {
             logger.LogWarning(ex, "Failed to parse projection file for skill '{SkillName}' at {ProjectionPath}", skillName, projectionPath);
             return ProjectionRouteAttempt.Blocked(
-                Block(skillName, $"Projection file '{selectedView.Item.Path}' could not be parsed."),
+                Block(skillName, $"Projection file '{resolvedView.Item.Path}' could not be parsed."),
                 totalScore);
         }
 
         if (projection is null)
         {
             return ProjectionRouteAttempt.Blocked(
-                Block(skillName, $"Projection file '{selectedView.Item.Path}' is missing required route fields."),
+                Block(skillName, $"Projection file '{resolvedView.Item.Path}' is missing required route fields."),
                 totalScore);
         }
 
         if (index.DefaultSelectionPolicy.BlockOnOpenQuestions && projection.OpenQuestions.Count > 0)
         {
             return ProjectionRouteAttempt.Blocked(
-                Block(skillName, $"Projection '{selectedTopic.Item.DomainSlug}/{selectedView.Item.TargetView}' has blocking open questions."),
+                Block(skillName, $"Projection '{resolvedTopic.Item.DomainSlug}/{resolvedView.Item.TargetView}' has blocking open questions."),
                 totalScore);
         }
 
@@ -173,7 +194,7 @@ public static class SkillProjectionResolver
             projection.OpenQuestions.Count > 0)
         {
             return ProjectionRouteAttempt.Blocked(
-                Block(skillName, $"Projection '{selectedTopic.Item.DomainSlug}/{selectedView.Item.TargetView}' requires escalation before use."),
+                Block(skillName, $"Projection '{resolvedTopic.Item.DomainSlug}/{resolvedView.Item.TargetView}' requires escalation before use."),
                 totalScore);
         }
 
@@ -182,8 +203,8 @@ public static class SkillProjectionResolver
             {
                 SkillName = skillName,
                 HasContracts = true,
-                SelectedTopic = selectedTopic.Item.DomainSlug,
-                SelectedTargetView = selectedView.Item.TargetView,
+                SelectedTopic = resolvedTopic.Item.DomainSlug,
+                SelectedTargetView = resolvedView.Item.TargetView,
                 ProjectionFilePath = projectionPath,
                 Projection = projection
             },
@@ -231,6 +252,9 @@ public static class SkillProjectionResolver
             .ToList();
 
         if (scored.Count == 0)
+            return null;
+
+        if (scored[0].Score <= 0)
             return null;
 
         if (scored.Count > 1 && (scored[0].Score - scored[1].Score) < threshold)
@@ -300,10 +324,64 @@ public static class SkillProjectionResolver
         if (scored.Count == 0)
             return null;
 
+        if (scored[0].Score <= 0)
+            return null;
+
         if (scored.Count > 1 && (scored[0].Score - scored[1].Score) < threshold)
             return null;
 
         return scored[0];
+    }
+
+    private static bool TryResolveNoSignalFallback(
+        ProjectionContractIndex index,
+        out ProjectionScore<ProjectionTopicRecord>? selectedTopic)
+    {
+        selectedTopic = null;
+
+        foreach (var targetView in index.DefaultSelectionPolicy.FallbackOrderByTargetView)
+        {
+            if (string.IsNullOrWhiteSpace(targetView))
+                continue;
+
+            foreach (var topic in index.Topics)
+            {
+                if (!topic.Views.Any(view => view.TargetView.Equals(targetView, StringComparison.OrdinalIgnoreCase)))
+                    continue;
+
+                selectedTopic = new ProjectionScore<ProjectionTopicRecord>(topic, 0);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryResolveFallbackView(
+        ProjectionContractIndex index,
+        ProjectionTopicRecord topic,
+        out ProjectionScore<ProjectionViewRecord>? selectedView)
+    {
+        selectedView = null;
+
+        var candidates = index.DefaultSelectionPolicy.PreferReadyOnly
+            ? topic.Views.Where(view => view.Status.Equals("READY", StringComparison.OrdinalIgnoreCase)).ToList()
+            : topic.Views.ToList();
+
+        foreach (var targetView in index.DefaultSelectionPolicy.FallbackOrderByTargetView)
+        {
+            if (string.IsNullOrWhiteSpace(targetView))
+                continue;
+
+            var view = candidates.FirstOrDefault(candidate => candidate.TargetView.Equals(targetView, StringComparison.OrdinalIgnoreCase));
+            if (view is null)
+                continue;
+
+            selectedView = new ProjectionScore<ProjectionViewRecord>(view, 0);
+            return true;
+        }
+
+        return false;
     }
 
     private static ProjectionDocument? LoadProjection(string projectionPath)

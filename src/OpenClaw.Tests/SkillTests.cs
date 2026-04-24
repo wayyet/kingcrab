@@ -765,7 +765,8 @@ public class SkillProjectionResolverTests
                             DefaultSelectionPolicy = new ProjectionSelectionPolicy
                             {
                                 PreferReadyOnly = true,
-                                BlockOnOpenQuestions = true
+                                BlockOnOpenQuestions = true,
+                                FallbackOrderByTargetView = ["prompt-constraint"]
                             },
                             TopicScoring = new ProjectionTopicScoring
                             {
@@ -914,7 +915,8 @@ public class SkillProjectionResolverTests
                             DefaultSelectionPolicy = new ProjectionSelectionPolicy
                             {
                                 PreferReadyOnly = true,
-                                BlockOnOpenQuestions = true
+                                BlockOnOpenQuestions = true,
+                                FallbackOrderByTargetView = ["prompt-constraint"]
                             },
                             Topics =
                             [
@@ -1220,6 +1222,58 @@ public class SkillProjectionResolverTests
         }
     }
 
+    [Fact]
+    public void ResolveForRequest_WithNoMatchingSignals_UsesConfiguredFallbackRoute()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"openclaw-projection-tests-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(tempDir, "task-execution"));
+
+        try
+        {
+            var relativePath = Path.Combine("task-execution", "task-execution.prompt-constraint.projection.json").Replace('\\', '/');
+
+            File.WriteAllText(
+                Path.Combine(tempDir, relativePath.Replace('/', Path.DirectorySeparatorChar)),
+                """
+                {
+                  "prompt_projection": {
+                    "allowed_terms": ["generic_review"]
+                  },
+                  "delivery_artifacts": [],
+                  "dropped_items": [],
+                  "open_questions": []
+                }
+                """);
+
+            var skill = new SkillDefinition
+            {
+                Name = "software-developer",
+                Description = "Developer skill",
+                Instructions = "Base skill instructions.",
+                Location = "/skills/software-developer",
+                ProjectionContracts =
+                [
+                    CreateProjectionContractSet(
+                        tempDir,
+                        relativePath,
+                        ["prompt policy"],
+                        ["review guidance"])
+                ]
+            };
+
+            var resolution = SkillProjectionResolver.ResolveForRequest(skill, "hello", new TestLogger());
+
+            Assert.False(resolution.IsBlocked);
+            Assert.Equal("task-execution", resolution.SelectedTopic);
+            Assert.Equal("prompt-constraint", resolution.SelectedTargetView);
+            Assert.NotNull(resolution.ProjectionFilePath);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
     private static SkillProjectionContractSet CreateProjectionContractSet(
         string rootPath,
         string relativePath,
@@ -1236,7 +1290,8 @@ public class SkillProjectionResolverTests
                 DefaultSelectionPolicy = new ProjectionSelectionPolicy
                 {
                     PreferReadyOnly = true,
-                    BlockOnOpenQuestions = true
+                    BlockOnOpenQuestions = true,
+                    FallbackOrderByTargetView = ["prompt-constraint"]
                 },
                 TopicScoring = new ProjectionTopicScoring
                 {

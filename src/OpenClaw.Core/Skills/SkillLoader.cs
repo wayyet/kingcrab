@@ -415,7 +415,8 @@ public static class SkillLoader
         => new()
         {
             PreferReadyOnly = ReadBoolean(element, "prefer_ready_only"),
-            BlockOnOpenQuestions = ReadBoolean(element, "block_on_open_questions")
+            BlockOnOpenQuestions = ReadBoolean(element, "block_on_open_questions"),
+            FallbackOrderByTargetView = ReadStringArray(element, "fallback_order_by_target_view")
         };
 
     private static ProjectionTopicScoring ParseProjectionTopicScoring(JsonElement element)
