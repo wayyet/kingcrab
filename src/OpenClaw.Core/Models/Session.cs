@@ -589,6 +589,7 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(List<SkillInfoDto>))]
 [JsonSerializable(typeof(SkillsDetailResponse))]
 [JsonSerializable(typeof(SkillMutationResponse))]
+[JsonSerializable(typeof(DigitalEmployeeUploadResponse))]
 [JsonSerializable(typeof(SlackChannelConfig))]
 [JsonSerializable(typeof(DiscordChannelConfig))]
 [JsonSerializable(typeof(SignalChannelConfig))]

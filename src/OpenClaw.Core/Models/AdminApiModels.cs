@@ -265,3 +265,17 @@ public sealed class SkillMutationResponse
     public int TotalLoaded { get; init; }
     public IReadOnlyList<string> LoadedNames { get; init; } = [];
 }
+
+public sealed class DigitalEmployeeUploadResponse
+{
+    public bool Success { get; init; }
+    public string? Error { get; init; }
+    /// <summary>Value of the 'name' field from manifest.json (if present).</summary>
+    public string? Name { get; init; }
+    /// <summary>Number of workspace skill directories installed/updated.</summary>
+    public int SkillsInstalled { get; init; }
+    /// <summary>Relative paths of all files written to the workspace.</summary>
+    public IReadOnlyList<string> InstalledFiles { get; init; } = [];
+    /// <summary>Number of skills loaded after the optional hot-reload step.</summary>
+    public int TotalSkillsLoaded { get; init; }
+}
