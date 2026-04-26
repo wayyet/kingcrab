@@ -178,11 +178,13 @@ internal sealed class FeishuMessageDedup : IDisposable
     private void EvictExpiredMemory()
     {
         var now = NowMs();
-        foreach (var kv in _memory)
-        {
-            if (kv.Value <= now)
-                _memory.TryRemove(kv.Key, out _);
-        }
+        var toRemove = _memory
+            .Where(kv => kv.Value <= now)
+            .Select(kv => kv.Key)
+            .ToList();
+
+        foreach (var key in toRemove)
+            _memory.TryRemove(key, out _);
     }
 
     // ── Disk helpers ─────────────────────────────────────────────────────────
@@ -210,6 +212,11 @@ internal sealed class FeishuMessageDedup : IDisposable
         {
             var path = ResolveDiskPath(ns);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+
+            // Check disk space before write (10MB threshold)
+            var drive = new DriveInfo(Path.GetPathRoot(path)!);
+            if (drive.AvailableFreeSpace < 10 * 1024 * 1024)
+                throw new IOException($"Insufficient disk space for dedup store: {drive.AvailableFreeSpace / 1024 / 1024}MB available");
 
             var entries = ReadDiskEntries(path);
             var now = NowMs();

@@ -233,7 +233,12 @@ public sealed class MafAgentRuntime : IAgentRuntime
         // require the messages list to end with a user turn.  This trigger is never
         // persisted to history.
         if (isSystemEvent)
-            messages.Add(new ChatMessage(ChatRole.User, "[scheduled task trigger]"));
+        {
+            var trigger = string.IsNullOrWhiteSpace(session.UserId)
+                ? "[scheduled task trigger]"
+                : $"[scheduled task trigger for user {session.UserId}]";
+            messages.Add(new ChatMessage(ChatRole.User, trigger));
+        }
 
         try
         {
