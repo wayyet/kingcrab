@@ -234,9 +234,7 @@ public sealed class MafAgentRuntime : IAgentRuntime
         // persisted to history.
         if (isSystemEvent)
         {
-            var trigger = string.IsNullOrWhiteSpace(session.UserId)
-                ? "[scheduled task trigger]"
-                : $"[scheduled task trigger for user {session.UserId}]";
+            var trigger = "[scheduled task trigger]";
             messages.Add(new ChatMessage(ChatRole.User, trigger));
         }
 
