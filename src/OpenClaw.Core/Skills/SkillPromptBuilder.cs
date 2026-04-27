@@ -85,6 +85,12 @@ public static class SkillPromptBuilder
             if (!skill.UserInvocable) flags.Add("no-slash");
             if (skill.Metadata.Always) flags.Add("always");
             if (skill.CommandDispatch is not null) flags.Add($"dispatch:{skill.CommandDispatch}");
+            if (skill.ProjectionDiscovery is not null)
+            {
+                var projectionFlag = FormatProjectionFlag(skill.ProjectionDiscovery);
+                if (!string.IsNullOrWhiteSpace(projectionFlag))
+                    flags.Add(projectionFlag);
+            }
 
             var flagStr = flags.Count > 0 ? $" [{string.Join(", ", flags)}]" : "";
             sb.AppendLine($"  - {skill.Name}: {skill.Description}{flagStr} ({skill.Source})");
@@ -125,4 +131,20 @@ public static class SkillPromptBuilder
             .Replace(">", "&gt;")
             .Replace("\"", "&quot;")
             .Replace("'", "&apos;");
+
+    private static string? FormatProjectionFlag(SkillProjectionDiscovery discovery)
+    {
+        if (string.Equals(discovery.Status, "none", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        return discovery.Status switch
+        {
+            "bound" => $"projection:bound({discovery.BoundCount})",
+            "partial" => $"projection:partial({discovery.BoundCount}/{discovery.IndexCount})",
+            "multiple-indexes" => $"projection:multiple({discovery.IndexCount})",
+            "parse-failed" => "projection:parse-failed",
+            "enumeration-failed" => "projection:enumeration-failed",
+            _ => $"projection:{discovery.Status}"
+        };
+    }
 }

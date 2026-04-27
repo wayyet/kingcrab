@@ -11,13 +11,15 @@
 - slice 黄灯样例：[warning-sample.json](../examples/warning/warning-sample.json)
 - slice 失败样例：[invalid-sample.json](../examples/invalid/invalid-sample.json)
 - projection 正向样例：[sample-projection.json](../examples/ready/sample-projection.json)
+- projection 正向样例：[json-schema-projection.json](../examples/ready/json-schema-projection.json)
+- projection 正向样例：[workflow-contract-projection.json](../examples/ready/workflow-contract-projection.json)
 - projection 黄灯样例：[warning-projection.json](../examples/warning/warning-projection.json)
 - projection 失败样例：[invalid-projection.json](../examples/invalid/invalid-projection.json)
 
-这份清单的目标不是替代 schema 校验器，而是给团队补上人工评审层。推荐做法是先跑结构校验器，再用本清单做 review：
+这份清单的目标不是替代 schema 校验器，而是给团队补上人工评审层。推荐做法是先跑结构校验器，再用本清单做人工评审：
 
-- slice 校验：`../scripts/validate-slice.ps1`
-- projection 校验：`../scripts/validate-projection.ps1`
+- 如果当前目录位于 `ncrew-ontology` 技能根目录内：slice 校验使用 `../scripts/validate-slice.ps1`，projection 校验使用 `../scripts/validate-projection.ps1`
+- 如果从仓库根目录执行普通结构校验：slice 使用 `scripts/validate-ontology-slice.ps1`，projection 使用 `scripts/validate-ontology-projection.ps1`
 
 ---
 
@@ -222,13 +224,15 @@
 
 `../scripts/validate-slice.ps1 -ReviewMode` 会在结构校验结果后，额外输出 `READY / WARNING / FAIL`。
 
+如果从仓库根目录执行，`scripts/validate-ontology-slice.ps1` 只承载普通结构校验入口，不暴露 `-ReviewMode`。
+
 当前用途：快速分流，不替代人工评审。
 
 #### Slice 当前启发式结论含义
 
 - `FAIL`：结构校验未通过，当前 slice 不能进入后续语义评审。
-- `READY`：结构校验通过，且当前没有命中 warning 信号；内置 `sample.json` 也直接作为 ready baseline。
-- `WARNING`：结构校验通过，但命中了 warning 信号；内置 `warning-sample.json` 也直接作为 yellow-light baseline。
+- `READY`：结构校验通过，且当前没有命中 warning 信号；内置 `sample.json` 也直接作为 READY 基线。
+- `WARNING`：结构校验通过，但命中了 warning 信号；内置 `warning-sample.json` 也直接作为 WARNING 黄灯基线。
 
 #### Slice 当前会触发 `WARNING` 的信号
 
@@ -242,13 +246,15 @@
 
 `../scripts/validate-projection.ps1 -ReviewMode` 会在结构校验结果后，额外输出 `READY / WARNING / FAIL`。
 
+如果从仓库根目录执行，`scripts/validate-ontology-projection.ps1` 只承载普通结构校验入口，不暴露 `-ReviewMode`。
+
 当前用途：快速分流 projection 风险，不替代 projection review。
 
 #### Projection 当前启发式结论含义
 
 - `FAIL`：结构校验未通过，当前 projection 不能进入后续语义评审。
-- `READY`：结构校验通过，且当前没有命中 projection warning 信号；内置 `sample-projection.json` 也直接作为 ready baseline。
-- `WARNING`：结构校验通过，但命中了 projection warning 信号；内置 `warning-projection.json` 也直接作为 yellow-light baseline。
+- `READY`：结构校验通过，且当前没有命中 projection warning 信号；内置 `sample-projection.json` 也直接作为 READY 基线。
+- `WARNING`：结构校验通过，但命中了 projection warning 信号；内置 `warning-projection.json` 也直接作为 WARNING 黄灯基线。
 
 #### Projection 当前会触发 `WARNING` 的信号
 
@@ -264,7 +270,7 @@
 
 - 如果评审状态是 `FAIL`，先修结构，不做语义讨论。
 - 如果评审状态是 `WARNING`，优先检查 warning 是否会阻断下游消费。
-- 如果评审状态是 `READY`，也不要跳过人工 review；它只表示当前没有命中这组快速风险信号。
+- 如果评审状态是 `READY`，也不要跳过人工评审；它只表示当前没有命中这组快速风险信号。
 
 ### 这两组信号的边界
 
@@ -290,7 +296,7 @@
 
 ## Slice 评审问题清单
 
-每次 review slice，至少回答下面九个问题：
+每次评审 slice，至少回答下面九个问题：
 
 1. 这份 slice 是否通过 schema 校验。
 2. 关键概念和关系是否都有可追溯来源支撑。
@@ -304,7 +310,7 @@
 
 ## Projection 评审问题清单
 
-每次 review projection，至少回答下面九个问题：
+每次评审 projection，至少回答下面九个问题：
 
 1. 这份 projection 是否通过 schema 校验。
 2. 它是否绑定到一个清晰、可定位的 source slice。
@@ -367,6 +373,8 @@
 - `warning-sample` = slice 黄灯样例，说明“什么叫结构过关但语义仍需 review”
 - `invalid-sample` = slice 失败样例，说明“什么叫连结构关都没过”
 - `sample-projection` = projection 通过样例，说明“什么叫忠实、安全、可追溯地下游投影”
+- `json-schema-projection` = projection 通过样例，说明“什么叫把 slice 稳定投影成 JSON Schema 契约”
+- `workflow-contract-projection` = projection 通过样例，说明“什么叫把 slice 稳定投影成 workflow step 契约”
 - `warning-projection` = projection 黄灯样例，说明“什么叫 projection 合法但仍不应直接定稿”
 - `invalid-projection` = projection 失败样例，说明“什么叫 projection 连结构层都没过”
 
@@ -393,5 +401,7 @@
 
 - 想看“什么叫合格 slice 基线”：看 `sample`
 - 想看“什么叫合格 projection 基线”：看 `sample-projection`
+- 想看“什么叫合格 JSON Schema projection 基线”：看 `json-schema-projection`
+- 想看“什么叫合格 workflow contract projection 基线”：看 `workflow-contract-projection`
 - 想看“什么叫结构过关但仍需 review”：看 `warning-sample` 和 `warning-projection`
 - 想看“什么叫应该直接退回修结构”：看 `invalid-sample` 和 `invalid-projection`

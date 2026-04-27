@@ -16,6 +16,16 @@
 ..\..\scripts\validate-slice.ps1 .\sample.json -ReviewMode
 ```
 
+上面的命令适用于当前目录位于 `ncrew-ontology` 技能根目录内，调用的是支持 `-ReviewMode` 的真实校验器。
+
+如果从仓库根目录执行普通结构校验：
+
+```powershell
+.\scripts\validate-ontology-slice.ps1 .\src\OpenClaw.Gateway\skills\ncrew-ontology\examples\ready\sample.json
+```
+
+仓库根目录包装入口只承载普通结构校验，不暴露 `-ReviewMode`。
+
 ## 结构层表现
 
 - 结构结果：`PASS`

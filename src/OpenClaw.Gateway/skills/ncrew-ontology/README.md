@@ -21,19 +21,33 @@
   - `TEMPLATE.schema.json`：严格 JSON Schema。
   - `PROJECTION_TEMPLATE.json`：下游 codegen / prompt orchestration 投影模板。
   - `PROJECTION_TEMPLATE.schema.json`：projection 文件校验规则。
+  - `CONSUMER_SKILL_PROJECTION_SECTION.md`：consumer skill 复用的最小 `Projection Contracts` 段落模板。
+  - `CONSUMER_SKILL_SCAFFOLD.md`：创建新 consumer skill 时可直接复制的最小完整骨架。
+  - `NEW_CONSUMER_SKILL_CHECKLIST.md`：复制 scaffold 后用于替换占位符和删减不适用字段的创建清单。
+  - `EXAMPLE_CONSUMER_SKILL.md`：已经替换完占位符、删减完字段的完整 consumer skill 示例。
 - `references/`
   - `FIELD_GUIDE.md`：字段语义说明。
   - `REVIEW_CHECKLIST.md`：同时覆盖 slice 和 projection 两层评审标准。
   - `DOWNSTREAM_MAPPING_GUIDE.md`：下游代码生成 / 提示词编排映射规范。
+  - `PROJECTION_CONSUMPTION_GUIDE.md`：其他 skill 如何消费 `projection.json`。
+  - `CONSUMER_PROJECTION_LAYOUT_GUIDE.md`：consumer skill 专用 projection 目录与命名规范。
   - `SCHEMA_MIGRATION.md`：slice 与 projection 的 schema 版本迁移说明。
+- `../../../../docs/`
   - `SESSION_SUMMARY.md`：本次规范包从 slice skill 演进到完整治理包的总结文章。
 - `examples/ready/`
   - `sample.json`：`READY` 基线样例。
   - `sample-projection.json`：基于 `sample.json` 的合法 projection 样例。
+  - `json-schema-projection.json`：面向 `json_schema_projection` 的 `READY` 样例。
+  - `workflow-contract-projection.json`：面向 `workflow_contract_projection` 的 `READY` 样例。
+  - `minimal-projection.json`：最小可机读 projection 样例。
   - `sample.entry.md`：`sample.json` 的短入口页。
   - `sample-projection.entry.md`：`sample-projection.json` 的短入口页。
+  - `json-schema-projection.entry.md`：`json-schema-projection.json` 的短入口页。
+  - `workflow-contract-projection.entry.md`：`workflow-contract-projection.json` 的短入口页。
   - `sample.md`：`sample.json` 的人读评审版。
   - `sample-projection.md`：`sample-projection.json` 的人读评审版。
+  - `json-schema-projection.md`：`json-schema-projection.json` 的人读评审版。
+  - `workflow-contract-projection.md`：`workflow-contract-projection.json` 的人读评审版。
 - `examples/warning/`
   - `warning-sample.json`：`WARNING` 黄灯样例。
   - `warning-sample.entry.md`：短入口页。
@@ -50,7 +64,12 @@
   - `invalid-projection.md`：`invalid-projection.json` 的失败路径说明。
 - `scripts/`
   - `validate-slice.ps1`：真实校验器，支持 `-ReviewMode`。
+  - `validate-slice.py`：Python 版本真实校验器，支持 `--review-mode`。
   - `validate-projection.ps1`：projection 真实校验器，支持 `-ReviewMode`。
+  - `validate-projection.py`：projection 的 Python 版本真实校验器，支持 `--review-mode`。
+- 仓库根目录 `scripts/`
+  - `validate-ontology-slice.ps1/.py`：slice 的包装入口，适合从仓库根目录或任意当前目录直接发起普通结构校验。
+  - `validate-ontology-projection.ps1/.py`：projection 的包装入口，适合从仓库根目录或任意当前目录直接发起普通结构校验。
 
 ---
 
@@ -78,7 +97,7 @@
 5. 再把结果落到 `templates/TEMPLATE.json` 对应结构。
 6. 需要形成下游交付物时，复制 `templates/PROJECTION_TEMPLATE.json` 填写 projection。
 7. 用 `templates/PROJECTION_TEMPLATE.schema.json` 校验 projection 文件结构。
-8. 最后使用 `templates/TEMPLATE.schema.json` 或 `scripts/validate-slice.ps1` 做 slice 校验。
+8. 最后做 slice 校验：如果当前目录就是本技能根目录，使用 `scripts/validate-slice.ps1` / `scripts/validate-slice.py`；如果从仓库根目录执行，使用仓库根目录 `scripts/validate-ontology-slice.ps1` / `scripts/validate-ontology-slice.py`。
 
 ### 路径二：直接生成工程化产物
 
@@ -87,18 +106,30 @@
 3. 遇到字段拿不准时，回看 `references/FIELD_GUIDE.md`。
 4. 需要面向代码生成或提示词编排时，按 `references/DOWNSTREAM_MAPPING_GUIDE.md` 做投影。
 5. 复制 `templates/PROJECTION_TEMPLATE.json`，形成可交付的 projection 文件。
-6. 使用 `templates/PROJECTION_TEMPLATE.schema.json` 做 projection 结构校验。
-7. 使用 `templates/TEMPLATE.schema.json` 做 slice 结构校验。
+6. 做 projection 结构校验：如果当前目录就是本技能根目录，使用 `scripts/validate-projection.ps1` / `scripts/validate-projection.py`；如果从仓库根目录执行，使用仓库根目录 `scripts/validate-ontology-projection.ps1` / `scripts/validate-ontology-projection.py`。
+7. 做 slice 结构校验：如果当前目录就是本技能根目录，使用 `scripts/validate-slice.ps1` / `scripts/validate-slice.py`；如果从仓库根目录执行，使用仓库根目录 `scripts/validate-ontology-slice.ps1` / `scripts/validate-ontology-slice.py`。
 
 ### 路径三：按三态样例做团队对齐
 
 1. 先看 `examples/ready/sample.json -> sample.entry.md -> sample.md` 建立正向基线。
 2. 再看 `examples/ready/sample-projection.json -> sample-projection.entry.md -> sample-projection.md`，理解 READY slice 如何落成可交付 projection。
-3. 再看 `examples/warning/warning-sample.json -> warning-sample.entry.md -> warning-sample.md` 学会识别黄灯风险。
-4. 再看 `examples/warning/warning-projection.json -> warning-projection.entry.md -> warning-projection.md` 理解 projection 为什么也可能是黄灯。
-5. 最后看 `examples/invalid/invalid-sample.json -> invalid-sample.entry.md -> invalid-sample.md` 理解失败路径和报错边界。
-6. 再看 `examples/invalid/invalid-projection.json -> invalid-projection.entry.md -> invalid-projection.md` 理解 projection 结构失败长什么样。
-7. 回到 `references/REVIEW_CHECKLIST.md`，把三态样例统一成同一套评审口径。
+3. 再看 `examples/ready/json-schema-projection.json -> json-schema-projection.entry.md -> json-schema-projection.md`，理解同一份 slice 如何投影成 JSON Schema 契约。
+4. 再看 `examples/ready/workflow-contract-projection.json -> workflow-contract-projection.entry.md -> workflow-contract-projection.md`，理解同一份 slice 如何投影成 workflow contract。
+5. 再看 `examples/warning/warning-sample.json -> warning-sample.entry.md -> warning-sample.md` 学会识别黄灯风险。
+6. 再看 `examples/warning/warning-projection.json -> warning-projection.entry.md -> warning-projection.md` 理解 projection 为什么也可能是黄灯。
+7. 最后看 `examples/invalid/invalid-sample.json -> invalid-sample.entry.md -> invalid-sample.md` 理解失败路径和报错边界。
+8. 再看 `examples/invalid/invalid-projection.json -> invalid-projection.entry.md -> invalid-projection.md` 理解 projection 结构失败长什么样。
+9. 回到 `references/REVIEW_CHECKLIST.md`，把三态样例统一成同一套评审口径。
+
+### README 版五步顺序
+
+如果目标是把 slice 真正交付成 consumer skill 可加载的 projection contract，而不是只停留在 producer 侧文档，可直接按下面顺序执行：
+
+1. 先在 `ncrew-ontology` 中收缩当前主题，产出最小可验证 slice，并先让 slice 通过对应校验器校验：在技能根目录使用 `validate-slice`，在仓库根目录使用 `validate-ontology-slice`。
+2. 先决定本次只面向哪一种主交付视图：`domain-model`、`json-schema`、`prompt-constraint` 或 `workflow-contract`。
+3. 基于已通过校验的 slice，由 `ncrew-ontology` 按映射规范填充 `PROJECTION_TEMPLATE.json`，把 `concepts`、`relations`、`constraints` 显式映射到 projection。
+4. 验证 projection 时按所在层级选择入口：在技能根目录使用 `validate-projection.ps1` / `validate-projection.py`，在仓库根目录使用 `validate-ontology-projection.ps1` / `validate-ontology-projection.py`，确保结构、关键字段和本地诊断全部通过。
+5. projection 验证通过后，再将产物放入 consumer skill 的 `contracts/projections` 目录，并同步更新 `contract-index.json`、view 路由和必要的 routing hints。
 
 ---
 
@@ -107,16 +138,29 @@
 - 只想先讨论概念边界：用 `templates/TEMPLATE.md`
 - 想输出给程序、流水线或下游 projection：用 `templates/TEMPLATE.json`
 - 想把 slice 投影成 projection / codegen / prompt orchestration 输入：用 `templates/PROJECTION_TEMPLATE.json`
+- 想给 consumer skill 复用最小 `Projection Contracts` 段落：用 `templates/CONSUMER_SKILL_PROJECTION_SECTION.md`
+- 想新建一个可消费 projection 的 consumer skill：用 `templates/CONSUMER_SKILL_SCAFFOLD.md`
+- 想检查新 consumer skill 复制 scaffold 后还有哪些占位符和字段需要清理：用 `templates/NEW_CONSUMER_SKILL_CHECKLIST.md`
+- 想直接参考一份已经完成占位符替换和字段删减的最终样板：用 `templates/EXAMPLE_CONSUMER_SKILL.md`
 - 想检查结果合不合法：用 `templates/TEMPLATE.schema.json`
 - 想检查 projection 结构是否合法：用 `templates/PROJECTION_TEMPLATE.schema.json`
 - 想直接从一个合法 projection 样例开始改：用 `examples/ready/sample-projection.json`
+- 想直接从 JSON Schema projection 样例开始改：用 `examples/ready/json-schema-projection.json`
+- 想直接从 workflow contract projection 样例开始改：用 `examples/ready/workflow-contract-projection.json`
+- 想从最小合法 projection 骨架开始改：用 `examples/ready/minimal-projection.json`
 - 想看 projection 的短入口：用 `examples/ready/sample-projection.entry.md`
 - 想看 projection 为什么算 READY：用 `examples/ready/sample-projection.md`
+- 想看 JSON Schema projection 的短入口：用 `examples/ready/json-schema-projection.entry.md`
+- 想看 JSON Schema projection 为什么算 READY：用 `examples/ready/json-schema-projection.md`
+- 想看 workflow contract projection 的短入口：用 `examples/ready/workflow-contract-projection.entry.md`
+- 想看 workflow contract projection 为什么算 READY：用 `examples/ready/workflow-contract-projection.md`
 - 想统一字段口径：看 `references/FIELD_GUIDE.md`
 - 想统一 slice 和 projection 两层评审标准：看 `references/REVIEW_CHECKLIST.md`
 - 想看 schema 升级时模板、样例和校验器该怎么一起迁移：看 `references/SCHEMA_MIGRATION.md`
-- 想快速理解这套规范为什么会演进成现在这套结构：看 `references/SESSION_SUMMARY.md`
+- 想快速理解这套规范为什么会演进成现在这套结构：看 `../../../../docs/SESSION_SUMMARY.md`
 - 想把 slice 稳定接到 projection、codegen 或 prompt orchestration：看 `references/DOWNSTREAM_MAPPING_GUIDE.md`
+- 想让其他 skill 正式消费 projection 文件：看 `references/PROJECTION_CONSUMPTION_GUIDE.md`
+- 想统一 consumer skill 内 projection 的目录和命名：看 `references/CONSUMER_PROJECTION_LAYOUT_GUIDE.md`
 - 想直接在真实样例上改：用 `examples/ready/sample.json`（`READY`）
 - 想看 `READY` 的短入口：用 `examples/ready/sample.entry.md`
 - 想看 `READY` 的完整解释：用 `examples/ready/sample.md`
@@ -133,8 +177,10 @@
 - 想看 projection 失败的短入口：用 `examples/invalid/invalid-projection.entry.md`
 - 想看 projection 为什么是 FAIL：用 `examples/invalid/invalid-projection.md`
 - 想单独分享“该不该用这套规范”的判定入口：看 `references/DECISION_GUIDE.md`
-- 想一条命令校验样例或自定义 slice：用 `scripts/validate-slice.ps1`
-- 想一条命令校验样例或自定义 projection：用 `scripts/validate-projection.ps1`
+- 想在技能根目录一条命令校验样例或自定义 slice：用 `scripts/validate-slice.ps1` 或 `scripts/validate-slice.py`
+- 想在仓库根目录或任意当前目录一条命令校验 slice：用仓库根目录 `scripts/validate-ontology-slice.ps1` 或 `scripts/validate-ontology-slice.py`
+- 想在技能根目录一条命令校验样例或自定义 projection：用 `scripts/validate-projection.ps1` 或 `scripts/validate-projection.py`
+- 想在仓库根目录或任意当前目录一条命令校验 projection：用仓库根目录 `scripts/validate-ontology-projection.ps1` 或 `scripts/validate-ontology-projection.py`
 
 ---
 
@@ -173,6 +219,10 @@
 ## ReviewMode 说明
 
 `scripts/validate-slice.ps1 -ReviewMode` 会在结构校验结果后，额外输出一个启发式判定：`READY / WARNING / FAIL`。
+
+Python 版本 `scripts/validate-slice.py --review-mode` 提供同等的结构校验与启发式 review 输出，适合没有 PowerShell 或更偏 Python 工作流的环境。
+
+仓库根目录包装脚本 `scripts/validate-ontology-slice.ps1/.py` 只承载普通结构校验入口，不暴露 `ReviewMode` / `--review-mode`。
 
 当前启发式结论含义：
 
@@ -219,6 +269,25 @@
 .\scripts\validate-slice.ps1 .\examples\invalid\invalid-sample.json
 ```
 
+Python 版本对应命令：
+
+```powershell
+# 校验默认 READY 基线样例
+c:/python314/python.exe .\scripts\validate-slice.py
+
+# 校验单个自定义 slice
+c:/python314/python.exe .\scripts\validate-slice.py .\my-slice.json
+
+# 一次校验多个 slice
+c:/python314/python.exe .\scripts\validate-slice.py .\examples\ready\sample.json .\team-a.json .\team-b.json
+
+# 输出 READY / WARNING / FAIL 的启发式提示
+c:/python314/python.exe .\scripts\validate-slice.py .\examples\ready\sample.json --review-mode
+
+# 查看失败样例的报错输出
+c:/python314/python.exe .\scripts\validate-slice.py .\examples\invalid\invalid-sample.json
+```
+
 如果需要显式指定 schema 路径：
 
 ```powershell
@@ -231,6 +300,9 @@
 .\scripts\validate-ontology-slice.ps1
 .\scripts\validate-ontology-slice.ps1 .\path\to\team-slice.json
 .\scripts\validate-ontology-slice.ps1 .\src\OpenClaw.Gateway\skills\ncrew-ontology\examples\invalid\invalid-sample.json
+c:/python314/python.exe .\scripts\validate-ontology-slice.py
+c:/python314/python.exe .\scripts\validate-ontology-slice.py .\path\to\team-slice.json
+c:/python314/python.exe .\scripts\validate-ontology-slice.py .\src\OpenClaw.Gateway\skills\ncrew-ontology\examples\invalid\invalid-sample.json
 ```
 
 根目录包装脚本仍保持“普通结构校验入口”的角色，不额外承载 `-ReviewMode`。
@@ -262,6 +334,31 @@
 .\scripts\validate-projection.ps1 .\examples\invalid\invalid-projection.json
 ```
 
+Python 版本对应命令：
+
+```powershell
+# 校验默认 READY projection 基线样例
+c:/python314/python.exe .\scripts\validate-projection.py
+
+# 校验单个自定义 projection
+c:/python314/python.exe .\scripts\validate-projection.py .\my-projection.json
+
+# 一次校验多个 projection
+c:/python314/python.exe .\scripts\validate-projection.py .\examples\ready\sample-projection.json .\team-a-projection.json .\team-b-projection.json
+
+# 查看黄灯 projection 样例（应通过结构校验，但仍需人工 review）
+c:/python314/python.exe .\scripts\validate-projection.py .\examples\warning\warning-projection.json
+
+# 输出结构层结论，并提示 projection review 入口
+c:/python314/python.exe .\scripts\validate-projection.py .\examples\warning\warning-projection.json --review-mode
+
+# 输出 projection 的 READY / WARNING / FAIL 启发式提示
+c:/python314/python.exe .\scripts\validate-projection.py .\examples\ready\sample-projection.json --review-mode
+
+# 查看 projection 失败样例的报错输出
+c:/python314/python.exe .\scripts\validate-projection.py .\examples\invalid\invalid-projection.json
+```
+
 如果需要显式指定 projection schema 路径：
 
 ```powershell
@@ -274,6 +371,9 @@
 .\scripts\validate-ontology-projection.ps1
 .\scripts\validate-ontology-projection.ps1 .\path\to\team-projection.json
 .\scripts\validate-ontology-projection.ps1 .\src\OpenClaw.Gateway\skills\ncrew-ontology\examples\invalid\invalid-projection.json
+c:/python314/python.exe .\scripts\validate-ontology-projection.py
+c:/python314/python.exe .\scripts\validate-ontology-projection.py .\path\to\team-projection.json
+c:/python314/python.exe .\scripts\validate-ontology-projection.py .\src\OpenClaw.Gateway\skills\ncrew-ontology\examples\invalid\invalid-projection.json
 ```
 
 根目录 projection 包装脚本同样保持“普通结构校验入口”的角色，不额外承载 `-ReviewMode`。
@@ -298,4 +398,4 @@
 ## 后续可扩展方向
 
 - 增加自动校验脚本或 CI 校验入口
-- 增加可机读的 projection 模板或示例
+- 继续增加按运行时或交付介质细分的 projection 样例（如更细的 prompt policy、tool contract、event schema）

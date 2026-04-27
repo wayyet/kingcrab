@@ -1,0 +1,315 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openclaw.local/docs/skill-projection-contract-index.schema.json",
+  "title": "Skill Projection Contract Index",
+  "description": "Runtime-focused schema for skill projection contract index files. It validates the fields consumed by SkillLoader and allows advisory metadata used by human-authored examples.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "minLength": 1
+    },
+    "producer_skill": {
+      "type": "string",
+      "minLength": 1
+    },
+    "producer_priority": {
+      "type": "integer"
+    },
+    "producer_precedence": {
+      "type": "integer"
+    },
+    "consumer_skill": {
+      "type": "string",
+      "minLength": 1
+    },
+    "default_selection_policy": {
+      "$ref": "#/$defs/defaultSelectionPolicy"
+    },
+    "topic_conflict_resolution": {
+      "type": "object"
+    },
+    "topic_scoring": {
+      "$ref": "#/$defs/topicScoring"
+    },
+    "target_view_scoring": {
+      "$ref": "#/$defs/targetViewScoring"
+    },
+    "selection_algorithm": {
+      "type": "object"
+    },
+    "topics": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/topicRecord"
+      }
+    }
+  },
+  "required": [
+    "topics"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "producer_priority"
+        ]
+      },
+      "then": true,
+      "else": {
+        "properties": {
+          "producer_precedence": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "stringArray": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/nonEmptyString"
+      }
+    },
+    "scoreDimension": {
+      "type": "object",
+      "properties": {
+        "dimension": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "score": {
+          "type": "integer"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "dimension"
+      ],
+      "additionalProperties": true
+    },
+    "defaultSelectionPolicy": {
+      "type": "object",
+      "properties": {
+        "prefer_ready_only": {
+          "type": "boolean"
+        },
+        "block_on_open_questions": {
+          "type": "boolean"
+        },
+        "fallback_order_by_target_view": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "multi_view_resolution_hints": {
+          "$ref": "#/$defs/stringArray"
+        }
+      },
+      "additionalProperties": true
+    },
+    "topicSignals": {
+      "type": "object",
+      "properties": {
+        "domain_slug": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "primary_intent_signals": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "supporting_signals": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "explicit_artifact_signals": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "demote_when_competing_topic_signals": {
+          "$ref": "#/$defs/stringArray"
+        }
+      },
+      "required": [
+        "domain_slug"
+      ],
+      "additionalProperties": true
+    },
+    "viewSignals": {
+      "type": "object",
+      "properties": {
+        "target_view": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "explicit_output_signals": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "strong_signals": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "supporting_signals": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "demote_when_competing_view_signals": {
+          "$ref": "#/$defs/stringArray"
+        }
+      },
+      "required": [
+        "target_view"
+      ],
+      "additionalProperties": true
+    },
+    "topicViewBonus": {
+      "type": "object",
+      "properties": {
+        "target_view": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "when_request_signals": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "score": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "target_view"
+      ],
+      "additionalProperties": true
+    },
+    "topicViewOverride": {
+      "type": "object",
+      "properties": {
+        "domain_slug": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "bonuses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/topicViewBonus"
+          }
+        }
+      },
+      "required": [
+        "domain_slug"
+      ],
+      "additionalProperties": true
+    },
+    "topicScoring": {
+      "type": "object",
+      "properties": {
+        "selection_rule": {
+          "type": "string"
+        },
+        "clarify_when_score_gap_below": {
+          "type": "integer"
+        },
+        "score_dimensions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scoreDimension"
+          }
+        },
+        "topics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/topicSignals"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "targetViewScoring": {
+      "type": "object",
+      "properties": {
+        "selection_rule": {
+          "type": "string"
+        },
+        "clarify_when_score_gap_below": {
+          "type": "integer"
+        },
+        "prefer_explicit_user_artifact_requests": {
+          "type": "boolean"
+        },
+        "score_dimensions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scoreDimension"
+          }
+        },
+        "views": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/viewSignals"
+          }
+        },
+        "within_topic_overrides": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/topicViewOverride"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "viewRecord": {
+      "type": "object",
+      "properties": {
+        "target_view": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "projection_type": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "path": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      },
+      "required": [
+        "target_view",
+        "status",
+        "path"
+      ],
+      "additionalProperties": true
+    },
+    "topicRecord": {
+      "type": "object",
+      "properties": {
+        "domain_slug": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "intent_keywords": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "default_target_view": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "example_requests": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "views": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/viewRecord"
+          }
+        }
+      },
+      "required": [
+        "domain_slug",
+        "default_target_view"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

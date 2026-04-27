@@ -1,0 +1,200 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openclaw.local/docs/skill-projection-document.schema.json",
+  "title": "Skill Projection Document",
+  "description": "Runtime-focused schema for projection payload documents. It validates the fields consumed by SkillProjectionResolver and permits richer ontology metadata used by producer templates.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "minLength": 1
+    },
+    "template_type": {
+      "type": "string"
+    },
+    "projection_version": {
+      "type": "string"
+    },
+    "projection": {
+      "type": "object"
+    },
+    "mapping_policy": {
+      "$ref": "#/$defs/mappingPolicy"
+    },
+    "concept_mappings": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "relation_mappings": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "constraint_mappings": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "prompt_projection": {
+      "$ref": "#/$defs/promptProjection"
+    },
+    "delivery_artifacts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/deliveryArtifact"
+      }
+    },
+    "dropped_items": {
+      "$ref": "#/$defs/displayTextArray"
+    },
+    "open_questions": {
+      "$ref": "#/$defs/displayTextArray"
+    },
+    "meta": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "prompt_projection",
+    "delivery_artifacts",
+    "dropped_items",
+    "open_questions"
+  ],
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "stringArray": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/nonEmptyString"
+      }
+    },
+    "displayTextArray": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/nonEmptyString"
+          },
+          {
+            "$ref": "#/$defs/droppedItem"
+          },
+          {
+            "$ref": "#/$defs/openQuestion"
+          }
+        ]
+      }
+    },
+    "mappingPolicy": {
+      "type": "object",
+      "properties": {
+        "unresolved_item_policy": {
+          "type": "string"
+        },
+        "prompt_assumption_policy": {
+          "type": "string"
+        },
+        "preserve_source_trace": {
+          "type": "boolean"
+        },
+        "preserve_constraints": {
+          "type": "boolean"
+        },
+        "relation_flattening_policy": {
+          "type": "string"
+        },
+        "dropped_item_policy": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "promptProjection": {
+      "type": "object",
+      "properties": {
+        "allowed_terms": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "forbidden_assumptions": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "required_clarifications": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "reasoning_paths": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "source_digest": {
+          "$ref": "#/$defs/stringArray"
+        }
+      },
+      "additionalProperties": true
+    },
+    "deliveryArtifact": {
+      "type": "object",
+      "properties": {
+        "artifact_name": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "artifact_type": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "path": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_name",
+        "artifact_type",
+        "path"
+      ],
+      "additionalProperties": true
+    },
+    "droppedItem": {
+      "type": "object",
+      "properties": {
+        "item_type": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "item_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "reason": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "additionalProperties": true
+    },
+    "openQuestion": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "impact": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "required_input": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      },
+      "required": [
+        "question"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

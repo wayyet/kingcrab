@@ -92,14 +92,14 @@ function Get-ListItems {
     )
 
     if ($null -eq $Value) {
-        return @()
+        return ,([object[]]@())
     }
 
     if ($Value -is [System.Collections.IList] -and -not ($Value -is [string])) {
-        return @($Value)
+        return ,([object[]]$Value)
     }
 
-    return @($Value)
+    return ,([object[]]@($Value))
 }
 
 function Get-HeuristicReviewVerdict {
@@ -248,8 +248,12 @@ function Write-ReviewSummary {
     }
 
     $sampleGuidePath = Join-Path $SkillRootPath "examples\ready\sample-projection.md"
+    $jsonSchemaGuidePath = Join-Path $SkillRootPath "examples\ready\json-schema-projection.md"
+    $workflowContractGuidePath = Join-Path $SkillRootPath "examples\ready\workflow-contract-projection.md"
     $warningGuidePath = Join-Path $SkillRootPath "examples\warning\warning-projection.md"
     $sampleGuideDisplay = Get-DisplayPath -ResolvedPath $sampleGuidePath -BasePath $DisplayBasePath -OriginalPath $sampleGuidePath
+    $jsonSchemaGuideDisplay = Get-DisplayPath -ResolvedPath $jsonSchemaGuidePath -BasePath $DisplayBasePath -OriginalPath $jsonSchemaGuidePath
+    $workflowContractGuideDisplay = Get-DisplayPath -ResolvedPath $workflowContractGuidePath -BasePath $DisplayBasePath -OriginalPath $workflowContractGuidePath
     $warningGuideDisplay = Get-DisplayPath -ResolvedPath $warningGuidePath -BasePath $DisplayBasePath -OriginalPath $warningGuidePath
     $inputFileName = [System.IO.Path]::GetFileName($ResolvedInputPath)
 
@@ -264,6 +268,16 @@ function Write-ReviewSummary {
     }
     elseif ($inputFileName -ieq "sample-projection.json") {
         Write-Host ("  Suggested guide: {0}" -f $sampleGuideDisplay)
+    }
+    elseif ($inputFileName -ieq "json-schema-projection.json") {
+        Write-Host ("  Suggested guide: {0}" -f $jsonSchemaGuideDisplay)
+        Write-Host ("  General baseline: {0}" -f $sampleGuideDisplay)
+        Write-Host ("  Yellow-light reference: {0}" -f $warningGuideDisplay)
+    }
+    elseif ($inputFileName -ieq "workflow-contract-projection.json") {
+        Write-Host ("  Suggested guide: {0}" -f $workflowContractGuideDisplay)
+        Write-Host ("  General baseline: {0}" -f $sampleGuideDisplay)
+        Write-Host ("  Yellow-light reference: {0}" -f $warningGuideDisplay)
     }
     else {
         Write-Host ("  Suggested guide: {0}" -f $sampleGuideDisplay)
@@ -375,7 +389,11 @@ function Test-ObjectProperty {
         return $Object.Keys -contains $PropertyName
     }
 
-    return $Object.PSObject.Properties.Name -contains $PropertyName
+    if ($Object -is [pscustomobject]) {
+        return $Object.PSObject.Properties.Name -contains $PropertyName
+    }
+
+    return $false
 }
 
 function Resolve-SchemaNode {
@@ -474,6 +492,21 @@ function Test-SchemaNode {
     $schema = Resolve-SchemaNode -SchemaRoot $SchemaRoot -SchemaNode $SchemaNode
     if ($null -eq $schema) {
         return
+    }
+
+    if (Test-ObjectProperty -Object $schema -PropertyName 'allOf') {
+        foreach ($clause in (Get-ObjectValue -Object $schema -PropertyName 'allOf')) {
+            Test-SchemaNode -Value $Value -SchemaNode $clause -SchemaRoot $SchemaRoot -Path $Path -ValidationIssues $ValidationIssues
+        }
+    }
+
+    if (Test-ObjectProperty -Object $schema -PropertyName 'if') {
+        $conditionErrors = New-Object System.Collections.ArrayList
+        Test-SchemaNode -Value $Value -SchemaNode (Get-ObjectValue -Object $schema -PropertyName 'if') -SchemaRoot $SchemaRoot -Path $Path -ValidationIssues $conditionErrors
+        $branchName = if ($conditionErrors.Count -eq 0) { 'then' } else { 'else' }
+        if (Test-ObjectProperty -Object $schema -PropertyName $branchName) {
+            Test-SchemaNode -Value $Value -SchemaNode (Get-ObjectValue -Object $schema -PropertyName $branchName) -SchemaRoot $SchemaRoot -Path $Path -ValidationIssues $ValidationIssues
+        }
     }
 
     if (Test-ObjectProperty -Object $schema -PropertyName 'oneOf') {

@@ -1,0 +1,139 @@
+{
+  "$schema": "../../../../../../../../docs/skill-projection-document.schema.json",
+  "template_type": "ontology_projection",
+  "projection_version": "1.0.0",
+  "projection": {
+    "projection_id": "software-developer-task-execution-prompt-constraint-v1",
+    "projection_type": "prompt_constraint_projection",
+    "target_name": "SoftwareDeveloperTaskExecutionPromptPolicy",
+    "target_format": "system_prompt_policy",
+    "target_runtime": "llm_orchestrator",
+    "projection_goal": "Provide the software-developer skill with a prompt-side execution contract that preserves skill loading terminology, source precedence boundaries, and mandatory clarification rules during implementation tasks.",
+    "source_slice": {
+      "path": "../../../../../ncrew-ontology/examples/ready/sample.json",
+      "slice_topic": "skill loading order, source precedence, and eligibility filtering",
+      "schema_version": "1.0.0"
+    },
+    "intended_consumers": [
+      "software_developer_skill",
+      "prompt_orchestrator"
+    ]
+  },
+  "mapping_policy": {
+    "preserve_source_trace": true,
+    "preserve_constraints": true,
+    "relation_flattening_policy": "disallow_by_default",
+    "unresolved_item_policy": "block_or_escalate",
+    "dropped_item_policy": "disallow_drop",
+    "prompt_assumption_policy": "disallow_unmapped_terms"
+  },
+  "concept_mappings": [
+    {
+      "concept_id": "C1",
+      "projection_action": "map",
+      "target_kind": "prompt_term",
+      "target_name": "skills_config",
+      "target_path": "prompt.allowed_terms",
+      "source_ids": [
+        "S2",
+        "S3"
+      ],
+      "notes": "Expose the top-level skills configuration as an approved prompt term so planning and implementation discussions stay aligned with the ontology boundary."
+    },
+    {
+      "concept_id": "C3",
+      "projection_action": "map",
+      "target_kind": "prompt_term",
+      "target_name": "skill_definition",
+      "target_path": "prompt.allowed_terms",
+      "source_ids": [
+        "S2",
+        "S3"
+      ],
+      "notes": "Keep skill definition as an explicit prompt term so generated explanations and plans talk about the same core object the runtime consumes."
+    },
+    {
+      "concept_id": "C4",
+      "projection_action": "map",
+      "target_kind": "prompt_term",
+      "target_name": "skill_source_tier",
+      "target_path": "prompt.allowed_terms",
+      "source_ids": [
+        "S1",
+        "S2",
+        "S3",
+        "S4"
+      ],
+      "notes": "Carry source tier into the prompt vocabulary so precedence-sensitive reasoning cannot collapse into informal labels."
+    }
+  ],
+  "relation_mappings": [
+    {
+      "relation_id": "R3",
+      "projection_action": "map",
+      "target_kind": "reasoning_path",
+      "target_name": "SkillDefinitionDependsOnSkillSource",
+      "representation": "prompt_reasoning_path",
+      "source_ids": [
+        "S2",
+        "S3"
+      ],
+      "notes": "Preserve the dependency between skill definition and source as a permitted reasoning path for implementation guidance and review prompts."
+    }
+  ],
+  "constraint_mappings": [
+    {
+      "constraint_id": "K1",
+      "projection_action": "map",
+      "target_kind": "prompt_guardrail",
+      "target_name": "DoNotInvertSourcePrecedence",
+      "severity_mapping": "high -> blocking_prompt_guardrail",
+      "source_ids": [
+        "S1",
+        "S2",
+        "S4"
+      ],
+      "notes": "Require the prompt layer to preserve higher-priority source precedence and to reject any rewrite that silently inverts overwrite order."
+    }
+  ],
+  "prompt_projection": {
+    "allowed_terms": [
+      "skills_config",
+      "skill_definition",
+      "skill_source_tier",
+      "source_precedence"
+    ],
+    "forbidden_assumptions": [
+      "Do not assume bundled skills always outrank managed or workspace skills.",
+      "Do not rename source tiers into informal labels that lose ordering semantics."
+    ],
+    "required_clarifications": [
+      "Clarify the active managed skills path if code and documentation appear to drift before proposing implementation changes."
+    ],
+    "reasoning_paths": [
+      "skills_config -> skill_definition -> skill_source_tier",
+      "skill_source_tier -> source_precedence -> overwrite_decision"
+    ],
+    "source_digest": [
+      "Primary source: S2 src/OpenClaw.Core/Skills/SkillLoader.cs",
+      "Primary source: S3 src/OpenClaw.Core/Skills/SkillModels.cs",
+      "Supporting source: S1 docs/skillloader-loadall-analysis.md"
+    ]
+  },
+  "delivery_artifacts": [
+    {
+      "artifact_name": "TaskExecutionPromptPolicy.md",
+      "artifact_type": "prompt_fragment",
+      "path": "src/OpenClaw.Gateway/skills/software-developer/contracts/generated/task-execution/TaskExecutionPromptPolicy.md",
+      "status": "planned"
+    }
+  ],
+  "dropped_items": [],
+  "open_questions": [],
+  "meta": {
+    "generated_at": "2026-04-21T00:00:00Z",
+    "generated_by": "ncrew-ontology",
+    "workspace": "kingcrab",
+    "notes": "This consumer-skill prompt projection gives software-developer a prompt-side contract for implementation and review tasks while preserving ontology-derived terminology and guardrails."
+  }
+}

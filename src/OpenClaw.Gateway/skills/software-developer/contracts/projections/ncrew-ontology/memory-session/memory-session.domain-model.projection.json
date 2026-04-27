@@ -1,0 +1,148 @@
+{
+  "$schema": "../../../../../../../../docs/skill-projection-document.schema.json",
+  "template_type": "ontology_projection",
+  "projection_version": "1.0.0",
+  "projection": {
+    "projection_id": "software-developer-memory-session-domain-model-v1",
+    "projection_type": "domain_model_projection",
+    "target_name": "SoftwareDeveloperMemorySessionModel",
+    "target_format": "csharp_domain_model",
+    "target_runtime": "dotnet",
+    "projection_goal": "Provide the software-developer skill with a domain model for session state, memory persistence, recall boundaries, and retention lifecycle decisions.",
+    "source_slice": {
+      "path": "../../../../../../../../docs/openclaw-memory-recall-and-retention.md",
+      "slice_topic": "memory store boundaries, session state, and retention lifecycle",
+      "schema_version": "1.0.0"
+    },
+    "intended_consumers": [
+      "software_developer_skill",
+      "code_generator"
+    ]
+  },
+  "mapping_policy": {
+    "preserve_source_trace": true,
+    "preserve_constraints": true,
+    "relation_flattening_policy": "disallow_by_default",
+    "unresolved_item_policy": "block_or_escalate",
+    "dropped_item_policy": "disallow_drop",
+    "prompt_assumption_policy": "disallow_unmapped_terms"
+  },
+  "concept_mappings": [
+    {
+      "concept_id": "C1",
+      "projection_action": "map",
+      "target_kind": "domain_entity",
+      "target_name": "SessionStateModel",
+      "target_path": "contracts/generated/memory-session/Domain/SessionStateModel.cs",
+      "source_ids": [
+        "S1",
+        "S2"
+      ],
+      "notes": "Model the active session as a bounded aggregate so routing overrides, token counters, and lifecycle transitions remain explicit in implementation code."
+    },
+    {
+      "concept_id": "C2",
+      "projection_action": "map",
+      "target_kind": "domain_entity",
+      "target_name": "MemoryStoreModel",
+      "target_path": "contracts/generated/memory-session/Domain/MemoryStoreModel.cs",
+      "source_ids": [
+        "S1",
+        "S3"
+      ],
+      "notes": "Treat memory persistence as a first-class domain object so file-backed and SQLite-backed behavior stays under the same contract boundary."
+    },
+    {
+      "concept_id": "C3",
+      "projection_action": "map",
+      "target_kind": "value_object",
+      "target_name": "RetentionPolicyModel",
+      "target_path": "contracts/generated/memory-session/Domain/RetentionPolicyModel.cs",
+      "source_ids": [
+        "S1",
+        "S3"
+      ],
+      "notes": "Keep TTL, archive, and sweep settings as an explicit value object so lifecycle policy remains reviewable and machine-checkable."
+    },
+    {
+      "concept_id": "C4",
+      "projection_action": "map",
+      "target_kind": "value_object",
+      "target_name": "RecallBoundaryModel",
+      "target_path": "contracts/generated/memory-session/Domain/RecallBoundaryModel.cs",
+      "source_ids": [
+        "S1",
+        "S2"
+      ],
+      "notes": "Represent recall scope and trust boundary as a dedicated value object so automatic recall cannot be flattened into generic prompt history behavior."
+    }
+  ],
+  "relation_mappings": [
+    {
+      "relation_id": "R1",
+      "projection_action": "map",
+      "target_kind": "association",
+      "target_name": "SessionStateUsesMemoryStore",
+      "representation": "domain_association",
+      "source_ids": [
+        "S1",
+        "S2",
+        "S3"
+      ],
+      "notes": "Preserve the session-to-store boundary so session logic cannot silently bypass configured persistence and recall infrastructure."
+    }
+  ],
+  "constraint_mappings": [
+    {
+      "constraint_id": "K1",
+      "projection_action": "map",
+      "target_kind": "runtime_guard",
+      "target_name": "TreatRecalledMemoryAsUntrustedReference",
+      "severity_mapping": "high -> blocking_validation",
+      "source_ids": [
+        "S1"
+      ],
+      "notes": "Carry the memory trust-boundary rule into implementation so recalled notes cannot be promoted into executable instructions."
+    }
+  ],
+  "prompt_projection": {
+    "allowed_terms": [
+      "session_state",
+      "memory_store",
+      "retention_policy",
+      "recall_boundary"
+    ],
+    "forbidden_assumptions": [
+      "Do not collapse transient session state and persisted memory into the same domain object.",
+      "Do not treat recalled memory as trusted executable instruction input."
+    ],
+    "required_clarifications": [
+      "Clarify whether the requested change targets session lifetime, memory persistence, or recall injection before proposing model changes."
+    ],
+    "reasoning_paths": [
+      "session_state -> memory_store -> retention_policy",
+      "memory_store -> recall_boundary -> injected_context"
+    ],
+    "source_digest": [
+      "Primary source: docs/openclaw-memory-recall-and-retention.md",
+      "Primary source: docs/OpenClaw-Session-Management.md",
+      "Supporting source: docs/openclaw-gateway-startup-layers.md"
+    ]
+  },
+  "delivery_artifacts": [
+    {
+      "artifact_name": "SessionStateModel.cs",
+      "artifact_type": "code_file",
+      "path": "src/OpenClaw.Gateway/skills/software-developer/contracts/generated/memory-session/Domain/SessionStateModel.cs",
+      "status": "planned"
+    }
+  ],
+  "dropped_items": [],
+  "open_questions": [],
+  "meta": {
+    "generated_at": "2026-04-22T00:00:00Z",
+    "generated_by": "ncrew-ontology",
+    "workspace": "kingcrab",
+    "notes": "This consumer-skill domain-model projection gives software-developer a model-centered contract for memory and session changes while preserving trust boundaries and lifecycle semantics."
+  }
+}

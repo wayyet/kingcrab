@@ -47,7 +47,8 @@ public sealed class MafAgentRuntime : IAgentRuntime
     private readonly object _skillGate = new();
     private readonly object _mafToolsLock = new();
     private IList<AITool> _mafTools;
-    private string _systemPrompt = string.Empty;
+    private string _baseSystemPrompt = string.Empty;
+    private SkillDefinition[] _loadedSkills = [];
     private string[] _loadedSkillNames = [];
     private int _systemPromptLength;
     private int _skillPromptLength;
@@ -211,7 +212,7 @@ public sealed class MafAgentRuntime : IAgentRuntime
         // send the message with no visible user prompt in session history.
         ChatClientAgent agent = isSystemEvent
             ? CreateAgentWithSystemEvent(session, userMessage)
-            : CreateAgent(session);
+            : CreateAgent(session, userMessage);
         AgentSession mafSession = await _sessionStateStore.LoadAsync(agent, session, ct);
         var toolInvocations = new List<ToolInvocation>();
 
@@ -232,7 +233,10 @@ public sealed class MafAgentRuntime : IAgentRuntime
         // require the messages list to end with a user turn.  This trigger is never
         // persisted to history.
         if (isSystemEvent)
-            messages.Add(new ChatMessage(ChatRole.User, "[scheduled task trigger]"));
+        {
+            var trigger = "[scheduled task trigger]";
+            messages.Add(new ChatMessage(ChatRole.User, trigger));
+        }
 
         try
         {
@@ -240,7 +244,7 @@ public sealed class MafAgentRuntime : IAgentRuntime
             {
                 Session = session,
                 TurnContext = turnCtx,
-                SystemPromptLength = GetSystemPromptLength(session),
+                SystemPromptLength = GetSystemPromptLength(session, userMessage),
                 SkillPromptLength = _skillPromptLength,
                 SessionTokenBudget = _sessionTokenBudget,
                 ToolInvocations = toolInvocations,
@@ -349,7 +353,7 @@ public sealed class MafAgentRuntime : IAgentRuntime
 
         ChatClientAgent agent = isSystemEvent
             ? CreateAgentWithSystemEvent(session, userMessage)
-            : CreateAgent(session);
+            : CreateAgent(session, userMessage);
         AgentSession mafSession = await _sessionStateStore.LoadAsync(agent, session, ct);
         var eventChannel = Channel.CreateBounded<AgentStreamEvent>(new BoundedChannelOptions(256)
         {
@@ -374,6 +378,7 @@ public sealed class MafAgentRuntime : IAgentRuntime
 
         var producer = ProduceStreamingRunAsync(
             session,
+            userMessage,
             messages,
             agent,
             mafSession,
@@ -388,9 +393,9 @@ public sealed class MafAgentRuntime : IAgentRuntime
         await producer;
     }
 
-    private ChatClientAgent CreateAgent(Session session)
+    private ChatClientAgent CreateAgent(Session session, string userMessage)
     {
-        return _agentFactory.Create(_chatClient, GetSystemPrompt(session), _mafTools);
+        return _agentFactory.Create(_chatClient, GetSystemPrompt(session, userMessage), _mafTools);
     }
 
     /// <summary>
@@ -400,13 +405,14 @@ public sealed class MafAgentRuntime : IAgentRuntime
     /// </summary>
     private ChatClientAgent CreateAgentWithSystemEvent(Session session, string eventText)
     {
-        var systemPrompt = GetSystemPrompt(session)
+        var systemPrompt = GetSystemPrompt(session, eventText)
             + $"\n\n[Scheduled Task]\nA scheduled task has just fired. Generate a proactive assistant message based on the following task description — do NOT mention that this was scheduled or ask the user anything; just deliver the message naturally:\n{eventText.Trim()}";
         return _agentFactory.Create(_chatClient, systemPrompt, _mafTools);
     }
 
     private async Task ProduceStreamingRunAsync(
         Session session,
+        string userMessage,
         IReadOnlyList<ChatMessage> messages,
         ChatClientAgent agent,
         AgentSession mafSession,
@@ -427,7 +433,7 @@ public sealed class MafAgentRuntime : IAgentRuntime
             {
                 Session = session,
                 TurnContext = turnCtx,
-                SystemPromptLength = GetSystemPromptLength(session),
+                SystemPromptLength = GetSystemPromptLength(session, userMessage),
                 SkillPromptLength = _skillPromptLength,
                 SessionTokenBudget = _sessionTokenBudget,
                 ToolInvocations = toolInvocations,
@@ -544,12 +550,29 @@ public sealed class MafAgentRuntime : IAgentRuntime
         return options;
     }
 
-    private string GetSystemPrompt(Session session)
+    private string GetSystemPrompt(Session session, string userMessage)
     {
-        string systemPrompt;
+        string baseSystemPrompt;
+        SkillDefinition[] loadedSkills;
         lock (_skillGate)
         {
-            systemPrompt = _systemPrompt;
+            baseSystemPrompt = _baseSystemPrompt;
+            loadedSkills = _loadedSkills;
+        }
+
+        var effectiveSkills = ResolveSkillsForTurn(loadedSkills, userMessage, out var blockedRoutes);
+        var skillSection = SkillPromptBuilder.Build(effectiveSkills);
+        var systemPrompt = string.IsNullOrEmpty(skillSection)
+            ? baseSystemPrompt
+            : baseSystemPrompt + "\n" + skillSection;
+
+        if (!string.IsNullOrWhiteSpace(blockedRoutes))
+            systemPrompt += "\n\n[Blocked Skill Routes]\n" + blockedRoutes.Trim();
+
+        lock (_skillGate)
+        {
+            _skillPromptLength = skillSection.Length;
+            _systemPromptLength = systemPrompt.Length;
         }
 
         systemPrompt += AgentSystemPromptBuilder.BuildDynamicSuffix();
@@ -560,8 +583,8 @@ public sealed class MafAgentRuntime : IAgentRuntime
         return systemPrompt + "\n\n[Route Instructions]\n" + session.SystemPromptOverride.Trim();
     }
 
-    private int GetSystemPromptLength(Session session)
-        => GetSystemPrompt(session).Length;
+    private int GetSystemPromptLength(Session session, string userMessage)
+        => GetSystemPrompt(session, userMessage).Length;
 
     private async ValueTask TryInjectRecallAsync(List<ChatMessage> messages, string userMessage, CancellationToken ct)
     {
@@ -938,17 +961,76 @@ public sealed class MafAgentRuntime : IAgentRuntime
     {
         lock (_skillGate)
         {
-            var skillSection = SkillPromptBuilder.Build(skills);
-            var basePrompt = AgentSystemPromptBuilder.BuildBaseSystemPrompt(_requireToolApproval);
-            _skillPromptLength = skillSection.Length;
-            _systemPrompt = string.IsNullOrEmpty(skillSection) ? basePrompt : basePrompt + "\n" + skillSection;
-            _systemPromptLength = _systemPrompt.Length;
+            _baseSystemPrompt = AgentSystemPromptBuilder.BuildBaseSystemPrompt(_requireToolApproval);
+            _loadedSkills = [.. skills];
+            _skillPromptLength = SkillPromptBuilder.Build(skills).Length;
+            _systemPromptLength = _baseSystemPrompt.Length;
             _loadedSkillNames = skills
                 .Select(skill => skill.Name)
                 .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
         }
     }
+
+    private SkillDefinition[] ResolveSkillsForTurn(
+        IReadOnlyList<SkillDefinition> skills,
+        string userMessage,
+        out string blockedRoutes)
+    {
+        var resolvedSkills = new List<SkillDefinition>(skills.Count);
+        var blocked = new StringBuilder();
+
+        foreach (var skill in skills)
+        {
+            if (skill.ProjectionContracts.Count == 0)
+            {
+                resolvedSkills.Add(skill);
+                continue;
+            }
+
+            var resolution = SkillProjectionResolver.ResolveForRequest(skill, userMessage, _logger ?? NullLogger.Instance);
+            if (resolution.IsBlocked)
+            {
+                blocked.Append("- ");
+                blocked.Append(skill.Name);
+                blocked.Append(": ");
+                blocked.AppendLine(resolution.BlockReason ?? "Projection contract resolution blocked this skill for the current request.");
+                resolvedSkills.Add(CloneSkill(skill, skill.Instructions, disableModelInvocation: true));
+                continue;
+            }
+
+            var patch = SkillProjectionResolver.BuildPromptPatch(resolution);
+            if (string.IsNullOrWhiteSpace(patch))
+            {
+                resolvedSkills.Add(skill);
+                continue;
+            }
+
+            var patchedInstructions = string.Concat(skill.Instructions.TrimEnd(), "\n\n", patch);
+            resolvedSkills.Add(CloneSkill(skill, patchedInstructions, skill.DisableModelInvocation));
+        }
+
+        blockedRoutes = blocked.ToString();
+        return [.. resolvedSkills];
+    }
+
+    private static SkillDefinition CloneSkill(SkillDefinition source, string instructions, bool disableModelInvocation)
+        => new()
+        {
+            Name = source.Name,
+            Description = source.Description,
+            Instructions = instructions,
+            Location = source.Location,
+            Source = source.Source,
+            Metadata = source.Metadata,
+            UserInvocable = source.UserInvocable,
+            DisableModelInvocation = disableModelInvocation,
+            CommandDispatch = source.CommandDispatch,
+            CommandTool = source.CommandTool,
+            CommandArgMode = source.CommandArgMode,
+            ProjectionContracts = source.ProjectionContracts,
+            ProjectionDiscovery = source.ProjectionDiscovery
+        };
 
     private void TrimHistory(Session session)
     {

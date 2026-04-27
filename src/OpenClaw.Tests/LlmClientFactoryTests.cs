@@ -52,7 +52,7 @@ public sealed class LlmClientFactoryTests
         var transport = LlmClientFactory.CreateTransportOptions("https://example.invalid/v1");
 
         Assert.Equal(new Uri("https://example.invalid/v1"), transport.Endpoint);
-        Assert.Equal(0, transport.HiddenRetryCount);
+        Assert.Equal(0, transport.RetryCount);
     }
 
     [Fact]
@@ -61,7 +61,7 @@ public sealed class LlmClientFactoryTests
         var transport = LlmClientFactory.CreateTransportOptions(endpoint: null);
 
         Assert.Null(transport.Endpoint);
-        Assert.Equal(0, transport.HiddenRetryCount);
+        Assert.Equal(0, transport.RetryCount);
     }
 
     [Theory]

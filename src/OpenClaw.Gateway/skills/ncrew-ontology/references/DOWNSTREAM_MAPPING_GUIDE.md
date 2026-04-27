@@ -9,6 +9,8 @@
 - `../templates/PROJECTION_TEMPLATE.json`：下游投影模板
 - `../templates/PROJECTION_TEMPLATE.schema.json`：下游投影结构校验规则
 - `../examples/ready/sample-projection.json`：可直接改写的 READY projection 样例
+- `../examples/ready/json-schema-projection.json`：面向 JSON Schema 的 READY projection 样例
+- `../examples/ready/workflow-contract-projection.json`：面向 workflow contract 的 READY projection 样例
 - `./FIELD_GUIDE.md`：字段语义与填报口径
 - `./REVIEW_CHECKLIST.md`：人工 review 兜底规则
 
@@ -285,7 +287,11 @@ slice 的职责是稳定表达“概念、关系、约束、来源和边界”�
 
 如果团队需要统一产出格式，优先复制 `../templates/PROJECTION_TEMPLATE.json`，然后按目标类型填写 `projection_type`、`concept_mappings`、`relation_mappings`、`constraint_mappings` 和 `delivery_artifacts`。提交前再用 `../templates/PROJECTION_TEMPLATE.schema.json` 做结构校验。
 
-如果团队不想从空模板开始，可以直接参考 `../examples/ready/sample-projection.json`，它展示了一份 READY slice 如何投影成 domain model + prompt policy 的组合交付物。
+如果团队不想从空模板开始，可以先按目标类型选现成样例：
+
+- `../examples/ready/sample-projection.json`：组合型 domain model + prompt policy 基线
+- `../examples/ready/json-schema-projection.json`：JSON Schema 契约基线
+- `../examples/ready/workflow-contract-projection.json`：workflow contract 基线
 
 ---
 
