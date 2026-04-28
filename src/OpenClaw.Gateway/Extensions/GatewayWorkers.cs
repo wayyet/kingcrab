@@ -828,7 +828,10 @@ internal static class GatewayWorkers
                                 if (nonStreamFileUploads.Count > 0)
                                 {
                                     InjectFileUrlMarkersIntoHistory(session, nonStreamFileUploads);
-                                    responseText += BuildFileUrlSuffix(nonStreamFileUploads);
+                                    // WebSocket envelope clients receive a dedicated file_attachment envelope below;
+                                    // appending FILE_URL to responseText would produce a duplicate download link.
+                                    if (!(msg.ChannelId == "websocket" && wsChannel.IsClientUsingEnvelopes(msg.SenderId)))
+                                        responseText += BuildFileUrlSuffix(nonStreamFileUploads);
                                 }
 
                                 await sessionManager.PersistAsync(session, processingCt, sessionLockHeld: true);
@@ -1360,11 +1363,15 @@ internal static class GatewayWorkers
         };
 
     // Builds a newline-prefixed block of [FILE_URL:] markers to append to response text.
+    // Format: [FILE_URL:/media/{id}|{fileName}] so preprocessMediaMarkers can show the real name.
     private static string BuildFileUrlSuffix(List<StoredMediaAsset> assets)
     {
         var sb = new System.Text.StringBuilder();
         foreach (var a in assets)
-            sb.Append($"\n[FILE_URL:/media/{a.Id}]");
+        {
+            var nameSuffix = string.IsNullOrWhiteSpace(a.FileName) ? "" : $"|{a.FileName}";
+            sb.Append($"\n[FILE_URL:/media/{a.Id}{nameSuffix}]");
+        }
         return sb.ToString();
     }
 

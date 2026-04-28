@@ -249,11 +249,8 @@
                     out.push(`![](${url})`);
                     continue;
                 }
-                const mFileUrl = trimmed.match(/^\[FILE_URL:(.+)\]$/);
-                if (mFileUrl) {
-                    const url = mFileUrl[1].trim();
-                    const name = url.split('/').pop() || 'file';
-                    out.push(`[⬇ ${name}](${url})`);
+                // Strip [FILE_URL:] markers — extracted separately by extractFileAttachments for card rendering.
+                if (/^\[FILE_URL:.+\]$/.test(trimmed)) {
                     continue;
                 }
                 // Strip raw FILE_PATH markers – they are internal and should not be shown.
@@ -263,6 +260,50 @@
                 out.push(line);
             }
             return out.join('\n');
+        }
+
+        // Extracts [FILE_URL:] markers from assistant history content and returns
+        // { text, files: [{url, name}] } so each file can be rendered as a 📎 card.
+        function extractFileAttachments(content) {
+            const lines = (content || '').split('\n');
+            const files = [];
+            const textLines = [];
+            for (const line of lines) {
+                const trimmed = line.trim();
+                const m = trimmed.match(/^\[FILE_URL:(.+)\]$/);
+                if (m) {
+                    const raw = m[1].trim();
+                    const pipeIdx = raw.indexOf('|');
+                    const url = pipeIdx >= 0 ? raw.slice(0, pipeIdx) : raw;
+                    const name = pipeIdx >= 0 ? raw.slice(pipeIdx + 1) : (url.split('/').pop() || 'file');
+                    files.push({ url, name });
+                } else {
+                    textLines.push(line);
+                }
+            }
+            return { text: textLines.join('\n'), files };
+        }
+
+        // Renders a file as a 📎 attachment card (same style as live file_attachment envelope).
+        function appendFileCard(url, name) {
+            const row = createRow('assistant');
+            const card = document.createElement('div');
+            card.className = 'message assistant';
+            card.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 14px;';
+            const icon = document.createElement('span');
+            icon.textContent = '\uD83D\uDCCE';
+            icon.style.fontSize = '1.4em';
+            const info = document.createElement('div');
+            info.style.flex = '1';
+            const link = document.createElement('a');
+            link.href = url;
+            link.textContent = name;
+            link.style.cssText = 'font-weight:600;word-break:break-all;';
+            info.appendChild(link);
+            card.appendChild(icon);
+            card.appendChild(info);
+            row.appendChild(card);
+            chatContainer.insertBefore(row, typingRow);
         }
 
         // Intercept clicks on /media/ links rendered inside chat messages.
@@ -1152,13 +1193,19 @@
                                 row.appendChild(div);
                                 chatContainer.insertBefore(row, typingRow);
                             } else if (turn.role === 'assistant') {
-                                const row = createRow('assistant');
-                                const div = document.createElement('div');
-                                div.className = 'message assistant';
-                                div.innerHTML = DOMPurify.sanitize(marked.parse(preprocessMediaMarkers(turn.content || '')));
-                                div.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
-                                row.appendChild(div);
-                                chatContainer.insertBefore(row, typingRow);
+                                const { text: assistantText, files: attachedFiles } = extractFileAttachments(turn.content || '');
+                                if (assistantText.trim()) {
+                                    const row = createRow('assistant');
+                                    const div = document.createElement('div');
+                                    div.className = 'message assistant';
+                                    div.innerHTML = DOMPurify.sanitize(marked.parse(preprocessMediaMarkers(assistantText)));
+                                    div.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
+                                    row.appendChild(div);
+                                    chatContainer.insertBefore(row, typingRow);
+                                }
+                                for (const f of attachedFiles) {
+                                    appendFileCard(f.url, f.name);
+                                }
                             }
                             if (turn.toolCalls && turn.toolCalls.length > 0) {
                                 turn.toolCalls.forEach(tc => appendToolPill(tc.toolName));
