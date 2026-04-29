@@ -32,7 +32,14 @@ Task-scoped ontology slicing for extracting the smallest verifiable subgraph nee
 
 ## Output Contract
 
-默认输出遵循 `templates/TEMPLATE.json` 对应结构，至少覆盖：
+默认输出必须同时包含两份文件：
+
+- `.md`：面向人工阅读、评审和讨论，遵循 `templates/TEMPLATE.md`
+- `.json`：面向工程消费、校验、codegen 和 prompt 编排，遵循 `templates/TEMPLATE.json` 与 `templates/TEMPLATE.schema.json`
+
+两份文件必须描述同一个 ontology slice，保持相同的 `slice_request`、`scope`、`sources`、核心 `concepts`、`relations`、`constraints` 与未决项；不得只输出其中一种格式。
+
+JSON 至少覆盖：
 
 ```yaml
 slice_request: 当前任务、主题、目标、期望产出
@@ -47,7 +54,7 @@ next_actions: 后续衔接动作
 meta: 生成信息
 ```
 
-如果只需要人读版，可先用 `templates/TEMPLATE.md` 草拟，再落到 JSON。
+Markdown 可先用 `templates/TEMPLATE.md` 草拟，但交付前必须同步落到 JSON；如果先生成 JSON，也必须补齐对应 Markdown 人读版。
 
 ## Workflow
 
@@ -63,7 +70,20 @@ meta: 生成信息
 
 如果用户要求“整份 ontology”，先收缩到当前任务直接相关的子图。
 
-### 2. Locate authoritative sources
+### 2. Ingest uploaded files into ontology/
+
+如果用户给的是上传文件，而不是已经整理好的 slice JSON，先走 `ontology_ingest`：
+
+- 把用户上传的文件路径作为 `paths` 传给 `ontology_ingest`
+- 默认使用 `incremental` 模式写入当前沙箱 `ontology/`
+- 允许任意文件格式；如果是 `zip`，先解包并递归处理内部文件
+- 同名节点直接以最新结果覆盖，不做冲突类型识别，也不向用户裁决
+- 被覆盖或被同源增量移除的旧节点，必须归档到 `ontology/_archived/`
+- 返回给用户的摘要必须按 `新增 / 修改 / 移除` 分类，而不是只给一个文件列表
+
+这一阶段的目标不是直接产出最终 slice，而是先把上传材料沉淀成当前沙箱可继续消费的 `ontology/` 现状。
+
+### 3. Locate authoritative sources
 
 优先查找：
 
@@ -84,7 +104,9 @@ meta: 生成信息
 - 说明是缺切片文件，还是只有零散术语
 - 不要臆造 ontology 内容
 
-### 3. Build the minimal semantic closure
+如果当前请求已经明确要求“解析上传文件并写入沙箱”，则 `ontology_ingest` 产出的 `ontology/` 目录现状本身也属于当前可引用来源，后续切片和 projection 应基于它继续收敛，而不是重新忽略这一步的增量结果。
+
+### 4. Build the minimal semantic closure
 
 只保留完成任务所需的：
 
@@ -101,7 +123,7 @@ meta: 生成信息
 - 无法确认真伪的补充概念
 - 只会增加噪音的扩展属性
 
-### 4. Normalize terminology
+### 5. Normalize terminology
 
 统一输出：
 
@@ -113,13 +135,15 @@ meta: 生成信息
 
 如果不同来源命名不一致，显式写术语映射，不默认完全等价。
 
-### 5. Validate and hand off
+### 6. Validate and hand off
 
 交付前至少确认：
 
 - `source_ids` 能回到 `sources`
 - 概念、关系、约束引用不悬空
 - 冲突、歧义、不确定项已显式记录
+- Markdown 与 JSON 文件同时存在，且表达的是同一个 ontology slice
+- 如果本轮先执行过 `ontology_ingest`，确认 `ontology/`、`ontology/_archived/` 和 `新增 / 修改 / 移除` 摘要彼此一致
 - 能通过 `{baseDir}/templates/TEMPLATE.schema.json` 对应校验，或直接运行 `{baseDir}/scripts/validate-slice.ps1` / `{baseDir}/scripts/validate-slice.py`；如果从仓库根目录执行，则使用 `scripts/validate-ontology-slice.ps1` / `scripts/validate-ontology-slice.py`
 
 ## Quality Rules
@@ -127,6 +151,8 @@ meta: 生成信息
 - 优先做切片，不做全量转储
 - 优先保留关系和约束，不只列名词
 - 优先基于用户指定文件或目录加载
+- ontology slice 输出必须同时提供 `.md` 与 `.json`，方便人工评审和工程消费对齐
+- 用户提供上传文件时，优先先通过 `ontology_ingest` 落入 `ontology/`，再继续切片或投影
 - 找不到来源时直接说明，不补造本体
 - 当前任务已隐含切片范围时，不反复追问无关问题
 
@@ -164,6 +190,7 @@ meta: 生成信息
 - `{baseDir}/scripts/validate-slice.py`：skill 目录内真实 Python 校验器，支持 `--schema-path` 与 `--review-mode`
 - `scripts/validate-ontology-slice.ps1`：仓库根目录 PowerShell 包装入口，适合从任意当前目录直接校验，支持 `Paths` 与 `-SchemaPath`
 - `scripts/validate-ontology-slice.py`：仓库根目录 Python 包装入口，适合从任意当前目录直接校验，支持 `paths` 与 `--schema-path`
+- `ontology_ingest`：内置 agent tool，用于把上传文件递归解析并增量写入沙箱 `ontology/`，自动把被覆盖旧节点归档到 `ontology/_archived/`
 - `{baseDir}/README.md`：规范包总览
 
 ## Instruction Scope

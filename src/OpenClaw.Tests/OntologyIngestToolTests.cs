@@ -1,0 +1,124 @@
+using System.IO.Compression;
+using System.Text.Json;
+using OpenClaw.Agent.Tools;
+using OpenClaw.Core.Models;
+using Xunit;
+
+namespace OpenClaw.Tests;
+
+public sealed class OntologyIngestToolTests
+{
+    [Fact]
+    public async Task ExecuteAsync_WritesNewNodesIntoOntologyDirectory()
+    {
+        var root = CreateTempDir();
+        var sourcePath = Path.Combine(root, "requirements.md");
+        await File.WriteAllTextAsync(sourcePath, "# 用户管理\n支持新增、删除、冻结账号", CancellationToken.None);
+
+        var tool = CreateTool(root);
+
+        var result = await tool.ExecuteAsync(ToJson(new { paths = new[] { sourcePath } }), CancellationToken.None);
+
+        Assert.Contains("新增: 用户管理", result, StringComparison.Ordinal);
+        var nodePath = Path.Combine(root, "ontology", "用户管理.json");
+        Assert.True(File.Exists(nodePath));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ArchivesModifiedAndRemovedNodesForSameOrigin()
+    {
+        var root = CreateTempDir();
+        var sourcePath = Path.Combine(root, "domain.md");
+        await File.WriteAllTextAsync(sourcePath, "# Alpha\nold\n\n# Beta\nlegacy", CancellationToken.None);
+
+        var tool = CreateTool(root);
+        await tool.ExecuteAsync(ToJson(new { paths = new[] { sourcePath } }), CancellationToken.None);
+
+        await File.WriteAllTextAsync(sourcePath, "# Alpha\nnew content", CancellationToken.None);
+        var result = await tool.ExecuteAsync(ToJson(new { paths = new[] { sourcePath } }), CancellationToken.None);
+
+        Assert.Contains("修改: Alpha", result, StringComparison.Ordinal);
+        Assert.Contains("移除: Beta", result, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Combine(root, "ontology", "alpha.json")));
+        Assert.False(File.Exists(Path.Combine(root, "ontology", "beta.json")));
+
+        var archivedDir = Path.Combine(root, "ontology", "_archived");
+        Assert.True(Directory.Exists(archivedDir));
+        Assert.True(Directory.GetFiles(archivedDir).Length >= 2);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ParsesNestedZipRecursively()
+    {
+        var root = CreateTempDir();
+        var outerZip = Path.Combine(root, "bundle.zip");
+        var innerZipBytes = CreateZipBytes(("nested.md", "# Nested Topic\nzip content"));
+
+        using (var stream = File.Create(outerZip))
+        using (var archive = new ZipArchive(stream, ZipArchiveMode.Create))
+        {
+            var entry = archive.CreateEntry("inner.zip");
+            await using var entryStream = entry.Open();
+            await entryStream.WriteAsync(innerZipBytes, CancellationToken.None);
+        }
+
+        var tool = CreateTool(root);
+        var result = await tool.ExecuteAsync(ToJson(new { paths = new[] { outerZip } }), CancellationToken.None);
+
+        Assert.Contains("新增: Nested Topic", result, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Combine(root, "ontology", "nested-topic.json")));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ParsesDocxContainerAsOntologySource()
+    {
+        var root = CreateTempDir();
+        var docxPath = Path.Combine(root, "specs.docx");
+        await File.WriteAllBytesAsync(docxPath, CreateZipBytes(
+            ("word/document.xml", "<w:document><w:body><w:p><w:r><w:t>客户档案</w:t></w:r></w:p><w:p><w:r><w:t>需要支持主数据和状态同步</w:t></w:r></w:p></w:body></w:document>")), CancellationToken.None);
+
+        var tool = CreateTool(root);
+        var result = await tool.ExecuteAsync(ToJson(new { paths = new[] { docxPath } }), CancellationToken.None);
+
+        Assert.Contains("新增: specs", result, StringComparison.Ordinal);
+        var nodePath = Path.Combine(root, "ontology", "specs.json");
+        Assert.True(File.Exists(nodePath));
+
+        using var json = JsonDocument.Parse(await File.ReadAllTextAsync(nodePath, CancellationToken.None));
+        var content = json.RootElement.GetProperty("content").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(content));
+    }
+
+    private static OntologyIngestTool CreateTool(string root)
+        => new(new ToolingConfig
+        {
+            WorkspaceRoot = root,
+            AllowedReadRoots = [root],
+            AllowedWriteRoots = [root]
+        });
+
+    private static string ToJson(object value) => JsonSerializer.Serialize(value);
+
+    private static byte[] CreateZipBytes(params (string Name, string Content)[] entries)
+    {
+        using var ms = new MemoryStream();
+        using (var archive = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var (name, content) in entries)
+            {
+                var entry = archive.CreateEntry(name);
+                using var writer = new StreamWriter(entry.Open());
+                writer.Write(content);
+            }
+        }
+
+        return ms.ToArray();
+    }
+
+    private static string CreateTempDir()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "openclaw-tests", Guid.NewGuid().ToString("n"));
+        Directory.CreateDirectory(path);
+        return path;
+    }
+}

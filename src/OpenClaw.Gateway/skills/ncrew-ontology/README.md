@@ -8,6 +8,7 @@
 - 需要把概念、关系、约束整理成稳定结构，供模型、程序或团队协作复用
 - 需要把 slice 稳定投影到 projection / codegen / prompt orchestration 等下游输入
 - 需要让不同成员产出的 ontology slice 能按统一格式校验和审阅
+- 需要先解析用户上传的任意格式文件，并把结果增量沉淀到沙箱 `ontology/`
 
 ---
 
@@ -84,6 +85,29 @@
 
 这让它既能服务人工评审，也能作为 JSON 校验、代码生成和提示词编排的稳定输入。
 
+如果输入还只是上传文件而不是现成 slice，推荐先通过 `ontology_ingest` 把上传材料转成当前沙箱 `ontology/` 现状，再在这个基础上做切片、校验和 projection。这个入口支持任意格式文件，以及 `zip` 内任意格式文件的递归处理。
+
+---
+
+## 与 ontology_ingest 的关系
+
+`ontology_ingest` 是 `ncrew-ontology` 在运行时的文件接入入口，用来把“上传文件”变成“当前沙箱 ontology 状态”。
+
+它负责：
+
+- 接收用户上传的文件路径数组
+- 递归解析任意格式输入，`zip` 先解压再继续处理内部文件
+- 按默认 `incremental` 模式写入 `ontology/`
+- 同名节点直接用最新结果覆盖
+- 把被覆盖或被同源增量移除的旧节点归档到 `ontology/_archived/`
+- 返回按 `新增 / 修改 / 移除` 分类的用户摘要
+
+它不负责：
+
+- 判定复杂冲突类型
+- 请求用户对同名节点做人工裁决
+- 直接替代后续的 slice 校验、projection 校验或人工 review
+
 ---
 
 ## 推荐使用顺序
@@ -91,23 +115,25 @@
 ### 路径一：先人工梳理，再结构化落地
 
 1. 先看 `SKILL.md`，确认当前任务适不适合做 ontology slice 或下游 projection。
-2. 用 `templates/TEMPLATE.md` 梳理范围、来源、核心概念和约束。
-3. 参考 `references/FIELD_GUIDE.md`，统一字段语义和填报口径。
-4. 如需接到 codegen 或 prompt orchestration，补看 `references/DOWNSTREAM_MAPPING_GUIDE.md`，先明确投影规则。
-5. 再把结果落到 `templates/TEMPLATE.json` 对应结构。
-6. 需要形成下游交付物时，复制 `templates/PROJECTION_TEMPLATE.json` 填写 projection。
-7. 用 `templates/PROJECTION_TEMPLATE.schema.json` 校验 projection 文件结构。
-8. 最后做 slice 校验：如果当前目录就是本技能根目录，使用 `scripts/validate-slice.ps1` / `scripts/validate-slice.py`；如果从仓库根目录执行，使用仓库根目录 `scripts/validate-ontology-slice.ps1` / `scripts/validate-ontology-slice.py`。
+2. 如果输入是上传文件而不是现成 slice，先调用 `ontology_ingest`，把文件增量写入当前沙箱 `ontology/`。
+3. 用 `templates/TEMPLATE.md` 梳理范围、来源、核心概念和约束。
+4. 参考 `references/FIELD_GUIDE.md`，统一字段语义和填报口径。
+5. 如需接到 codegen 或 prompt orchestration，补看 `references/DOWNSTREAM_MAPPING_GUIDE.md`，先明确投影规则。
+6. 再把结果落到 `templates/TEMPLATE.json` 对应结构。
+7. 需要形成下游交付物时，复制 `templates/PROJECTION_TEMPLATE.json` 填写 projection。
+8. 用 `templates/PROJECTION_TEMPLATE.schema.json` 校验 projection 文件结构。
+9. 最后做 slice 校验：如果当前目录就是本技能根目录，使用 `scripts/validate-slice.ps1` / `scripts/validate-slice.py`；如果从仓库根目录执行，使用仓库根目录 `scripts/validate-ontology-slice.ps1` / `scripts/validate-ontology-slice.py`。
 
 ### 路径二：直接生成工程化产物
 
 1. 先看 `SKILL.md` 明确切片目标、projection 语义和边界。
-2. 直接基于 `templates/TEMPLATE.json` 生成结果。
-3. 遇到字段拿不准时，回看 `references/FIELD_GUIDE.md`。
-4. 需要面向代码生成或提示词编排时，按 `references/DOWNSTREAM_MAPPING_GUIDE.md` 做投影。
-5. 复制 `templates/PROJECTION_TEMPLATE.json`，形成可交付的 projection 文件。
-6. 做 projection 结构校验：如果当前目录就是本技能根目录，使用 `scripts/validate-projection.ps1` / `scripts/validate-projection.py`；如果从仓库根目录执行，使用仓库根目录 `scripts/validate-ontology-projection.ps1` / `scripts/validate-ontology-projection.py`。
-7. 做 slice 结构校验：如果当前目录就是本技能根目录，使用 `scripts/validate-slice.ps1` / `scripts/validate-slice.py`；如果从仓库根目录执行，使用仓库根目录 `scripts/validate-ontology-slice.ps1` / `scripts/validate-ontology-slice.py`。
+2. 如果输入是上传文件，先通过 `ontology_ingest` 获取当前 `ontology/` 增量状态和 `新增 / 修改 / 移除` 摘要。
+3. 直接基于 `templates/TEMPLATE.json` 生成结果。
+4. 遇到字段拿不准时，回看 `references/FIELD_GUIDE.md`。
+5. 需要面向代码生成或提示词编排时，按 `references/DOWNSTREAM_MAPPING_GUIDE.md` 做投影。
+6. 复制 `templates/PROJECTION_TEMPLATE.json`，形成可交付的 projection 文件。
+7. 做 projection 结构校验：如果当前目录就是本技能根目录，使用 `scripts/validate-projection.ps1` / `scripts/validate-projection.py`；如果从仓库根目录执行，使用仓库根目录 `scripts/validate-ontology-projection.ps1` / `scripts/validate-ontology-projection.py`。
+8. 做 slice 结构校验：如果当前目录就是本技能根目录，使用 `scripts/validate-slice.ps1` / `scripts/validate-slice.py`；如果从仓库根目录执行，使用仓库根目录 `scripts/validate-ontology-slice.ps1` / `scripts/validate-ontology-slice.py`。
 
 ### 路径三：按三态样例做团队对齐
 
@@ -125,16 +151,18 @@
 
 如果目标是把 slice 真正交付成 consumer skill 可加载的 projection contract，而不是只停留在 producer 侧文档，可直接按下面顺序执行：
 
-1. 先在 `ncrew-ontology` 中收缩当前主题，产出最小可验证 slice，并先让 slice 通过对应校验器校验：在技能根目录使用 `validate-slice`，在仓库根目录使用 `validate-ontology-slice`。
-2. 先决定本次只面向哪一种主交付视图：`domain-model`、`json-schema`、`prompt-constraint` 或 `workflow-contract`。
-3. 基于已通过校验的 slice，由 `ncrew-ontology` 按映射规范填充 `PROJECTION_TEMPLATE.json`，把 `concepts`、`relations`、`constraints` 显式映射到 projection。
-4. 验证 projection 时按所在层级选择入口：在技能根目录使用 `validate-projection.ps1` / `validate-projection.py`，在仓库根目录使用 `validate-ontology-projection.ps1` / `validate-ontology-projection.py`，确保结构、关键字段和本地诊断全部通过。
-5. projection 验证通过后，再将产物放入 consumer skill 的 `contracts/projections` 目录，并同步更新 `contract-index.json`、view 路由和必要的 routing hints。
+1. 如果输入还是上传文件，先通过 `ontology_ingest` 把文件递归解析并增量写入 `ontology/`，同时确认 `ontology/_archived/` 与 `新增 / 修改 / 移除` 摘要正确。
+2. 再在 `ncrew-ontology` 中收缩当前主题，产出最小可验证 slice，并先让 slice 通过对应校验器校验：在技能根目录使用 `validate-slice`，在仓库根目录使用 `validate-ontology-slice`。
+3. 先决定本次只面向哪一种主交付视图：`domain-model`、`json-schema`、`prompt-constraint` 或 `workflow-contract`。
+4. 基于已通过校验的 slice，由 `ncrew-ontology` 按映射规范填充 `PROJECTION_TEMPLATE.json`，把 `concepts`、`relations`、`constraints` 显式映射到 projection。
+5. 验证 projection 时按所在层级选择入口：在技能根目录使用 `validate-projection.ps1` / `validate-projection.py`，在仓库根目录使用 `validate-ontology-projection.ps1` / `validate-ontology-projection.py`，确保结构、关键字段和本地诊断全部通过。
+6. projection 验证通过后，再将产物放入 consumer skill 的 `contracts/projections` 目录，并同步更新 `contract-index.json`、view 路由和必要的 routing hints。
 
 ---
 
 ## 快速选择
 
+- 想先把上传文件递归解析进当前沙箱 `ontology/`：用 `ontology_ingest`
 - 只想先讨论概念边界：用 `templates/TEMPLATE.md`
 - 想输出给程序、流水线或下游 projection：用 `templates/TEMPLATE.json`
 - 想把 slice 投影成 projection / codegen / prompt orchestration 输入：用 `templates/PROJECTION_TEMPLATE.json`
