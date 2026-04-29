@@ -251,7 +251,7 @@ internal static class DigitalEmployeeEndpoints
             var slash = afterSkills.IndexOf('/');
             if (slash <= 0) return null; // must be under a sub-directory
             var skillName = afterSkills[..slash];
-            if (!Regex.IsMatch(skillName, @"^[a-zA-Z0-9][a-zA-Z0-9_\-]{0,63}$")) return null;
+            if (!Regex.IsMatch(skillName, @"^[a-zA-Z0-9][a-zA-Z0-9_\-.]{0,63}$")) return null;
             return "skills" + Path.DirectorySeparatorChar + afterSkills.Replace('/', Path.DirectorySeparatorChar);
         }
 
