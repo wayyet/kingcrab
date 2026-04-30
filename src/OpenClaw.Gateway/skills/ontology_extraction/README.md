@@ -97,9 +97,9 @@
 
 - 接收用户上传的文件路径数组
 - 递归解析任意格式输入，`zip` 先解压再继续处理内部文件
-- 按默认 `incremental` 模式写入 `ontology/`
+- 按默认 `incremental` 模式写入 `ontology/`，也支持用户明确要求全量替换时的 `full_replace`
 - 同名节点直接用最新结果覆盖
-- 把被覆盖或被同源增量移除的旧节点归档到 `ontology/_archived/`
+- 把被覆盖、被同源增量移除或被 `full_replace` 移除的旧 ingest 节点归档到 `ontology/_archived/`
 - 返回按 `新增 / 修改 / 移除` 分类的用户摘要
 
 它不负责：
@@ -107,6 +107,9 @@
 - 判定复杂冲突类型
 - 请求用户对同名节点做人工裁决
 - 直接替代后续的 slice 校验、projection 校验或人工 review
+- 删除非 `ontology_ingest` 生成的人工维护 ontology 文件
+
+当 `ontology_extraction` 作为 `employment-coach-conversation` 的下游被调起时，handoff todo 中的 `payload.mode` 会直接映射到 `ontology_ingest.mode`。`ontology_ingest` 完成后，还需要继续围绕 todo 的 `objective`、`category`、`scene_hint` 和 `acceptance` 产出正式 slice；ingest 节点只是资料入库状态，不是最终 slice 交付物。回传主 skill 时应提供 `technical_artifact` 和业务用户可读的 `user_summary`，其中 `technical_artifact` 至少列出 todo id、`ontology/` 目录、slice 文件路径、ingest 摘要和校验状态。
 
 ---
 
@@ -115,7 +118,7 @@
 ### 路径一：先人工梳理，再结构化落地
 
 1. 先看 `SKILL.md`，确认当前任务适不适合做 ontology slice 或下游 projection。
-2. 如果输入是上传文件而不是现成 slice，先调用 `ontology_ingest`，把文件增量写入当前沙箱 `ontology/`。
+2. 如果输入是上传文件而不是现成 slice，先调用 `ontology_ingest`，按 `incremental` 或 `full_replace` 把文件写入当前沙箱 `ontology/`。
 3. 用 `templates/TEMPLATE.md` 梳理范围、来源、核心概念和约束。
 4. 参考 `references/FIELD_GUIDE.md`，统一字段语义和填报口径。
 5. 如需接到 codegen 或 prompt orchestration，补看 `references/DOWNSTREAM_MAPPING_GUIDE.md`，先明确投影规则。
@@ -127,7 +130,7 @@
 ### 路径二：直接生成工程化产物
 
 1. 先看 `SKILL.md` 明确切片目标、projection 语义和边界。
-2. 如果输入是上传文件，先通过 `ontology_ingest` 获取当前 `ontology/` 增量状态和 `新增 / 修改 / 移除` 摘要。
+2. 如果输入是上传文件，先通过 `ontology_ingest` 获取当前 `ontology/` 状态和 `新增 / 修改 / 移除` 摘要。
 3. 直接基于 `templates/TEMPLATE.json` 生成结果。
 4. 遇到字段拿不准时，回看 `references/FIELD_GUIDE.md`。
 5. 需要面向代码生成或提示词编排时，按 `references/DOWNSTREAM_MAPPING_GUIDE.md` 做投影。
@@ -151,7 +154,7 @@
 
 如果目标是把 slice 真正交付成 consumer skill 可加载的 projection contract，而不是只停留在 producer 侧文档，可直接按下面顺序执行：
 
-1. 如果输入还是上传文件，先通过 `ontology_ingest` 把文件递归解析并增量写入 `ontology/`，同时确认 `ontology/_archived/` 与 `新增 / 修改 / 移除` 摘要正确。
+1. 如果输入还是上传文件，先通过 `ontology_ingest` 把文件递归解析并按指定模式写入 `ontology/`，同时确认 `ontology/_archived/` 与 `新增 / 修改 / 移除` 摘要正确。
 2. 再在 `ontology_extraction` 中收缩当前主题，产出最小可验证 slice，并先让 slice 通过对应校验器校验：在技能根目录使用 `validate-slice`，在仓库根目录使用 `validate-ontology-slice`。
 3. 先决定本次只面向哪一种主交付视图：`domain-model`、`json-schema`、`prompt-constraint` 或 `workflow-contract`。
 4. 基于已通过校验的 slice，由 `ontology_extraction` 按映射规范填充 `PROJECTION_TEMPLATE.json`，把 `concepts`、`relations`、`constraints` 显式映射到 projection。

@@ -56,6 +56,47 @@ meta: 生成信息
 
 Markdown 可先用 `templates/TEMPLATE.md` 草拟，但交付前必须同步落到 JSON；如果先生成 JSON，也必须补齐对应 Markdown 人读版。
 
+## Employment Coach Handoff Contract
+
+当本 skill 由 `employment-coach-conversation` 通过 `<dispatch>` 调起时，输入是一组 `target_skill: ontology_extraction` 的 material handoff todos。每条 todo 至少包含：
+
+```yaml
+id: <stable todo id>
+intent: <给用户读的一句话目标>
+category: <业务对象定义 | 决策规则 | 流程 SOP | 案例库 | 边界与约束 | 风格语料 | 其他>
+payload:
+  objective: <从这些资料里抽什么>
+  source_files: [<上传文件或沙箱可读路径>]
+  scene_hint: <客服 | 销售 | 内勤 | 营销 | 法务 | 技术 | 模糊>
+  mode: incremental | full_replace
+acceptance: <完成后如何判定通过>
+```
+
+处理规则：
+
+1. 按 todo 的 `payload.source_files` 收集上传资料；文件路径可能来自沙箱上传通道，也可能是系统解析后的可读路径。
+2. 先调用 `ontology_ingest` 写入当前沙箱 `ontology/`。`incremental` 只移除同源文件本轮消失的旧节点；`full_replace` 会归档并移除 `ontology_ingest` 生成的旧节点，再保留本轮抽出的节点。非 `ontology_ingest` 生成的人工文件不作为 full replace 的删除对象。
+3. `ontology_ingest` 产出的 `ontology/*.json` 节点只是资料入库结果，不等同于最终 ontology slice。后续仍必须围绕 todo 的 `objective`、`category`、`scene_hint` 和 `acceptance` 构造最小可验证 slice。
+4. 每条 todo 产出的 slice 必须同时落盘 `.md` 与 `.json`，并在 `sources` 中回指本轮资料、ingest 节点或其他权威来源。
+5. 如果多个 todo 属于同一业务主题，可以合并为一份 slice，但必须在 `meta.notes` 或人读版中列出覆盖的 todo id，避免回传时无法确认。
+
+回传给主 skill 时输出结构化摘要，至少包含：
+
+```json
+{
+  "technical_artifact": {
+    "todo_ids": ["m_example_001"],
+    "ontology_dir": "ontology",
+    "slice_files": ["ontology/<topic>.slice.json", "ontology/<topic>.slice.md"],
+    "ingest_summary": "新增 / 修改 / 移除 摘要",
+    "validation": "PASS | WARNING | FAIL"
+  },
+  "user_summary": "已从这批资料中抽出若干业务对象、判定规则和约束；结果已写入 ontology，并标出仍需确认的边界。"
+}
+```
+
+`user_summary` 必须能被雇佣教练用一两句话复述给业务用户；不要只返回文件列表。若 schema 校验失败或来源不足以支撑结论，`technical_artifact.validation` 标为 `FAIL` 或 `WARNING`，并在 `user_summary` 中说明需要补什么。
+
 ## Workflow
 
 ### 1. Identify the slice boundary
@@ -75,10 +116,10 @@ Markdown 可先用 `templates/TEMPLATE.md` 草拟，但交付前必须同步落�
 如果用户给的是上传文件，而不是已经整理好的 slice JSON，先走 `ontology_ingest`：
 
 - 把用户上传的文件路径作为 `paths` 传给 `ontology_ingest`
-- 默认使用 `incremental` 模式写入当前沙箱 `ontology/`
+- 默认使用 `incremental` 模式写入当前沙箱 `ontology/`；用户明确要求“全量替换”时传 `full_replace`
 - 允许任意文件格式；如果是 `zip`，先解包并递归处理内部文件
 - 同名节点直接以最新结果覆盖，不做冲突类型识别，也不向用户裁决
-- 被覆盖或被同源增量移除的旧节点，必须归档到 `ontology/_archived/`
+- 被覆盖、被同源增量移除或被 full replace 移除的旧 ingest 节点，必须归档到 `ontology/_archived/`
 - 返回给用户的摘要必须按 `新增 / 修改 / 移除` 分类，而不是只给一个文件列表
 
 这一阶段的目标不是直接产出最终 slice，而是先把上传材料沉淀成当前沙箱可继续消费的 `ontology/` 现状。
@@ -190,7 +231,7 @@ Markdown 可先用 `templates/TEMPLATE.md` 草拟，但交付前必须同步落�
 - `{baseDir}/scripts/validate-slice.py`：skill 目录内真实 Python 校验器，支持 `--schema-path` 与 `--review-mode`
 - `scripts/validate-ontology-slice.ps1`：仓库根目录 PowerShell 包装入口，适合从任意当前目录直接校验，支持 `Paths` 与 `-SchemaPath`
 - `scripts/validate-ontology-slice.py`：仓库根目录 Python 包装入口，适合从任意当前目录直接校验，支持 `paths` 与 `--schema-path`
-- `ontology_ingest`：内置 agent tool，用于把上传文件递归解析并增量写入沙箱 `ontology/`，自动把被覆盖旧节点归档到 `ontology/_archived/`
+- `ontology_ingest`：内置 agent tool，用于把上传文件递归解析并按 `incremental` / `full_replace` 写入沙箱 `ontology/`，自动把被覆盖、被同源增量移除或被全量替换移除的 ingest 节点归档到 `ontology/_archived/`
 - `{baseDir}/README.md`：规范包总览
 
 ## Instruction Scope

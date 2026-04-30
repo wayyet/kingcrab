@@ -31,7 +31,7 @@ public sealed class OntologyIngestTool : ITool
 
     public string Description =>
         "Parse uploaded files of any format, extract ontology-like slices, and write them into the sandbox ontology directory. " +
-        "Supports recursive ZIP parsing, same-name overwrite with archive, incremental removal for the same source, and returns a summary grouped by added, modified, and removed nodes.";
+        "Supports recursive ZIP parsing, same-name overwrite with archive, incremental removal for the same source, full replacement of generated nodes, and returns a summary grouped by added, modified, and removed nodes.";
 
     public string ParameterSchema =>
         """
@@ -50,9 +50,9 @@ public sealed class OntologyIngestTool : ITool
             },
             "mode": {
               "type": "string",
-              "enum": ["incremental"],
+              "enum": ["incremental", "full_replace"],
               "default": "incremental",
-              "description": "Ingestion mode. Only incremental is currently supported."
+              "description": "Ingestion mode. incremental removes stale nodes only for the same source; full_replace removes stale ontology_ingest-generated nodes across the ontology directory."
             }
           },
           "required": ["paths"]
@@ -64,8 +64,8 @@ public sealed class OntologyIngestTool : ITool
         if (!TryParseArguments(argumentsJson, out var inputPaths, out var ontologyDirArg, out var mode, out var error))
             return error!;
 
-        if (!string.Equals(mode, "incremental", StringComparison.OrdinalIgnoreCase))
-            return $"Error: Unsupported mode '{mode}'. Only 'incremental' is supported.";
+        if (!IsSupportedMode(mode))
+            return $"Error: Unsupported mode '{mode}'. Supported modes: incremental, full_replace.";
 
         var resolvedInputs = new List<ResolvedInput>(inputPaths.Count);
         foreach (var rawPath in inputPaths)
@@ -150,7 +150,7 @@ public sealed class OntologyIngestTool : ITool
             if (!existing.GeneratedByTool)
                 continue;
 
-            if (!existing.SourceOriginKeys.Any(origin => incomingOrigins.Contains(origin)))
+            if (IsIncrementalMode(mode) && !existing.SourceOriginKeys.Any(origin => incomingOrigins.Contains(origin)))
                 continue;
 
             if (extractedNodes.ContainsKey(existing.Slug))
@@ -163,6 +163,12 @@ public sealed class OntologyIngestTool : ITool
         var summary = BuildSummary(ontologyDir, added, modified, removed);
         return summary;
     }
+
+    private static bool IsSupportedMode(string mode)
+        => IsIncrementalMode(mode) || string.Equals(mode, "full_replace", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsIncrementalMode(string mode)
+        => string.Equals(mode, "incremental", StringComparison.OrdinalIgnoreCase);
 
     private static string BuildSummary(string ontologyDir, IReadOnlyList<string> added, IReadOnlyList<string> modified, IReadOnlyList<string> removed)
     {

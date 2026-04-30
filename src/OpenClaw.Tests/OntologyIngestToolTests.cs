@@ -111,6 +111,37 @@ public sealed class OntologyIngestToolTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_FullReplaceRemovesStaleGeneratedNodesOnly()
+    {
+        var root = CreateTempDir();
+        var sourceA = Path.Combine(root, "a.md");
+        var sourceB = Path.Combine(root, "b.md");
+        await File.WriteAllTextAsync(sourceA, "# Alpha\nfrom A", CancellationToken.None);
+        await File.WriteAllTextAsync(sourceB, "# Beta\nfrom B", CancellationToken.None);
+
+        var tool = CreateTool(root);
+        await tool.ExecuteAsync(ToJson(new { paths = new[] { sourceA } }), CancellationToken.None);
+        await tool.ExecuteAsync(ToJson(new { paths = new[] { sourceB } }), CancellationToken.None);
+
+        var manualPath = Path.Combine(root, "ontology", "manual.json");
+        await File.WriteAllTextAsync(manualPath, "{\"name\":\"Manual\"}", CancellationToken.None);
+
+        var sourceC = Path.Combine(root, "c.md");
+        await File.WriteAllTextAsync(sourceC, "# Gamma\nfrom C", CancellationToken.None);
+        var result = await tool.ExecuteAsync(ToJson(new { paths = new[] { sourceC }, mode = "full_replace" }), CancellationToken.None);
+
+        Assert.Contains("新增: Gamma", result, StringComparison.Ordinal);
+        Assert.Contains("移除: Alpha、Beta", result, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(root, "ontology", "alpha.json")));
+        Assert.False(File.Exists(Path.Combine(root, "ontology", "beta.json")));
+        Assert.True(File.Exists(Path.Combine(root, "ontology", "gamma.json")));
+        Assert.True(File.Exists(manualPath));
+
+        var archivedDir = Path.Combine(root, "ontology", "_archived");
+        Assert.True(Directory.GetFiles(archivedDir).Length >= 2);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_ParsesDocxContainerAsOntologySource()
     {
         var root = CreateTempDir();
