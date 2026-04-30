@@ -6,6 +6,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ServiceDiscovery;
 using OpenTelemetry;
+using OpenTelemetry.Exporter;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 
@@ -83,9 +84,9 @@ public static class Extensions
     private static TBuilder AddOpenTelemetryExporters<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
         var otlpEndpoint = builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"];
-        var langfuseHost = builder.Configuration["LANGFUSE_HOST"]?.Trim().Trim('"');
-        var langfusePublicKey = builder.Configuration["LANGFUSE_PUBLIC_KEY"];
-        var langfuseSecretKey = builder.Configuration["LANGFUSE_SECRET_KEY"];
+        var langfuseHost = CleanConfigurationValue(builder.Configuration["LANGFUSE_HOST"]);
+        var langfusePublicKey = CleanConfigurationValue(builder.Configuration["LANGFUSE_PUBLIC_KEY"]);
+        var langfuseSecretKey = CleanConfigurationValue(builder.Configuration["LANGFUSE_SECRET_KEY"]);
 
         if (string.IsNullOrWhiteSpace(otlpEndpoint)
             && !string.IsNullOrWhiteSpace(langfuseHost)
@@ -94,11 +95,15 @@ public static class Extensions
         {
             var authorization = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{langfusePublicKey}:{langfuseSecretKey}"));
 
-            builder.Configuration["OTEL_EXPORTER_OTLP_PROTOCOL"] = "http/protobuf";
-            builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"] = $"{langfuseHost.TrimEnd('/')}/api/public/otel/v1/traces";
-            builder.Configuration["OTEL_EXPORTER_OTLP_HEADERS"] = $"Authorization=Basic {authorization}";
+            builder.Services.AddOpenTelemetry()
+                .WithTracing(tracing => tracing.AddOtlpExporter(options =>
+                {
+                    options.Protocol = OtlpExportProtocol.HttpProtobuf;
+                    options.Endpoint = new Uri($"{langfuseHost.TrimEnd('/')}/api/public/otel/v1/traces");
+                    options.Headers = $"Authorization=Basic {authorization}";
+                }));
 
-            otlpEndpoint = builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"];
+            return builder;
         }
 
         if (!string.IsNullOrWhiteSpace(otlpEndpoint))
@@ -108,6 +113,8 @@ public static class Extensions
 
         return builder;
     }
+
+    private static string? CleanConfigurationValue(string? value) => value?.Trim().Trim('"');
 
     public static TBuilder AddDefaultHealthChecks<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
