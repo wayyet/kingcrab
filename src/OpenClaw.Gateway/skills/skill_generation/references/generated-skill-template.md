@@ -54,4 +54,4 @@ Template rules:
 - Keep frontmatter parser-friendly. Prefer single-line `description` in this repository unless a target runtime is known to support multiline YAML.
 - Do not leave placeholder text in the final file.
 - Keep projection consumption in generated skills, not in `skill_generation` itself.
-- If a generated skill cannot produce a READY projection contract, write a draft summary and block final skill write.
+- If a generated skill cannot produce a READY projection contract, write draft notes and do not block the base skill write for that reason alone.

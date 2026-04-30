@@ -1,6 +1,6 @@
 # Generated Consumer Projection Contract Template
 
-Generated skills must be projection consumers. Use this layout:
+Generated skills may be projection consumers when enough ontology projection information exists. Use this layout only for READY contracts or draft projection notes:
 
 ```text
 skills/<skill_slug>/
@@ -15,7 +15,7 @@ skills/<skill_slug>/
           REVIEW.md
 ```
 
-Minimum `contract-index.json` requirements:
+Minimum READY `contract-index.json` requirements:
 
 - `producer_skill`: `ontology_extraction`
 - `consumer_skill`: generated skill `name`
@@ -24,7 +24,7 @@ Minimum `contract-index.json` requirements:
 - At least one `topics[]` entry
 - Each READY view path points to an existing `*.projection.json`
 
-Minimum projection document requirements:
+Minimum READY projection document requirements:
 
 - `$schema`: relative path to `docs/skill-projection-document.schema.json`
 - `template_type`: `ontology_projection`
@@ -38,3 +38,5 @@ Minimum projection document requirements:
 - `open_questions`
 
 Use `workflow-contract` by default for generated business skills because it maps capability execution into steps, gates, and failure handling. Use `prompt-constraint` when the skill is mainly guidance language. Use `json-schema` when the user explicitly asks for structured payload validation.
+
+If there is not enough information to generate a READY contract, write draft notes or a WARNING summary under the generated skill's references/contracts area, but do not mark the contract READY and do not block the base skill write for that reason alone.

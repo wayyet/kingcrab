@@ -1,24 +1,66 @@
 ---
 name: skill_generation
-description: 根据用户会话描述或上传的 skill 文件，抽取统一 SkillSpec，生成可直接运行的业务技能包，并仅写入当前沙箱 skills/ 目录。
+description: 根据雇佣教练 handoff todo、用户会话描述或上传的 skill 文件，抽取统一 SkillSpec，生成可直接运行的业务技能包，并仅写入当前沙箱 skills/ 目录。
 metadata: {"openclaw":{"emoji":"🧩"}}
 ---
 
 # Skill Generation
 
-当用户要求根据描述、Markdown、文本、JSON、YAML 或 zip 文件创建、更新、合并、规范化业务技能包时，使用本技能。
+当用户要求根据雇佣教练阶段二 handoff todo、描述、Markdown、文本、JSON、YAML 或 zip 文件创建、更新、合并、规范化业务技能包时，使用本技能。
 
 本技能的职责是生成以 `SKILL.md` 为核心的业务技能包。核心思想是先把非结构化输入抽取为统一的 SkillSpec，再映射到固定模板，生成后通过最小质量校验，通过后才落盘。生成过程中严格区分输入来源、提炼说明、产物质量和消费契约，确保生成过程可审阅、可复盘、可迁移。
 
 ## 输入类型
 
-支持三类输入：
+支持四类输入：
 
 - 会话描述：例如“它要会处理退货咨询、订单查询”。
 - 上传文件：Markdown、文本、JSON、YAML 或 zip。
 - 混合输入：上传文件作为基线，会话描述作为增量补充。
+- 雇佣教练 handoff todo：由上游 `employment-coach-conversation` 通过 `<dispatch target=skill_generation>` 交接的结构化 todo。
 
 同时读取当前沙箱 `skills/` 目录快照，用于同名覆盖、异名新增和去重。
+
+## Employment Coach Handoff Mode
+
+当输入来自雇佣教练阶段二 dispatch 时，优先按 handoff todo 处理，而不是把它当普通会话描述重新追问。
+
+输入形态：
+
+```yaml
+dispatch:
+  target: skill_generation
+  todos: [s_refund_init_001, s_refund_progress_001]
+
+handoff_todos:
+  - id: s_refund_init_001
+    stage: skill
+    target_skill: skill_generation
+    intent: 生成退货资格初判技能
+    category: 判定
+    payload:
+      skill_name: 退货资格初判
+      skill_description: 在用户提出退货请求时，根据订单状态、商品类型、是否超过 7 天来判断是否符合退货条件，并把结论和理由回给用户。
+      trigger: 用户消息中出现退货 / 退款 / 退掉等关键词，且能匹配到具体订单
+      expected_output: 一条回复消息（含结论 + 依据），以及一条工单流转建议
+      from_upload: false
+    source: 用户描述退货咨询主线
+    acceptance: skill_generation 产出的 skill 文件能匹配该 todo 的 name + description
+    status: ready_to_dispatch
+```
+
+处理规则：
+
+- 只处理 `target_skill: skill_generation` 且状态为 `ready_to_dispatch` 或 `dirty` 的 todo。
+- 每条 todo 必须保留 `id`，并在输出中按同一个 `todo_id` 回传结果。
+- `payload.skill_name` 映射为 SkillSpec 的 `display_name` 和 slug 来源。
+- `payload.skill_description` 映射为 SkillSpec 的 `description`，并作为能力边界的主要依据。
+- `payload.trigger` 映射为 SkillSpec 的 `triggers`。
+- `payload.expected_output` 映射为 capability 的 `outputs`，并写入 `references/extraction-notes.md`。
+- `source` 与 `acceptance` 必须写入 `references/source-digest.md` 或 `references/quality-report.md`，方便上游确认。
+- `from_upload: true` 表示上游已确认该输入是现成 skill 文件；优先导入、规范化和补齐元数据，不再要求用户重新证明明确度。
+- 批量 todo 可以生成多个 `skills/<skill_slug>/` 目录；如果多个 todo 明确属于同一个业务 skill，可合并为一个目录，但 `todo_results` 必须列出每个 todo 的映射结果。
+- 单条失败不能吞掉其他 todo 的成功结果；失败项在 `todo_results` 中标为 `failed`，并给出可给用户复述的原因。
 
 ## 统一中间模型
 
@@ -60,15 +102,16 @@ metadata: {"openclaw":{"emoji":"🧩"}}
 
 先判断请求路径：
 
+- handoff 路径：输入包含 `target_skill: skill_generation` 的 handoff todo，且 payload 已含 `skill_name`、`skill_description`、`trigger`、`expected_output`。
 - 直接路径：用户已经给出明确业务域、触发词、能力或上传了候选 skill 文件。
 - 模糊路径：用户只说“帮我做个 skill”“把这些能力整理成 skill”，但缺少业务域、能力边界或产物目标。
 - 更新路径：现有 `skills/<skill_slug>/` 已存在，需要同名覆盖、增量合并或跳过。
 
-直接路径继续 Phase 0.5。模糊路径先做需求诊断：列出最多 3 个候选业务域、每个候选域的触发词和预计能力，要求用户确认后再落盘。
+handoff 路径和直接路径继续 Phase 0.5。模糊路径先做需求诊断：列出最多 3 个候选业务域、每个候选域的触发词和预计能力，要求用户确认后再落盘。
 
 ### Phase 0.5: 创建自包含技能目录
 
-在解析和渲染前先确定目标目录：
+在解析和渲染前先确定目标目录；`contracts/` 仅在生成 READY projection contract 或 draft projection notes 时创建：
 
 ```text
 skills/<skill_slug>/
@@ -78,7 +121,7 @@ skills/<skill_slug>/
     source-digest.md
     extraction-notes.md
     quality-report.md
-  contracts/
+  contracts/                         # optional, only when projection data exists
     projections/
       ontology_extraction/
         contract-index.json
@@ -89,12 +132,13 @@ skills/<skill_slug>/
           REVIEW.md
 ```
 
-目录必须自包含：生成 skill 所需的摘要、来源、质量报告和 projection contract 都放在该 skill 目录内。不要把生成过程依赖散落到 `config/`、`ontology/`、`external/` 或临时目录。
+目录必须自包含：生成 skill 所需的摘要、来源、质量报告都放在该 skill 目录内；如生成 projection contract 或 draft notes，也必须放在该 skill 目录内。不要把生成过程依赖散落到 `config/`、`ontology/`、`external/` 或临时目录。
 
 ### Phase 1: 输入采集与来源归档
 
 对不同输入执行不同采集策略：
 
+- handoff todo：保留 todo id、intent、payload、source、acceptance，写入 `references/source-digest.md` 的 handoff source 区块。
 - 会话描述：保留用户原话，写入 `references/source-digest.md` 的 conversation source 区块。
 - 上传文件：解析 Markdown、文本、JSON、YAML；zip 递归读取候选 skill 文件；保留文件清单、解析结论和不可解析项。
 - 混合输入：上传文件作为基线，会话描述作为增量补充，不用会话描述覆盖文件里更明确的能力定义。
@@ -105,9 +149,9 @@ skills/<skill_slug>/
 
 进入结构化归一前检查：
 
-- 至少有一个可解释的业务域或能力域。
-- 至少能推导出一个 trigger。
-- 至少能推导出一个 capability。
+- 至少有一个可解释的业务域或能力域；handoff 路径中可由 `skill_name` 和 `skill_description` 直接给出。
+- 至少能推导出一个 trigger；handoff 路径中优先使用 `payload.trigger`。
+- 至少能推导出一个 capability；handoff 路径中由 `skill_description` + `expected_output` 构造。
 - 所有敏感字段已脱敏或阻断。
 - 上传文件不可解析时，已记录失败原因和补全建议。
 
@@ -129,7 +173,7 @@ skills/<skill_slug>/
 
 - `SKILL.md`：业务技能说明、触发条件、能力清单、处理流程、边界、不做事项、对话示例、Projection Contracts 消费章节。
 - `metadata.json`：完整 SkillSpec、质量门、来源模式、版本和生成策略。
-- `contracts/projections/ontology_extraction/**`：让生成出来的业务 skill 按本仓库 consumer skill 方式消费 `ontology_extraction` projection。
+- `contracts/projections/ontology_extraction/**`：当已有足够本体 projection 信息时，让生成出来的业务 skill 按本仓库 consumer skill 方式消费 `ontology_extraction` projection。
 - `references/source-digest.md`、`references/extraction-notes.md`、`references/quality-report.md`：让生成过程可审阅、可复盘、可迁移。
 
 模板参考文件位于本技能目录：
@@ -144,7 +188,7 @@ skills/<skill_slug>/
 
 - Sanity Check：用 2-3 个典型用户请求检查触发词、能力选择和输出边界是否匹配。
 - Edge Case：用 1 个信息不足或越界请求检查是否会补槽、拒绝或转交，而不是编造结果。
-- Contract Check：确认 `contract-index.json` 的 path 指向真实 projection 文件，projection 含 `prompt_projection`、`delivery_artifacts`、`dropped_items`、`open_questions`。
+- Contract Check：如生成了 READY projection contract，确认 `contract-index.json` 的 path 指向真实 projection 文件，projection 含 `prompt_projection`、`delivery_artifacts`、`dropped_items`、`open_questions`；如信息不足，只写 draft/notes，不把 contract 标为 READY，也不阻断基础业务 skill 落盘。
 - Safety Check：确认产物不含明文 token、密钥、密码、连接串。
 - Self-contained Check：复制整个 `skills/<skill_slug>/` 后仍能独立被 loader 发现和人工审阅。
 
@@ -161,19 +205,20 @@ skills/<skill_slug>/
 
 ## 兼容执行清单
 
-1. 输入判型：判断是会话描述、上传文件还是混合输入。
+1. 输入判型：判断是 handoff todo、会话描述、上传文件还是混合输入。
 2. 内容解析：
+  - handoff todo：读取 `payload.skill_name`、`payload.skill_description`、`payload.trigger`、`payload.expected_output`、`from_upload`、`source`、`acceptance`，保留 todo id。
    - 会话描述：抽取触发词、能力项、输入、输出、边界和示例。
    - 上传文件：解析 Markdown、文本、JSON、YAML，并映射到 SkillSpec。
    - zip 文件：递归读取候选 skill 文件，优先保留原文件能力定义，再结构化归一。
 3. 结构化归一：补齐缺省字段，规范化 `name`、`display_name`、`description`、`triggers`、`capabilities`、`boundaries`、`examples`、`source`、`version`。
 4. Slug 生成：由能力名称生成 `skill_slug`，使用小写短横线，只保留字母、数字和短横线。
 5. 冲突处理：读取现有 `skills/`，按同名覆盖、异名新增规则合并。多能力输入可按业务域合并为一个技能，也可在用户启用多技能拆分时按业务域生成多个技能。
-6. Projection 契约生成：为产出的业务 skill 生成 consumer-skill projection 目录，使生成后的 skill 能消费 `ontology_extraction` 创建的 projection。
-7. 模板渲染：按固定业务技能模板生成 `SKILL.md`，同时生成 `metadata.json` 与 projection contract 伴随文件。
+6. Projection 契约生成：有足够本体 projection 信息时，为产出的业务 skill 生成 READY consumer-skill projection 目录；信息不足时只记录 draft/notes，不伪造 READY contract。
+7. 模板渲染：按固定业务技能模板生成 `SKILL.md` 和 `metadata.json`；如具备 projection 信息，同时生成 projection contract 伴随文件。
 8. 质量校验：未通过时阻止落盘，返回失败原因。
-9. 写入产物：只写入 `skills/<skill_slug>/` 下的技能文件、metadata 与 projection contract 文件。
-10. 返回摘要：输出 `technical_artifact` 与 `user_summary`。
+9. 写入产物：只写入 `skills/<skill_slug>/` 下的技能文件、metadata、references，以及可选 projection contract 文件。
+10. 返回摘要：输出 `technical_artifact`、`todo_results` 与 `user_summary`。
 
 ## SKILL.md 业务模板
 
@@ -217,9 +262,9 @@ description: |
 
 ## 生成 Skill 的 Projection Contract 模板
 
-生成出来的业务 skill 必须按本仓库 consumer skill 方式接入 `ontology_extraction` projection，而不是让 `skill_generation` 自己消费 projection。
+生成出来的业务 skill 可以按本仓库 consumer skill 方式接入 `ontology_extraction` projection，而不是让 `skill_generation` 自己消费 projection。projection contract 是条件增强：有足够 ontology projection 信息时生成 READY contract；信息不足时生成 draft/notes，不能伪造 READY contract，也不能因此阻断基础业务 skill 落盘。
 
-每个生成的技能包默认包含：
+当 projection 信息足够时，每个生成的技能包包含：
 
 ```text
 skills/<skill_slug>/
@@ -240,7 +285,7 @@ skills/<skill_slug>/
           REVIEW.md
 ```
 
-生成的业务 `SKILL.md` 必须包含以下 consumer skill 章节，并按具体业务域裁剪 supported deliverables、projection types 和 local exclusions：
+生成的业务 `SKILL.md` 可以包含以下 consumer skill 章节，并按具体业务域裁剪 supported deliverables、projection types 和 local exclusions。仅当该技能确实带有 `contracts/projections/**/contract-index.json` 或 draft projection notes 时写入本章节：
 
 ```markdown
 ## Projection Contracts
@@ -263,7 +308,7 @@ This skill may be augmented by bound `ontology_extraction` projection contracts 
 - Do not recreate items listed in `dropped_items`.
 ```
 
-生成 `contract-index.json` 时必须：
+生成 READY `contract-index.json` 时必须：
 
 - 设置 `producer_skill` 为 `ontology_extraction`。
 - 设置 `consumer_skill` 为当前生成的 `{{name}}`。
@@ -277,7 +322,7 @@ This skill may be augmented by bound `ontology_extraction` projection contracts 
 - 包含 `prompt_projection`、`delivery_artifacts`、`dropped_items`、`open_questions`。
 - 对 `mapping_policy.unresolved_item_policy` 使用 `block_or_escalate`。
 - 将 `delivery_artifacts.path` 限定到该业务 skill 真实会产出的文件或响应结构。
-- 如果用户输入中没有足够信息生成 READY projection，生成 WARNING/草稿摘要但不要伪造 READY contract。
+- 如果用户输入中没有足够信息生成 READY projection，生成 WARNING/草稿摘要但不要伪造 READY contract，也不要阻断基础业务 skill 落盘。
 
 ## 伴随文件模板
 
@@ -297,8 +342,8 @@ This skill may be augmented by bound `ontology_extraction` projection contracts 
 - 可触发性：至少包含 1 个 trigger。
 - 可执行性：每个 capability 都必须有输入、输出和兜底。
 - 安全性：不得写入明文 token、密钥、密码、连接串或凭据。
-- 自包含性：来源摘要、提炼说明、质量报告和 projection contract 必须随生成 skill 一起落在 `skills/<skill_slug>/`。
-- 可消费性：生成 skill 的 `contract-index.json` 必须能被 runtime 从 `contracts/projections/**/contract-index.json` 自动发现。
+- 自包含性：来源摘要、提炼说明、质量报告必须随生成 skill 一起落在 `skills/<skill_slug>/`；如生成 projection contract，也必须落在同一 skill 目录内。
+- 可消费性：如生成 READY projection contract，生成 skill 的 `contract-index.json` 必须能被 runtime 从 `contracts/projections/**/contract-index.json` 自动发现。
 
 如检测到敏感明文即将写入，拒绝写入并输出安全告警。敏感内容应替换为 `[REDACTED]`，但不要把真实值写入任何产物。
 
@@ -320,7 +365,7 @@ This skill may be augmented by bound `ontology_extraction` projection contracts 
 
 ## 输出格式
 
-最终输出必须包含两个部分：
+最终输出必须包含三个部分：
 
 ```json
 {
@@ -329,18 +374,32 @@ This skill may be augmented by bound `ontology_extraction` projection contracts 
     "skills/<skill_slug>/metadata.json",
     "skills/<skill_slug>/references/source-digest.md",
     "skills/<skill_slug>/references/extraction-notes.md",
-    "skills/<skill_slug>/references/quality-report.md",
+    "skills/<skill_slug>/references/quality-report.md"
+  ],
+  "optional_projection_artifact": [
     "skills/<skill_slug>/contracts/projections/ontology_extraction/contract-index.json",
     "skills/<skill_slug>/contracts/projections/ontology_extraction/README.md",
     "skills/<skill_slug>/contracts/projections/ontology_extraction/<domain-slug>/<domain-slug>.<projection-type-short>.projection.json",
     "skills/<skill_slug>/contracts/projections/ontology_extraction/<domain-slug>/README.md",
     "skills/<skill_slug>/contracts/projections/ontology_extraction/<domain-slug>/REVIEW.md"
   ],
+  "todo_results": [
+    {
+      "todo_id": "s_seven_day_init_001",
+      "status": "success",
+      "skill_slug": "seven-day-return-initial-check",
+      "artifacts": [
+        "skills/seven-day-return-initial-check/SKILL.md",
+        "skills/seven-day-return-initial-check/metadata.json"
+      ],
+      "acceptance_result": "生成的 skill 文件匹配 todo 的 skill_name、skill_description、trigger 和 expected_output。"
+    }
+  ],
   "user_summary": "已新增 1 个技能：退货与订单查询助手；现在能处理退货咨询、订单状态查询和物流进度追踪。"
 }
 ```
 
-如果发生新增和更新混合，摘要必须按新增、更新、跳过、失败分类说明。
+如果发生新增和更新混合，摘要必须按新增、更新、跳过、失败分类说明。handoff 路径中，`todo_results` 必须覆盖本次 dispatch 的每个 todo id；失败项必须包含 `status: failed`、可读 `error`，以及是否保留旧产物。
 
 ## References
 
