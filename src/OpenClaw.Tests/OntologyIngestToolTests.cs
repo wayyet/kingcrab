@@ -70,6 +70,47 @@ public sealed class OntologyIngestToolTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_RejectsZipWhenEntryBudgetIsExceeded()
+    {
+        var root = CreateTempDir();
+        var zipPath = Path.Combine(root, "oversized.zip");
+        var entries = Enumerable.Range(0, 513)
+            .Select(index => ($"topic-{index}.md", $"# Topic {index}\ncontent"))
+            .ToArray();
+        await File.WriteAllBytesAsync(zipPath, CreateZipBytes(entries), CancellationToken.None);
+
+        var tool = CreateTool(root);
+
+        var result = await tool.ExecuteAsync(ToJson(new { paths = new[] { zipPath } }), CancellationToken.None);
+
+        Assert.Contains("Error:", result, StringComparison.Ordinal);
+        Assert.Contains("too many files", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_UsesFullSourceIdentityForIncrementalRemoval()
+    {
+        var root = CreateTempDir();
+        var sourceA = Path.Combine(root, "a", "domain.md");
+        var sourceB = Path.Combine(root, "b", "domain.md");
+        Directory.CreateDirectory(Path.GetDirectoryName(sourceA)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(sourceB)!);
+        await File.WriteAllTextAsync(sourceA, "# Alpha\nfrom A", CancellationToken.None);
+        await File.WriteAllTextAsync(sourceB, "# Beta\nfrom B", CancellationToken.None);
+
+        var tool = CreateTool(root);
+        await tool.ExecuteAsync(ToJson(new { paths = new[] { sourceA } }), CancellationToken.None);
+        await tool.ExecuteAsync(ToJson(new { paths = new[] { sourceB } }), CancellationToken.None);
+
+        await File.WriteAllTextAsync(sourceA, "# Alpha\nfrom A updated", CancellationToken.None);
+        var result = await tool.ExecuteAsync(ToJson(new { paths = new[] { sourceA } }), CancellationToken.None);
+
+        Assert.Contains("修改: Alpha", result, StringComparison.Ordinal);
+        Assert.DoesNotContain("移除: Beta", result, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Combine(root, "ontology", "beta.json")));
+    }
+
+    [Fact]
     public async Task ExecuteAsync_ParsesDocxContainerAsOntologySource()
     {
         var root = CreateTempDir();

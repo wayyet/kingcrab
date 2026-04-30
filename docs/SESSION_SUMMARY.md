@@ -1,14 +1,14 @@
-# 从 Ontology Slice 到 Projection 治理：ncrew-ontology 规范包的演进总结
+# 从 Ontology Slice 到 Projection 治理：ontology_extraction 规范包的演进总结
 
-这篇文章不是模板说明，也不是字段手册，而是对本次会话工作的一次整体回顾。它回答的问题是：`ncrew-ontology` 这一套规范，为什么会从“做一个加载 ontology 切片的 skill”逐步演进成今天这套同时覆盖 slice、projection、review、migration 和决策入口的完整包。
+这篇文章不是模板说明，也不是字段手册，而是对本次会话工作的一次整体回顾。它回答的问题是：`ontology_extraction` 这一套规范，为什么会从“做一个加载 ontology 切片的 skill”逐步演进成今天这套同时覆盖 slice、projection、review、migration 和决策入口的完整包。
 
-如果只想直接使用这套规范，看 [../src/OpenClaw.Gateway/skills/ncrew-ontology/README.md](../src/OpenClaw.Gateway/skills/ncrew-ontology/README.md)。如果想理解它为什么长成现在这样、各个文档之间为什么这么分工、以及这次会话真正完成了什么，这篇文章更合适。
+如果只想直接使用这套规范，看 [../src/OpenClaw.Gateway/skills/ontology_extraction/README.md](../src/OpenClaw.Gateway/skills/ontology_extraction/README.md)。如果想理解它为什么长成现在这样、各个文档之间为什么这么分工、以及这次会话真正完成了什么，这篇文章更合适。
 
 ---
 
 ## 一、起点：最初并不是要做一整套规范
 
-这次工作的起点很简单：实现一个名为 `ncrew-ontology` 的 skill，用来“加载 ontology 切片”。
+这次工作的起点很简单：实现一个名为 `ontology_extraction` 的 skill，用来“加载 ontology 切片”。
 
 如果只停在这个目标上，最直接的交付其实只需要三样东西：
 
@@ -32,7 +32,7 @@
 
 第一阶段的核心目标，是把 ontology slice 本身定义清楚。
 
-这里最重要的设计选择，不是字段长什么样，而是先把方法论定下来：`ncrew-ontology` 不追求导出整份 ontology，而是围绕当前任务抽取“最小可验证子图”。
+这里最重要的设计选择，不是字段长什么样，而是先把方法论定下来：`ontology_extraction` 不追求导出整份 ontology，而是围绕当前任务抽取“最小可验证子图”。
 
 围绕这个原则，slice 层逐步沉淀出几类核心资产：
 
@@ -41,7 +41,7 @@
 - `templates/TEMPLATE.schema.json`：严格结构校验规则
 - `references/FIELD_GUIDE.md`：字段语义和填报口径
 - `examples/ready|warning|invalid/`：三态样例链路
-- `src/OpenClaw.Gateway/skills/ncrew-ontology/scripts/validate-slice.ps1`：技能根目录内真实校验器，本地校验与 review 辅助入口
+- `src/OpenClaw.Gateway/skills/ontology_extraction/scripts/validate-slice.ps1`：技能根目录内真实校验器，本地校验与 review 辅助入口
 - `scripts/validate-ontology-slice.ps1`：仓库根目录包装入口，适合从仓库根目录或任意当前目录发起普通结构校验
 
 这一步的价值，在于把“切片”从一个容易凭经验乱写的动作，收敛成一个有输入边界、有结构合同、有人工 review 入口的标准交付物。
@@ -66,7 +66,7 @@
 - `templates/PROJECTION_TEMPLATE.json`
 - `templates/PROJECTION_TEMPLATE.schema.json`
 - `references/DOWNSTREAM_MAPPING_GUIDE.md`
-- `src/OpenClaw.Gateway/skills/ncrew-ontology/scripts/validate-projection.ps1`：技能根目录内真实 projection 校验器
+- `src/OpenClaw.Gateway/skills/ontology_extraction/scripts/validate-projection.ps1`：技能根目录内真实 projection 校验器
 - `scripts/validate-ontology-projection.ps1`：仓库根目录 projection 包装入口
 - `examples/ready|warning|invalid/*-projection.*`
 
@@ -87,7 +87,7 @@
 - slice 评审：判断 ontology 子图本身是否够稳、够准、够可追溯
 - projection 评审：判断下游投影是否忠实、安全、可治理
 
-于是有了统一后的 [../src/OpenClaw.Gateway/skills/ncrew-ontology/references/REVIEW_CHECKLIST.md](../src/OpenClaw.Gateway/skills/ncrew-ontology/references/REVIEW_CHECKLIST.md)。
+于是有了统一后的 [../src/OpenClaw.Gateway/skills/ontology_extraction/references/REVIEW_CHECKLIST.md](../src/OpenClaw.Gateway/skills/ontology_extraction/references/REVIEW_CHECKLIST.md)。
 
 这份清单并不是为了重复 schema 校验，而是为了补上人工判断层。它把两类产物统一收敛到同一套骨架：
 
@@ -107,11 +107,11 @@
 
 ## 五、第四阶段：再往前走一步，把使用前决策也显式化
 
-当包越来越完整后，又出现了一个现实问题：不是每个任务都适合直接进入 `ncrew-ontology`。
+当包越来越完整后，又出现了一个现实问题：不是每个任务都适合直接进入 `ontology_extraction`。
 
 有些场景主题不明确，有些没有事实源，有些实际上想做的是 formal ontology，而不是 task-scoped slice。如果这些情况也强行套进模板，只会得到形式完整但没有治理价值的产物。
 
-因此，规范包后续又补了一份 [../src/OpenClaw.Gateway/skills/ncrew-ontology/references/DECISION_GUIDE.md](../src/OpenClaw.Gateway/skills/ncrew-ontology/references/DECISION_GUIDE.md)。
+因此，规范包后续又补了一份 [../src/OpenClaw.Gateway/skills/ontology_extraction/references/DECISION_GUIDE.md](../src/OpenClaw.Gateway/skills/ontology_extraction/references/DECISION_GUIDE.md)。
 
 这份文档做的事很简单，但非常关键：在“写之前”先回答“该不该写”。
 
@@ -121,7 +121,7 @@
 - 黄灯：可以做，但只能作为受控草案或局部治理视图
 - 红灯：当前不适合，先补主题、补来源，或改用别的方法
 
-这意味着 `ncrew-ontology` 不再只是一个“输出格式包”，而开始具备流程前置治理能力。
+这意味着 `ontology_extraction` 不再只是一个“输出格式包”，而开始具备流程前置治理能力。
 
 ---
 
@@ -137,7 +137,7 @@
 
 如果没有显式迁移规则，团队很容易只改 schema 或只改模板，最后造成“表面版本号一致，实际规范断裂”。
 
-所以这次会话后期又专门把迁移规则独立成了 [../src/OpenClaw.Gateway/skills/ncrew-ontology/references/SCHEMA_MIGRATION.md](../src/OpenClaw.Gateway/skills/ncrew-ontology/references/SCHEMA_MIGRATION.md)。
+所以这次会话后期又专门把迁移规则独立成了 [../src/OpenClaw.Gateway/skills/ontology_extraction/references/SCHEMA_MIGRATION.md](../src/OpenClaw.Gateway/skills/ontology_extraction/references/SCHEMA_MIGRATION.md)。
 
 这份文档的意义，不是告诉大家“现在就要升级”，而是提前定义升级时必须一起移动的对象：
 
@@ -206,7 +206,7 @@
 - 根目录脚本包装入口
 - README 中的统一导航
 
-换句话说，这次工作的结果已经不是“新增一个 skill”，而是把 `ncrew-ontology` 建成了一套完整的 ontology slice / projection 工作流规范。
+换句话说，这次工作的结果已经不是“新增一个 skill”，而是把 `ontology_extraction` 建成了一套完整的 ontology slice / projection 工作流规范。
 
 ---
 
@@ -259,4 +259,4 @@
 
 所以，这篇文章的价值，不在于替代任何操作手册，而在于给后来者提供一条清晰的理解路径：
 
-`ncrew-ontology` 不是一份模板集合，而是一套围绕 task-scoped ontology slicing 建立起来的、可校验、可评审、可投影、可迁移的治理体系。
+`ontology_extraction` 不是一份模板集合，而是一套围绕 task-scoped ontology slicing 建立起来的、可校验、可评审、可投影、可迁移的治理体系。

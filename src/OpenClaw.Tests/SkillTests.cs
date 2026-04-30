@@ -194,7 +194,7 @@ public class SkillLoaderTests
         public void ParseSkillContent_WithProjectionContractIndex_BindsProjectionContracts()
         {
                 var skillDir = Path.Combine(Path.GetTempPath(), $"openclaw-skill-projection-{Guid.NewGuid():N}");
-                var contractRoot = Path.Combine(skillDir, "contracts", "projections", "ncrew-ontology");
+                var contractRoot = Path.Combine(skillDir, "contracts", "projections", "ontology_extraction");
                 Directory.CreateDirectory(contractRoot);
 
                 try
@@ -202,7 +202,7 @@ public class SkillLoaderTests
                         File.WriteAllText(Path.Combine(contractRoot, "contract-index.json"),
                             $$"""
                                 {
-                                    "producer_skill": "ncrew-ontology",
+                                    "producer_skill": "ontology_extraction",
                                     "producer_priority": 42,
                                     "default_selection_policy": {
                                         "prefer_ready_only": true,
@@ -269,7 +269,7 @@ public class SkillLoaderTests
                         Assert.Single(skill!.ProjectionContracts);
                         Assert.NotNull(skill.ProjectionDiscovery);
                         Assert.Equal(contractRoot, skill.ProjectionContracts[0].RootPath);
-                        Assert.Equal("ncrew-ontology", skill.ProjectionContracts[0].ProducerName);
+                        Assert.Equal("ontology_extraction", skill.ProjectionContracts[0].ProducerName);
                         Assert.Equal(42, skill.ProjectionContracts[0].ProducerPriority);
                         Assert.Equal("bound", skill.ProjectionDiscovery!.Status);
                         Assert.Equal(1, skill.ProjectionDiscovery.BoundCount);
@@ -646,7 +646,7 @@ public class SkillPromptBuilderTests
                     Status = "bound",
                     IndexCount = 1,
                     BoundCount = 1,
-                    IndexPaths = ["/skills/search/contracts/projections/ncrew-ontology/contract-index.json"]
+                    IndexPaths = ["/skills/search/contracts/projections/ontology_extraction/contract-index.json"]
                 }
             },
             new()

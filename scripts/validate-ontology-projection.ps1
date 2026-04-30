@@ -26,7 +26,7 @@ function Resolve-AbsolutePath {
 }
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
-$validatorPath = Join-Path $repoRoot "src\OpenClaw.Gateway\skills\ncrew-ontology\scripts\validate-projection.ps1"
+$validatorPath = Join-Path $repoRoot "src\OpenClaw.Gateway\skills\ontology_extraction\scripts\validate-projection.ps1"
 
 if (-not (Test-Path -LiteralPath $validatorPath)) {
     throw "Validator script not found: $validatorPath"

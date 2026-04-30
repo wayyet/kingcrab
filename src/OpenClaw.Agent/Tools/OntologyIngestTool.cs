@@ -18,6 +18,11 @@ namespace OpenClaw.Agent.Tools;
 public sealed class OntologyIngestTool : ITool
 {
     private const int MaxDocumentChars = 200_000;
+    private const int MaxInputBytes = 50 * 1024 * 1024;
+    private const int MaxZipDepth = 5;
+    private const int MaxZipEntries = 512;
+    private const long MaxZipExpandedBytes = 100L * 1024 * 1024;
+    private const int MaxZipEntryBytes = 25 * 1024 * 1024;
     private readonly ToolingConfig _config;
 
     public OntologyIngestTool(ToolingConfig config) => _config = config;
@@ -87,7 +92,20 @@ public sealed class OntologyIngestTool : ITool
         var extractedNodes = new Dictionary<string, PersistedOntologyNode>(StringComparer.OrdinalIgnoreCase);
         foreach (var input in resolvedInputs)
         {
-            var parsedDocuments = await ParseInputAsync(input, ct);
+            IReadOnlyList<ParsedDocument> parsedDocuments;
+            try
+            {
+                parsedDocuments = await ParseInputAsync(input, ct);
+            }
+            catch (InvalidDataException ex)
+            {
+                return $"Error: Failed to parse '{input.RawPath}': {ex.Message}";
+            }
+            catch (InvalidOperationException ex)
+            {
+                return $"Error: Failed to parse '{input.RawPath}': {ex.Message}";
+            }
+
             foreach (var document in parsedDocuments)
             {
                 foreach (var node in BuildNodes(document, input.OriginKey))
@@ -348,7 +366,11 @@ public sealed class OntologyIngestTool : ITool
     private async Task<IReadOnlyList<ParsedDocument>> ParseInputAsync(ResolvedInput input, CancellationToken ct)
     {
         var bytes = await File.ReadAllBytesAsync(input.ResolvedPath, ct);
-        return await ParseBytesAsync(bytes, Path.GetFileName(input.ResolvedPath), input.ResolvedPath, input.OriginKey, ct);
+        if (bytes.Length > MaxInputBytes)
+            throw new InvalidOperationException($"Input file is too large ({bytes.Length} bytes). Max allowed is {MaxInputBytes} bytes.");
+
+        var budget = new ZipParseBudget();
+        return await ParseBytesAsync(bytes, Path.GetFileName(input.ResolvedPath), input.ResolvedPath, input.OriginKey, budget, depth: 0, ct);
     }
 
     private async Task<IReadOnlyList<ParsedDocument>> ParseBytesAsync(
@@ -356,11 +378,13 @@ public sealed class OntologyIngestTool : ITool
         string entryName,
         string virtualPath,
         string originKey,
+        ZipParseBudget budget,
+        int depth,
         CancellationToken ct)
     {
         var extension = Path.GetExtension(entryName).ToLowerInvariant();
         if (extension == ".zip")
-            return await ParseZipAsync(bytes, virtualPath, originKey, ct);
+            return await ParseZipAsync(bytes, virtualPath, originKey, budget, depth + 1, ct);
 
         if (IsOpenXmlContainer(extension))
         {
@@ -386,8 +410,11 @@ public sealed class OntologyIngestTool : ITool
         return CreateDocumentList(entryName, virtualPath, originKey, extension, fallbackText);
     }
 
-    private async Task<IReadOnlyList<ParsedDocument>> ParseZipAsync(byte[] bytes, string virtualPath, string originKey, CancellationToken ct)
+    private async Task<IReadOnlyList<ParsedDocument>> ParseZipAsync(byte[] bytes, string virtualPath, string originKey, ZipParseBudget budget, int depth, CancellationToken ct)
     {
+        if (depth > MaxZipDepth)
+            throw new InvalidOperationException($"ZIP nesting is too deep. Max depth is {MaxZipDepth}.");
+
         var results = new List<ParsedDocument>();
         using var ms = new MemoryStream(bytes, writable: false);
         using var archive = new ZipArchive(ms, ZipArchiveMode.Read, leaveOpen: false);
@@ -396,11 +423,22 @@ public sealed class OntologyIngestTool : ITool
             if (string.IsNullOrEmpty(entry.Name))
                 continue;
 
+            budget.EntryCount++;
+            if (budget.EntryCount > MaxZipEntries)
+                throw new InvalidOperationException($"ZIP contains too many files. Max entries is {MaxZipEntries}.");
+
+            if (entry.Length > MaxZipEntryBytes)
+                throw new InvalidOperationException($"ZIP entry '{entry.FullName}' is too large ({entry.Length} bytes). Max entry size is {MaxZipEntryBytes} bytes.");
+
+            budget.ExpandedBytes += entry.Length;
+            if (budget.ExpandedBytes > MaxZipExpandedBytes)
+                throw new InvalidOperationException($"ZIP expanded content is too large. Max expanded size is {MaxZipExpandedBytes} bytes.");
+
             await using var entryStream = entry.Open();
             using var entryBuffer = new MemoryStream();
             await entryStream.CopyToAsync(entryBuffer, ct);
             var nestedVirtualPath = virtualPath + "::" + entry.FullName.Replace('\\', '/');
-            var nestedDocuments = await ParseBytesAsync(entryBuffer.ToArray(), entry.Name, nestedVirtualPath, originKey, ct);
+            var nestedDocuments = await ParseBytesAsync(entryBuffer.ToArray(), entry.Name, nestedVirtualPath, originKey, budget, depth, ct);
             results.AddRange(nestedDocuments);
         }
 
@@ -737,9 +775,14 @@ public sealed class OntologyIngestTool : ITool
     }
 
     private static string BuildOriginKey(string resolvedPath)
-        => Slugify(Path.GetFileNameWithoutExtension(resolvedPath));
+    {
+        var fullPath = ToolPathPolicy.ResolveRealPath(resolvedPath);
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fullPath)))[..12].ToLowerInvariant();
+        var name = Slugify(Path.GetFileNameWithoutExtension(fullPath));
+        return string.IsNullOrWhiteSpace(name) ? hash : $"{name}-{hash}";
+    }
 
-    private static string? ResolveInputPath(string path)
+    internal static string? ResolveInputPath(string path)
     {
         var normalized = path.Trim();
         if (normalized.StartsWith("[FILE_URL:", StringComparison.OrdinalIgnoreCase) && normalized.EndsWith(']'))
@@ -791,6 +834,12 @@ public sealed class OntologyIngestTool : ITool
     private sealed record ResolvedInput(string RawPath, string ResolvedPath, string OriginKey);
 
     private sealed record ParsedDocument(string OriginKey, string Title, string SourcePath, string Parser, string Text);
+
+    private sealed class ZipParseBudget
+    {
+        public int EntryCount { get; set; }
+        public long ExpandedBytes { get; set; }
+    }
 
     private sealed record ExistingNode(string FilePath, string Slug, string Name, string Content, bool GeneratedByTool, IReadOnlyList<string> SourceOriginKeys);
 

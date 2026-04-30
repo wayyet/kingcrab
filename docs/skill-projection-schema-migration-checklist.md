@@ -7,8 +7,8 @@
 相关文档：
 
 - `docs/skill-projection-contracts-schema.md`
-- `docs/ncrew-ontology-slice-to-skill-method.md`
-- `src/OpenClaw.Gateway/skills/ncrew-ontology/references/SCHEMA_MIGRATION.md`
+- `docs/ontology_extraction-slice-to-skill-method.md`
+- `src/OpenClaw.Gateway/skills/ontology_extraction/references/SCHEMA_MIGRATION.md`
 
 ---
 
@@ -17,8 +17,8 @@
 团队在迁移或新增 contract 前，先把两类 schema 的职责固定下来：
 
 - `producer 模板 schema`
-  - `src/OpenClaw.Gateway/skills/ncrew-ontology/templates/TEMPLATE.schema.json`
-  - `src/OpenClaw.Gateway/skills/ncrew-ontology/templates/PROJECTION_TEMPLATE.schema.json`
+  - `src/OpenClaw.Gateway/skills/ontology_extraction/templates/TEMPLATE.schema.json`
+  - `src/OpenClaw.Gateway/skills/ontology_extraction/templates/PROJECTION_TEMPLATE.schema.json`
   - 用途：校验 producer 侧产出的 slice 与 projection 模板文件
   - 场景：ontology 收缩、投影生成、ready/warning/invalid 样例维护、producer 模板升级
 
@@ -54,7 +54,7 @@
 
 只要变更涉及 producer 产出，就先确保 producer 层通过模板校验：
 
-下面示例使用的是仓库根目录包装入口；如果你当前就在 `src/OpenClaw.Gateway/skills/ncrew-ontology/` 技能根目录，也可以改用对应的真实校验器 `validate-slice` / `validate-projection`。
+下面示例使用的是仓库根目录包装入口；如果你当前就在 `src/OpenClaw.Gateway/skills/ontology_extraction/` 技能根目录，也可以改用对应的真实校验器 `validate-slice` / `validate-projection`。
 
 ```powershell
 # slice
@@ -133,8 +133,8 @@ schema 通过不等于 runtime 一定会消费所有字段。进入评审前，�
 
 1. 总览类：`docs/ontology-slice-projection-summary.md`
 2. 字段/口径类：`docs/skill-projection-contracts-schema.md`
-3. 方法类：`docs/ncrew-ontology-slice-to-skill-method.md`
-4. 版本迁移类：`src/OpenClaw.Gateway/skills/ncrew-ontology/references/SCHEMA_MIGRATION.md`
+3. 方法类：`docs/ontology_extraction-slice-to-skill-method.md`
+4. 版本迁移类：`src/OpenClaw.Gateway/skills/ontology_extraction/references/SCHEMA_MIGRATION.md`
 
 最小要求不是全部重写，而是让团队能在总览文档里看到：
 

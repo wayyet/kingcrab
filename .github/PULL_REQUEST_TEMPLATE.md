@@ -15,15 +15,15 @@
 ## Schema Boundary Checklist
 
 - [ ] I explicitly classified this PR as `producer`, `runtime`, or `both` before changing schema paths or validation flow.
-- [ ] Producer-side files still use the template schemas under `src/OpenClaw.Gateway/skills/ncrew-ontology/templates/`.
+- [ ] Producer-side files still use the template schemas under `src/OpenClaw.Gateway/skills/ontology_extraction/templates/`.
 - [ ] Consumer-side `contract-index.json` files use `docs/skill-projection-contract-index.schema.json`.
 - [ ] Consumer-side runtime `*.projection.json` files use `docs/skill-projection-document.schema.json`.
 - [ ] I did not use `PROJECTION_TEMPLATE.schema.json` as the main validation baseline for runtime projection contracts.
 
 ## Validation
 
-- [ ] I ran the producer slice validator when producer slice output changed: from repo root `./scripts/validate-ontology-slice.ps1` or Python equivalent, or from `src/OpenClaw.Gateway/skills/ncrew-ontology/` the real `validate-slice` script.
-- [ ] I ran the producer projection validator when producer projection output changed: from repo root `./scripts/validate-ontology-projection.ps1` or Python equivalent, or from `src/OpenClaw.Gateway/skills/ncrew-ontology/` the real `validate-projection` script.
+- [ ] I ran the producer slice validator when producer slice output changed: from repo root `./scripts/validate-ontology-slice.ps1` or Python equivalent, or from `src/OpenClaw.Gateway/skills/ontology_extraction/` the real `validate-slice` script.
+- [ ] I ran the producer projection validator when producer projection output changed: from repo root `./scripts/validate-ontology-projection.ps1` or Python equivalent, or from `src/OpenClaw.Gateway/skills/ontology_extraction/` the real `validate-projection` script.
 - [ ] I ran `./scripts/validate-skill-projection-contract-index.ps1` or the Python equivalent when runtime contract indexes changed.
 - [ ] I ran `./scripts/validate-skill-projection-document.ps1` or the Python equivalent when runtime projection contracts changed.
 - [ ] If loader or resolver behavior changed, I also ran the relevant focused tests.

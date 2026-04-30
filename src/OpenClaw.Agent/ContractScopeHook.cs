@@ -207,7 +207,11 @@ public sealed class ContractScopeHook : IToolHookWithContext
         {
             var value = ontologyDir.GetString();
             if (!string.IsNullOrWhiteSpace(value))
-                collected.Add(value!);
+                collected.Add(ResolveOntologyScopePath(value!));
+        }
+        else
+        {
+            collected.Add(ResolveOntologyScopePath("ontology"));
         }
 
         if (root.TryGetProperty("paths", out var pathArray) && pathArray.ValueKind == JsonValueKind.Array)
@@ -219,12 +223,23 @@ public sealed class ContractScopeHook : IToolHookWithContext
 
                 var value = item.GetString();
                 if (!string.IsNullOrWhiteSpace(value))
-                    collected.Add(value!);
+                    collected.Add(OntologyIngestTool.ResolveInputPath(value!) ?? value!);
             }
         }
 
         paths = collected;
         return collected.Count > 0;
+    }
+
+    private static string ResolveOntologyScopePath(string path)
+    {
+        if (Path.IsPathRooted(path))
+            return Path.GetFullPath(path);
+
+        var workspace = Environment.GetEnvironmentVariable("OPENCLAW_WORKSPACE")
+            ?? Environment.GetEnvironmentVariable("OPENCLAW_WORKSPACE_ROOT")
+            ?? Directory.GetCurrentDirectory();
+        return Path.GetFullPath(Path.Combine(workspace, path));
     }
 
     private static bool TryReadStringList(JsonElement root, string propertyName, out IReadOnlyList<string> paths)

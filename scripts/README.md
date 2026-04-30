@@ -79,14 +79,14 @@
 
 - PowerShell 和 Python 两个入口都会把传入的相对路径按你当前执行目录解析为绝对路径，再转交给真实校验器
 - Python 入口会复用当前 Python 解释器来调用技能目录下的真实 `validate-*.py` 校验器
-- 两类真实 schema、默认样例和参考文档都位于 `src/OpenClaw.Gateway/skills/ncrew-ontology/` 下的 `templates/`、`examples/`、`references/` 目录
-- 本 README 主要描述仓库根目录包装入口；如果当前目录就是 `src/OpenClaw.Gateway/skills/ncrew-ontology/` 技能根目录，也可以直接使用该目录下的真实校验器
+- 两类真实 schema、默认样例和参考文档都位于 `src/OpenClaw.Gateway/skills/ontology_extraction/` 下的 `templates/`、`examples/`、`references/` 目录
+- 本 README 主要描述仓库根目录包装入口；如果当前目录就是 `src/OpenClaw.Gateway/skills/ontology_extraction/` 技能根目录，也可以直接使用该目录下的真实校验器
 
 ---
 
 ### Slice 校验入口
 
-根目录同时提供 PowerShell 与 Python 两个包装入口，统一调用 `src/OpenClaw.Gateway/skills/ncrew-ontology/scripts/validate-slice.*` 真实校验器，适合团队从仓库根目录或任意当前目录直接校验 ontology slice JSON。
+根目录同时提供 PowerShell 与 Python 两个包装入口，统一调用 `src/OpenClaw.Gateway/skills/ontology_extraction/scripts/validate-slice.*` 真实校验器，适合团队从仓库根目录或任意当前目录直接校验 ontology slice JSON。
 
 | 入口 | 参数 | 默认值 | 说明 |
 | --- | --- | --- | --- |
@@ -123,14 +123,14 @@ c:/python314/python.exe .\scripts\validate-ontology-slice.py .\sample-a.json .\s
 **差异说明：**
 
 - 默认 schema 为 `templates/TEMPLATE.schema.json`
-- 包装入口只承载普通结构校验；如需 `-ReviewMode` / `--review-mode`，请切到 `src/OpenClaw.Gateway/skills/ncrew-ontology/` 技能根目录后使用真实校验器 `scripts/validate-slice.ps1` / `scripts/validate-slice.py`
+- 包装入口只承载普通结构校验；如需 `-ReviewMode` / `--review-mode`，请切到 `src/OpenClaw.Gateway/skills/ontology_extraction/` 技能根目录后使用真实校验器 `scripts/validate-slice.ps1` / `scripts/validate-slice.py`
 - 主要用于 slice 的本地检查、评审前自检，以及后续 CI 接入
 
 ---
 
 ### Projection 校验入口
 
-根目录同时提供 PowerShell 与 Python 两个包装入口，统一调用 `src/OpenClaw.Gateway/skills/ncrew-ontology/scripts/validate-projection.*` 真实校验器，适合团队从仓库根目录或任意当前目录直接校验 ontology projection JSON。
+根目录同时提供 PowerShell 与 Python 两个包装入口，统一调用 `src/OpenClaw.Gateway/skills/ontology_extraction/scripts/validate-projection.*` 真实校验器，适合团队从仓库根目录或任意当前目录直接校验 ontology projection JSON。
 
 | 入口 | 参数 | 默认值 | 说明 |
 | --- | --- | --- | --- |
@@ -167,7 +167,7 @@ c:/python314/python.exe .\scripts\validate-ontology-projection.py .\projection-a
 **差异说明：**
 
 - 默认 schema 为 `templates/PROJECTION_TEMPLATE.schema.json`
-- 包装入口只承载普通结构校验；如需 `-ReviewMode` / `--review-mode`，请切到 `src/OpenClaw.Gateway/skills/ncrew-ontology/` 技能根目录后使用真实校验器 `scripts/validate-projection.ps1` / `scripts/validate-projection.py`
+- 包装入口只承载普通结构校验；如需 `-ReviewMode` / `--review-mode`，请切到 `src/OpenClaw.Gateway/skills/ontology_extraction/` 技能根目录后使用真实校验器 `scripts/validate-projection.ps1` / `scripts/validate-projection.py`
 - 主要用于 projection 进入 codegen、prompt orchestration 或 CI 前的结构自检
 
 ---
@@ -180,9 +180,9 @@ c:/python314/python.exe .\scripts\validate-ontology-projection.py .\projection-a
 
 | 入口 | 参数 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| PowerShell | `Paths` | `src/OpenClaw.Gateway/skills/software-developer/contracts/projections/ncrew-ontology/contract-index.json` | 一个或多个 `contract-index.json` 路径；不传时校验仓库内真实样例 |
+| PowerShell | `Paths` | `src/OpenClaw.Gateway/skills/software-developer/contracts/projections/ontology_extraction/contract-index.json` | 一个或多个 `contract-index.json` 路径；不传时校验仓库内真实样例 |
 | PowerShell | `-SchemaPath` | `docs/skill-projection-contract-index.schema.json` | 可选，显式指定 runtime contract index schema |
-| Python | `paths` | `src/OpenClaw.Gateway/skills/software-developer/contracts/projections/ncrew-ontology/contract-index.json` | 一个或多个 `contract-index.json` 路径；不传时校验仓库内真实样例 |
+| Python | `paths` | `src/OpenClaw.Gateway/skills/software-developer/contracts/projections/ontology_extraction/contract-index.json` | 一个或多个 `contract-index.json` 路径；不传时校验仓库内真实样例 |
 | Python | `--schema-path` | `docs/skill-projection-contract-index.schema.json` | 可选，显式指定 runtime contract index schema |
 
 **常用命令：**

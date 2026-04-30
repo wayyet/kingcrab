@@ -22,14 +22,14 @@ def main() -> int:
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parent.parent
-    validator_path = repo_root / "src" / "OpenClaw.Gateway" / "skills" / "ncrew-ontology" / "scripts" / "validate-projection.py"
+    validator_path = repo_root / "src" / "OpenClaw.Gateway" / "skills" / "ontology_extraction" / "scripts" / "validate-projection.py"
 
     if not validator_path.exists():
         raise FileNotFoundError(f"Validator script not found: {validator_path}")
 
     current_base = Path.cwd().resolve()
     default_schema_path = repo_root / "docs" / "skill-projection-contract-index.schema.json"
-    default_input_path = repo_root / "src" / "OpenClaw.Gateway" / "skills" / "software-developer" / "contracts" / "projections" / "ncrew-ontology" / "contract-index.json"
+    default_input_path = repo_root / "src" / "OpenClaw.Gateway" / "skills" / "software-developer" / "contracts" / "projections" / "ontology_extraction" / "contract-index.json"
 
     invoke_args = [
         sys.executable,

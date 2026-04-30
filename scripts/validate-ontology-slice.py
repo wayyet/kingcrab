@@ -15,14 +15,14 @@ def resolve_absolute_path(path_text: str, base_path: Path) -> Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Root-level wrapper for the ncrew-ontology slice validator."
+        description="Root-level wrapper for the ontology_extraction slice validator."
     )
     parser.add_argument("paths", nargs="*", help="Slice JSON paths to validate.")
     parser.add_argument("--schema-path", dest="schema_path", help="Optional schema path.")
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parent.parent
-    validator_path = repo_root / "src" / "OpenClaw.Gateway" / "skills" / "ncrew-ontology" / "scripts" / "validate-slice.py"
+    validator_path = repo_root / "src" / "OpenClaw.Gateway" / "skills" / "ontology_extraction" / "scripts" / "validate-slice.py"
 
     if not validator_path.exists():
         raise FileNotFoundError(f"Validator script not found: {validator_path}")
