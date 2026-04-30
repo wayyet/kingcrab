@@ -22,9 +22,9 @@ def main() -> int:
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parent.parent
-    validator_path = repo_root / "src" / "OpenClaw.Gateway" / "skills" / "ncrew-ontology" / "scripts" / "validate-projection.py"
+    validator_path = repo_root / "src" / "OpenClaw.Gateway" / "skills" / "ontology_extraction" / "scripts" / "validate-projection.py"
     default_schema_path = repo_root / "docs" / "skill-projection-document.schema.json"
-    default_input_path = repo_root / "src" / "OpenClaw.Gateway" / "skills" / "software-developer" / "contracts" / "projections" / "ncrew-ontology" / "skill-loading" / "skill-loading.domain-model.projection.json"
+    default_input_path = repo_root / "src" / "OpenClaw.Gateway" / "skills" / "software-developer" / "contracts" / "projections" / "ontology_extraction" / "skill-loading" / "skill-loading.domain-model.projection.json"
 
     if not validator_path.exists():
         raise FileNotFoundError(f"Validator script not found: {validator_path}")

@@ -55,7 +55,7 @@
 
 ### 1. Producer 侧：完成语义抽取与投影生成
 
-以 `ncrew-ontology` 为代表的 producer skill，其主要职责不是直接承担业务执行，而是负责：
+以 `ontology_extraction` 为代表的 producer skill，其主要职责不是直接承担业务执行，而是负责：
 
 - 从文档、schema、代码与样例中抽取最小语义闭包。
 - 将结果组织为结构化 slice。
@@ -182,7 +182,7 @@
 综合以上分析，可以将本阶段建设成果概括为以下几点：
 
 1. 已形成从 ontology 到 slice、从 slice 到 projection、从 projection 到 runtime consumption 的完整方法链路。
-2. `ncrew-ontology` 已从单一 skill 说明入口，演进为 producer 侧的语义治理入口。
+2. `ontology_extraction` 已从单一 skill 说明入口，演进为 producer 侧的语义治理入口。
 3. projection contracts 已从静态文档资产演进为 skill runtime 的正式控制面之一。
 4. loader 自动发现、request-time 路由、blocking checks、多 producer precedence 等关键机制已经构成一套可运行、可治理的工程框架。
 5. 当前体系的核心价值已不再是“生成文档”或“补充 JSON 文件”，而是在于将语义建模、契约交付、运行时路由与风险控制纳入同一条闭环治理链路。

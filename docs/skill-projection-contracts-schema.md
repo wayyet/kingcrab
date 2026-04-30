@@ -31,8 +31,8 @@
 
 当前真实样例位于：
 
-- `src/OpenClaw.Gateway/skills/software-developer/contracts/projections/ncrew-ontology/contract-index.json`
-- `src/OpenClaw.Gateway/skills/software-developer/contracts/projections/ncrew-ontology/task-execution/task-execution.prompt-constraint.projection.json`
+- `src/OpenClaw.Gateway/skills/software-developer/contracts/projections/ontology_extraction/contract-index.json`
+- `src/OpenClaw.Gateway/skills/software-developer/contracts/projections/ontology_extraction/task-execution/task-execution.prompt-constraint.projection.json`
 
 ## 2. 解析边界
 
@@ -93,7 +93,7 @@
 
 ```json
 {
-  "producer_skill": "ncrew-ontology",
+  "producer_skill": "ontology_extraction",
   "producer_priority": 100,
   "default_selection_policy": {
     "prefer_ready_only": true,
@@ -637,7 +637,7 @@
 
 ```json
 {
-  "producer_skill": "ncrew-ontology",
+  "producer_skill": "ontology_extraction",
   "producer_priority": 100,
   "default_selection_policy": {
     "prefer_ready_only": true,
@@ -863,7 +863,7 @@
 以当前真实样例为参照，路径会是：
 
 ```text
-src/OpenClaw.Gateway/skills/software-developer/contracts/projections/ncrew-ontology/
+src/OpenClaw.Gateway/skills/software-developer/contracts/projections/ontology_extraction/
   contract-index.json
   new-topic/
     new-topic.prompt-constraint.projection.json
@@ -919,7 +919,7 @@ src/OpenClaw.Gateway/skills/software-developer/contracts/projections/ncrew-ontol
 
 - 真实 `contract-index.json` 应引用 `docs/skill-projection-contract-index.schema.json`
 - 真实 `*.projection.json` 应引用 `docs/skill-projection-document.schema.json`
-- 不要继续引用 `ncrew-ontology/templates/PROJECTION_TEMPLATE.schema.json` 作为 runtime contract 的主校验入口
+- 不要继续引用 `ontology_extraction/templates/PROJECTION_TEMPLATE.schema.json` 作为 runtime contract 的主校验入口
 
 如果是新增 producer 目录，应优先检查相对路径层级是否正确，因为这类错误最容易在复制现有文件时引入。
 
@@ -939,21 +939,13 @@ src/OpenClaw.Gateway/skills/software-developer/contracts/projections/ncrew-ontol
 
 `contract-index.json`：
 
-```powershell
-# PowerShell
-.\scripts\validate-skill-projection-contract-index.ps1
-
-# Python
+```text
 c:/python314/python.exe .\scripts\validate-skill-projection-contract-index.py
 ```
 
 `*.projection.json`：
 
-```powershell
-# PowerShell
-.\scripts\validate-skill-projection-document.ps1
-
-# Python
+```text
 c:/python314/python.exe .\scripts\validate-skill-projection-document.py
 ```
 

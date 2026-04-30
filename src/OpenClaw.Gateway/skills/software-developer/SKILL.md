@@ -38,9 +38,9 @@ When asked to "write code", "fix a bug", "implement a feature", or act as a "dev
 
 ## Projection Contracts
 
-This skill may be augmented by bound `ncrew-ontology` projection contracts discovered under `contracts/projections/**/contract-index.json`.
+This skill may be augmented by bound `ontology_extraction` projection contracts discovered under `contracts/projections/**/contract-index.json`.
 
-- Use `../ncrew-ontology/templates/CONSUMER_SKILL_PROJECTION_SECTION.md` as the shared minimal template for consumer skills.
+- Use `../ontology_extraction/templates/CONSUMER_SKILL_PROJECTION_SECTION.md` as the shared minimal template for consumer skills.
 - Projection discovery, route selection, and prompt patching are handled by runtime rather than by manual rules in this file.
 - For human review, read `contract-index.json` first, then the selected topic's `README.md` and `REVIEW.md`, and then the chosen `*.projection.json` file.
 
@@ -65,7 +65,7 @@ This skill may be augmented by bound `ncrew-ontology` projection contracts disco
 
 ## References
 
-- `../ncrew-ontology/templates/CONSUMER_SKILL_PROJECTION_SECTION.md`: shared minimal `Projection Contracts` section
-- `../ncrew-ontology/templates/NEW_CONSUMER_SKILL_CHECKLIST.md`: post-copy checklist for trimming unsupported fields and placeholders
-- `../ncrew-ontology/references/PROJECTION_CONSUMPTION_GUIDE.md`: how consumer skills should consume projection contracts
-- `../ncrew-ontology/references/CONSUMER_PROJECTION_LAYOUT_GUIDE.md`: where to place local bound projection files
+- `../ontology_extraction/templates/CONSUMER_SKILL_PROJECTION_SECTION.md`: shared minimal `Projection Contracts` section
+- `../ontology_extraction/templates/NEW_CONSUMER_SKILL_CHECKLIST.md`: post-copy checklist for trimming unsupported fields and placeholders
+- `../ontology_extraction/references/PROJECTION_CONSUMPTION_GUIDE.md`: how consumer skills should consume projection contracts
+- `../ontology_extraction/references/CONSUMER_PROJECTION_LAYOUT_GUIDE.md`: where to place local bound projection files

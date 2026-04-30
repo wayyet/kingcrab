@@ -129,7 +129,7 @@ public sealed class ContractScopeHook : IToolHookWithContext
         => policy.ScopedCapabilities.Any(scope => scope.AllowedPaths.Length > 0);
 
     private static bool IsFilesystemAffectingTool(string toolName)
-        => toolName is "shell" or "code_exec" or "git" or "process" or "file_read" or "file_write" or "edit_file" or "apply_patch";
+        => toolName is "shell" or "code_exec" or "git" or "process" or "file_read" or "file_write" or "edit_file" or "apply_patch" or "ontology_ingest";
 
     private static bool IsPathAllowed(string path, string[] allowedPaths)
     {
@@ -172,6 +172,7 @@ public sealed class ContractScopeHook : IToolHookWithContext
                 "git" => TryReadStringList(root, "cwd", out paths),
                 "process" => TryReadProcessPaths(root, out paths),
                 "shell" => false,
+                "ontology_ingest" => TryReadOntologyIngestPaths(root, out paths),
                 "file_read" or "file_write" or "edit_file" or "apply_patch" => TryReadStringList(root, "path", out paths),
                 _ => TryReadStringList(root, "path", out paths)
             };
@@ -196,6 +197,49 @@ public sealed class ContractScopeHook : IToolHookWithContext
             return false;
 
         return TryReadStringList(root, "working_directory", out paths);
+    }
+
+    private static bool TryReadOntologyIngestPaths(JsonElement root, out IReadOnlyList<string> paths)
+    {
+        var collected = new List<string>();
+
+        if (root.TryGetProperty("ontology_dir", out var ontologyDir) && ontologyDir.ValueKind == JsonValueKind.String)
+        {
+            var value = ontologyDir.GetString();
+            if (!string.IsNullOrWhiteSpace(value))
+                collected.Add(ResolveOntologyScopePath(value!));
+        }
+        else
+        {
+            collected.Add(ResolveOntologyScopePath("ontology"));
+        }
+
+        if (root.TryGetProperty("paths", out var pathArray) && pathArray.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in pathArray.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.String)
+                    continue;
+
+                var value = item.GetString();
+                if (!string.IsNullOrWhiteSpace(value))
+                    collected.Add(OntologyIngestTool.ResolveInputPath(value!) ?? value!);
+            }
+        }
+
+        paths = collected;
+        return collected.Count > 0;
+    }
+
+    private static string ResolveOntologyScopePath(string path)
+    {
+        if (Path.IsPathRooted(path))
+            return Path.GetFullPath(path);
+
+        var workspace = Environment.GetEnvironmentVariable("OPENCLAW_WORKSPACE")
+            ?? Environment.GetEnvironmentVariable("OPENCLAW_WORKSPACE_ROOT")
+            ?? Directory.GetCurrentDirectory();
+        return Path.GetFullPath(Path.Combine(workspace, path));
     }
 
     private static bool TryReadStringList(JsonElement root, string propertyName, out IReadOnlyList<string> paths)

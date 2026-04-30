@@ -4,8 +4,8 @@
 
 相关文档：
 
-- [docs/ncrew-ontology-slice-to-skill-method.md](docs/ncrew-ontology-slice-to-skill-method.md)：从 `ncrew-ontology` skill 构建业务本体切片，并将本体切片应用到具体业务 Skill 的过程与方法。
-- [docs/ncrew-ontology-first-skill-practical-template.md](docs/ncrew-ontology-first-skill-practical-template.md)：从零为一个新业务 Skill 落第一份 slice、第一条 topic 和第一个 projection 的实操模板。
+- [docs/ontology_extraction-slice-to-skill-method.md](docs/ontology_extraction-slice-to-skill-method.md)：从 `ontology_extraction` skill 构建业务本体切片，并将本体切片应用到具体业务 Skill 的过程与方法。
+- [docs/ontology_extraction-first-skill-practical-template.md](docs/ontology_extraction-first-skill-practical-template.md)：从零为一个新业务 Skill 落第一份 slice、第一条 topic 和第一个 projection 的实操模板。
 
 ## 1. 背景与问题
 
@@ -316,11 +316,11 @@ view 评分来自 `TargetViewScoring`，主要维度包括：
 
 当前仓库里真实的 checked-in projection producer 入口为：
 
-- `src/OpenClaw.Gateway/skills/software-developer/contracts/projections/ncrew-ontology/contract-index.json`
+- `src/OpenClaw.Gateway/skills/software-developer/contracts/projections/ontology_extraction/contract-index.json`
 
 它目前已经具备：
 
-- `producer_skill: "ncrew-ontology"`
+- `producer_skill: "ontology_extraction"`
 - `producer_priority: 100`
 
 也就是说，当前真实 contract 已经能参与多 producer precedence 选择，而不只是测试里的模型样例。
