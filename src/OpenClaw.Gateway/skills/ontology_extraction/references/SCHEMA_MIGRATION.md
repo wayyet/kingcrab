@@ -9,10 +9,10 @@
 - `../templates/TEMPLATE.json`：slice 模板
 - `../templates/PROJECTION_TEMPLATE.json`：projection 模板
 - `../examples/ready/`、`../examples/warning/`、`../examples/invalid/`：内置三态样例
-- `../scripts/validate-slice.ps1`：技能根目录内的 slice 真实校验器
-- `../scripts/validate-projection.ps1`：技能根目录内的 projection 真实校验器
-- `scripts/validate-ontology-slice.ps1`：仓库根目录 slice 包装入口
-- `scripts/validate-ontology-projection.ps1`：仓库根目录 projection 包装入口
+- `../scripts/validate-slice.py`：技能根目录内的 slice 真实校验器
+- `../scripts/validate-projection.py`：技能根目录内的 projection 真实校验器
+- `scripts/validate-ontology-slice.py`：仓库根目录 slice 包装入口
+- `scripts/validate-ontology-projection.py`：仓库根目录 projection 包装入口
 - `./FIELD_GUIDE.md`：slice 字段语义说明
 - `./REVIEW_CHECKLIST.md`：slice 与 projection 统一评审标准
 
@@ -103,8 +103,8 @@ slice schema 与 projection schema 是两条独立版本线。不要因为 proje
 
 - 版本变化是否真的来自结构变化，而不是文档变化。
 - 模板、样例、校验脚本和 README 是否已经同步。
-- 技能根目录内 `validate-slice.ps1` 和 `validate-projection.ps1` 的默认样例是否仍能通过。
-- 如需从仓库根目录做普通结构校验，`validate-ontology-slice.ps1` 和 `validate-ontology-projection.ps1` 的默认入口是否仍能通过。
+- 技能根目录内 `validate-slice.py` 和 `validate-projection.py` 的默认样例是否仍能通过。
+- 如需从仓库根目录做普通结构校验，`validate-ontology-slice.py` 和 `validate-ontology-projection.py` 的默认入口是否仍能通过。
 - warning / invalid 样例是否仍保留各自的预期定位。
 - review 文档是否已反映新版本的字段口径和迁移边界。
 - 下游 codegen / prompt orchestration 是否仍能读懂新的 projection 结构。

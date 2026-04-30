@@ -58,10 +58,10 @@
 
 ```powershell
 # slice
-.\scripts\validate-ontology-slice.ps1
+.\scripts\validate-ontology-slice.py
 
 # projection template output
-.\scripts\validate-ontology-projection.ps1
+.\scripts\validate-ontology-projection.py
 ```
 
 此阶段的目标不是让 runtime 直接消费，而是确保：
@@ -106,8 +106,8 @@ producer projection 合法后，不要直接整份复制到 consumer 目录。�
 团队评审前至少执行下面两条命令：
 
 ```powershell
-.\scripts\validate-skill-projection-contract-index.ps1
-.\scripts\validate-skill-projection-document.ps1
+.\scripts\validate-skill-projection-contract-index.py
+.\scripts\validate-skill-projection-document.py
 ```
 
 它们对应的固定职责是：

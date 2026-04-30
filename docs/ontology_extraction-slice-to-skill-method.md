@@ -105,8 +105,8 @@ producer 侧的判断标准是：
 
 - `templates/TEMPLATE.json`
 - `templates/TEMPLATE.schema.json`
-- `src/OpenClaw.Gateway/skills/ontology_extraction/scripts/validate-slice.ps1` / `validate-slice.py`：技能根目录内真实校验器
-- `scripts/validate-ontology-slice.ps1` / `validate-ontology-slice.py`：仓库根目录包装入口
+- `src/OpenClaw.Gateway/skills/ontology_extraction/scripts/validate-slice.py`：技能根目录内真实校验器
+- `scripts/validate-ontology-slice.py`：仓库根目录包装入口
 - `examples/ready|warning|invalid`
 
 这一步的目标是两件事：
@@ -385,7 +385,7 @@ projection 写完后，不应直接落到 consumer skill 目录中。先过结�
 - 必填映射区块没有缺项。
 - 编辑器诊断和本地校验脚本结果一致。
 
-在当前仓库中，这一步应按所在层级选择入口：在 `ontology_extraction` 技能根目录优先使用 `validate-projection.ps1` 或 `validate-projection.py`；如果从仓库根目录执行，则使用 `validate-ontology-projection.ps1` 或 `validate-ontology-projection.py`。如有需要，也可以在技能根目录配合 review mode 判断它现在更接近 `READY` 还是 `WARNING`。
+在当前仓库中，这一步应按所在层级选择入口：在 `ontology_extraction` 技能根目录优先使用 `validate-projection.py`；如果从仓库根目录执行，则使用 `validate-ontology-projection.py`。如有需要，也可以在技能根目录配合 review mode 判断它现在更接近 `READY` 还是 `WARNING`。
 
 这一步的目的不是证明 projection “已经完美”，而是确保它至少已经从“草稿猜想”变成“结构合法、可继续 review、可进入 consumer contract”的产物。
 

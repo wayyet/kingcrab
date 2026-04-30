@@ -137,11 +137,14 @@ public sealed class OntologyIngestTool : ITool
                 continue;
             }
 
-            if (NodesEquivalent(existing, node))
+            var nodeToWrite = MergeEquivalentNodeProvenance(existing, node);
+            if (NodesEquivalent(existing, nodeToWrite))
                 continue;
 
-            ArchiveNode(existing.FilePath, archiveDir, "modified");
-            await WriteNodeAsync(destinationPath, node, ct);
+            if (!HasEquivalentGeneratedContent(existing, nodeToWrite))
+                ArchiveNode(existing.FilePath, archiveDir, "modified");
+
+            await WriteNodeAsync(destinationPath, nodeToWrite, ct);
             modified.Add(node.Name);
         }
 
@@ -181,9 +184,37 @@ public sealed class OntologyIngestTool : ITool
     }
 
     private static bool NodesEquivalent(ExistingNode existing, PersistedOntologyNode current)
-        => string.Equals(existing.Name, current.Name, StringComparison.Ordinal)
-        && string.Equals(existing.Content, current.Content, StringComparison.Ordinal)
-        && existing.GeneratedByTool;
+        => HasEquivalentGeneratedContent(existing, current)
+        && SetEquals(existing.SourceOriginKeys, current.SourceOriginKeys)
+        && SetEquals(existing.SourceFiles, current.SourceFiles);
+
+    private static bool HasEquivalentGeneratedContent(ExistingNode existing, PersistedOntologyNode current)
+        => existing.GeneratedByTool
+        && string.Equals(existing.Name, current.Name, StringComparison.Ordinal)
+        && string.Equals(existing.Content, current.Content, StringComparison.Ordinal);
+
+    private static PersistedOntologyNode MergeEquivalentNodeProvenance(ExistingNode existing, PersistedOntologyNode current)
+    {
+        if (!HasEquivalentGeneratedContent(existing, current))
+            return current;
+
+        return current with
+        {
+            SourceOriginKeys = MergeValues(existing.SourceOriginKeys, current.SourceOriginKeys),
+            SourceFiles = MergeValues(existing.SourceFiles, current.SourceFiles)
+        };
+    }
+
+    private static IReadOnlyList<string> MergeValues(IReadOnlyList<string> existing, IReadOnlyList<string> current)
+        => existing
+            .Concat(current)
+            .Where(static item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static item => item, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+    private static bool SetEquals(IReadOnlyList<string> existing, IReadOnlyList<string> current)
+        => existing.ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(current);
 
     private static async Task WriteNodeAsync(string destinationPath, PersistedOntologyNode node, CancellationToken ct)
     {
@@ -253,6 +284,7 @@ public sealed class OntologyIngestTool : ITool
             var generatedByTool = false;
             var name = slug;
             var sourceOriginKeys = Array.Empty<string>();
+            var sourceFiles = Array.Empty<string>();
             var nodeContent = content;
 
             if (file.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
@@ -279,6 +311,16 @@ public sealed class OntologyIngestTool : ITool
                             .Select(static item => item!)
                             .ToArray();
                     }
+                    if (root.TryGetProperty("source_files", out var sourceFilesProp) && sourceFilesProp.ValueKind == JsonValueKind.Array)
+                    {
+                        sourceFiles = sourceFilesProp
+                            .EnumerateArray()
+                            .Where(static item => item.ValueKind == JsonValueKind.String)
+                            .Select(static item => item.GetString())
+                            .Where(static item => !string.IsNullOrWhiteSpace(item))
+                            .Select(static item => item!)
+                            .ToArray();
+                    }
                 }
                 catch
                 {
@@ -286,7 +328,7 @@ public sealed class OntologyIngestTool : ITool
                 }
             }
 
-            result[slug] = new ExistingNode(file, slug, name, nodeContent, generatedByTool, sourceOriginKeys);
+            result[slug] = new ExistingNode(file, slug, name, nodeContent, generatedByTool, sourceOriginKeys, sourceFiles);
         }
 
         return result;
@@ -847,7 +889,7 @@ public sealed class OntologyIngestTool : ITool
         public long ExpandedBytes { get; set; }
     }
 
-    private sealed record ExistingNode(string FilePath, string Slug, string Name, string Content, bool GeneratedByTool, IReadOnlyList<string> SourceOriginKeys);
+    private sealed record ExistingNode(string FilePath, string Slug, string Name, string Content, bool GeneratedByTool, IReadOnlyList<string> SourceOriginKeys, IReadOnlyList<string> SourceFiles);
 
     private sealed record PersistedOntologyNode(
         string GeneratedBy,

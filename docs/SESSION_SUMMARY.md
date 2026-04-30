@@ -41,8 +41,8 @@
 - `templates/TEMPLATE.schema.json`：严格结构校验规则
 - `references/FIELD_GUIDE.md`：字段语义和填报口径
 - `examples/ready|warning|invalid/`：三态样例链路
-- `src/OpenClaw.Gateway/skills/ontology_extraction/scripts/validate-slice.ps1`：技能根目录内真实校验器，本地校验与 review 辅助入口
-- `scripts/validate-ontology-slice.ps1`：仓库根目录包装入口，适合从仓库根目录或任意当前目录发起普通结构校验
+- `src/OpenClaw.Gateway/skills/ontology_extraction/scripts/validate-slice.py`：技能根目录内真实校验器，本地校验与 review 辅助入口
+- `scripts/validate-ontology-slice.py`：仓库根目录包装入口，适合从仓库根目录或任意当前目录发起普通结构校验
 
 这一步的价值，在于把“切片”从一个容易凭经验乱写的动作，收敛成一个有输入边界、有结构合同、有人工 review 入口的标准交付物。
 
@@ -66,8 +66,8 @@
 - `templates/PROJECTION_TEMPLATE.json`
 - `templates/PROJECTION_TEMPLATE.schema.json`
 - `references/DOWNSTREAM_MAPPING_GUIDE.md`
-- `src/OpenClaw.Gateway/skills/ontology_extraction/scripts/validate-projection.ps1`：技能根目录内真实 projection 校验器
-- `scripts/validate-ontology-projection.ps1`：仓库根目录 projection 包装入口
+- `src/OpenClaw.Gateway/skills/ontology_extraction/scripts/validate-projection.py`：技能根目录内真实 projection 校验器
+- `scripts/validate-ontology-projection.py`：仓库根目录 projection 包装入口
 - `examples/ready|warning|invalid/*-projection.*`
 
 这一步的本质，是把原本容易“拍脑袋下放”的 downstream mapping，变成一套可追溯、可解释、可校验的显式过程。
@@ -184,7 +184,7 @@
 - `TEMPLATE.schema.json`
 - `FIELD_GUIDE.md`
 - slice 三态样例
-- `validate-slice.ps1` / `validate-ontology-slice.ps1`：分别对应技能根目录真实校验器与仓库根目录包装入口
+- `validate-slice.py`：分别对应技能根目录真实校验器与仓库根目录包装入口
 
 ### 3. Projection 定义层
 
@@ -192,7 +192,7 @@
 - `PROJECTION_TEMPLATE.schema.json`
 - `DOWNSTREAM_MAPPING_GUIDE.md`
 - projection 三态样例
-- `validate-projection.ps1` / `validate-ontology-projection.ps1`：分别对应技能根目录真实校验器与仓库根目录包装入口
+- `validate-projection.py`：分别对应技能根目录真实校验器与仓库根目录包装入口
 
 ### 4. Review 与流程治理层
 

@@ -18,8 +18,8 @@
 
 这份清单的目标不是替代 schema 校验器，而是给团队补上人工评审层。推荐做法是先跑结构校验器，再用本清单做人工评审：
 
-- 如果当前目录位于 `ontology_extraction` 技能根目录内：slice 校验使用 `../scripts/validate-slice.ps1`，projection 校验使用 `../scripts/validate-projection.ps1`
-- 如果从仓库根目录执行普通结构校验：slice 使用 `scripts/validate-ontology-slice.ps1`，projection 使用 `scripts/validate-ontology-projection.ps1`
+- 如果当前目录位于 `ontology_extraction` 技能根目录内：slice 校验使用 `../scripts/validate-slice.py`，projection 校验使用 `../scripts/validate-projection.py`
+- 如果从仓库根目录执行普通结构校验：slice 使用 `scripts/validate-ontology-slice.py`，projection 使用 `scripts/validate-ontology-projection.py`
 
 ---
 
@@ -222,9 +222,9 @@
 
 ### Slice ReviewMode
 
-`../scripts/validate-slice.ps1 -ReviewMode` 会在结构校验结果后，额外输出 `READY / WARNING / FAIL`。
+`../scripts/validate-slice.py --review-mode` 会在结构校验结果后，额外输出 `READY / WARNING / FAIL`。
 
-如果从仓库根目录执行，`scripts/validate-ontology-slice.ps1` 只承载普通结构校验入口，不暴露 `-ReviewMode`。
+如果从仓库根目录执行，`scripts/validate-ontology-slice.py` 只承载普通结构校验入口，不暴露 `--review-mode`。
 
 当前用途：快速分流，不替代人工评审。
 
@@ -244,9 +244,9 @@
 
 ### Projection ReviewMode
 
-`../scripts/validate-projection.ps1 -ReviewMode` 会在结构校验结果后，额外输出 `READY / WARNING / FAIL`。
+`../scripts/validate-projection.py --review-mode` 会在结构校验结果后，额外输出 `READY / WARNING / FAIL`。
 
-如果从仓库根目录执行，`scripts/validate-ontology-projection.ps1` 只承载普通结构校验入口，不暴露 `-ReviewMode`。
+如果从仓库根目录执行，`scripts/validate-ontology-projection.py` 只承载普通结构校验入口，不暴露 `--review-mode`。
 
 当前用途：快速分流 projection 风险，不替代 projection review。
 

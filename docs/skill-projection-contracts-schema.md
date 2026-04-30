@@ -939,21 +939,13 @@ src/OpenClaw.Gateway/skills/software-developer/contracts/projections/ontology_ex
 
 `contract-index.json`：
 
-```powershell
-# PowerShell
-.\scripts\validate-skill-projection-contract-index.ps1
-
-# Python
+```text
 c:/python314/python.exe .\scripts\validate-skill-projection-contract-index.py
 ```
 
 `*.projection.json`：
 
-```powershell
-# PowerShell
-.\scripts\validate-skill-projection-document.ps1
-
-# Python
+```text
 c:/python314/python.exe .\scripts\validate-skill-projection-document.py
 ```
 

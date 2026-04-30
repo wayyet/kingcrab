@@ -16,18 +16,18 @@
 ## 使用方式
 
 ```powershell
-..\..\scripts\validate-projection.ps1 .\warning-projection.json -ReviewMode
+..\..\scripts\validate-projection.py .\warning-projection.json --review-mode
 ```
 
-上面的命令适用于当前目录位于 `ontology_extraction` 技能根目录内，调用的是支持 `-ReviewMode` 的真实校验器。
+上面的命令适用于当前目录位于 `ontology_extraction` 技能根目录内，调用的是支持 `--review-mode` 的真实校验器。
 
 如果从仓库根目录执行：
 
 ```powershell
-.\scripts\validate-ontology-projection.ps1 .\src\OpenClaw.Gateway\skills\ontology_extraction\examples\warning\warning-projection.json
+.\scripts\validate-ontology-projection.py .\src\OpenClaw.Gateway\skills\ontology_extraction\examples\warning\warning-projection.json
 ```
 
-仓库根目录包装入口只承载普通结构校验，不暴露 `-ReviewMode`。
+仓库根目录包装入口只承载普通结构校验，不暴露 `--review-mode`。
 
 ---
 

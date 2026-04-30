@@ -161,6 +161,33 @@ public sealed class OntologyIngestToolTests
         Assert.False(string.IsNullOrWhiteSpace(content));
     }
 
+    [Fact]
+    public async Task ExecuteAsync_MergesProvenanceWhenSameContentArrivesFromDifferentSources()
+    {
+        var root = CreateTempDir();
+        var sourceA = Path.Combine(root, "a", "shared.md");
+        var sourceB = Path.Combine(root, "b", "shared.md");
+        Directory.CreateDirectory(Path.GetDirectoryName(sourceA)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(sourceB)!);
+        await File.WriteAllTextAsync(sourceA, "# Shared\nsame content", CancellationToken.None);
+        await File.WriteAllTextAsync(sourceB, "# Shared\nsame content", CancellationToken.None);
+
+        var tool = CreateTool(root);
+        await tool.ExecuteAsync(ToJson(new { paths = new[] { sourceA } }), CancellationToken.None);
+        var result = await tool.ExecuteAsync(ToJson(new { paths = new[] { sourceB } }), CancellationToken.None);
+
+        Assert.Contains("修改: Shared", result, StringComparison.Ordinal);
+
+        var nodePath = Path.Combine(root, "ontology", "shared.json");
+        using var json = JsonDocument.Parse(await File.ReadAllTextAsync(nodePath, CancellationToken.None));
+        var sourceFiles = json.RootElement.GetProperty("source_files").EnumerateArray().Select(item => item.GetString()).ToArray();
+        var sourceOriginKeys = json.RootElement.GetProperty("source_origin_keys").EnumerateArray().Select(item => item.GetString()).ToArray();
+
+        Assert.Contains(sourceA, sourceFiles);
+        Assert.Contains(sourceB, sourceFiles);
+        Assert.Equal(2, sourceOriginKeys.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+    }
+
     private static OntologyIngestTool CreateTool(string root)
         => new(new ToolingConfig
         {

@@ -13,18 +13,18 @@
 ## 使用方式
 
 ```powershell
-..\..\scripts\validate-slice.ps1 .\sample.json -ReviewMode
+..\..\scripts\validate-slice.py .\sample.json --review-mode
 ```
 
-上面的命令适用于当前目录位于 `ontology_extraction` 技能根目录内，调用的是支持 `-ReviewMode` 的真实校验器。
+上面的命令适用于当前目录位于 `ontology_extraction` 技能根目录内，调用的是支持 `--review-mode` 的真实校验器。
 
 如果从仓库根目录执行普通结构校验：
 
 ```powershell
-.\scripts\validate-ontology-slice.ps1 .\src\OpenClaw.Gateway\skills\ontology_extraction\examples\ready\sample.json
+.\scripts\validate-ontology-slice.py .\src\OpenClaw.Gateway\skills\ontology_extraction\examples\ready\sample.json
 ```
 
-仓库根目录包装入口只承载普通结构校验，不暴露 `-ReviewMode`。
+仓库根目录包装入口只承载普通结构校验，不暴露 `--review-mode`。
 
 ## 结构层表现
 
@@ -289,7 +289,7 @@
 如果运行下面这条命令：
 
 ```powershell
-..\..\scripts\validate-slice.ps1 .\sample.json -ReviewMode
+..\..\scripts\validate-slice.py .\sample.json --review-mode
 ```
 
 脚本会给出 `Heuristic verdict: READY`。对内置样例来说，这个结果首先是一个约定：`sample.json` 被当作 ready baseline，用于表达“什么叫结构和语义都基本过关”。

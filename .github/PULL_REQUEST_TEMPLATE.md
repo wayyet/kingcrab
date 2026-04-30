@@ -22,10 +22,10 @@
 
 ## Validation
 
-- [ ] I ran the producer slice validator when producer slice output changed: from repo root `./scripts/validate-ontology-slice.ps1` or Python equivalent, or from `src/OpenClaw.Gateway/skills/ontology_extraction/` the real `validate-slice` script.
-- [ ] I ran the producer projection validator when producer projection output changed: from repo root `./scripts/validate-ontology-projection.ps1` or Python equivalent, or from `src/OpenClaw.Gateway/skills/ontology_extraction/` the real `validate-projection` script.
-- [ ] I ran `./scripts/validate-skill-projection-contract-index.ps1` or the Python equivalent when runtime contract indexes changed.
-- [ ] I ran `./scripts/validate-skill-projection-document.ps1` or the Python equivalent when runtime projection contracts changed.
+- [ ] I ran the producer slice validator when producer slice output changed: from repo root `./scripts/validate-ontology-slice.py`, or from `src/OpenClaw.Gateway/skills/ontology_extraction/` the real `validate-slice.py` script.
+- [ ] I ran the producer projection validator when producer projection output changed: from repo root `./scripts/validate-ontology-projection.py`, or from `src/OpenClaw.Gateway/skills/ontology_extraction/` the real `validate-projection.py` script.
+- [ ] I ran `./scripts/validate-skill-projection-contract-index.py` when runtime contract indexes changed.
+- [ ] I ran `./scripts/validate-skill-projection-document.py` when runtime projection contracts changed.
 - [ ] If loader or resolver behavior changed, I also ran the relevant focused tests.
 
 ## Runtime Consumption Check

@@ -210,6 +210,94 @@ def get_raw_object_value(obj: Any, property_name: str) -> Any:
     return None
 
 
+def get_string_set(items: Any, property_name: str) -> set[str]:
+    result: set[str] = set()
+    for item in get_list_items(items):
+        if not isinstance(item, dict):
+            continue
+        value = item.get(property_name)
+        if isinstance(value, str) and value:
+            result.add(value)
+    return result
+
+
+def validate_known_ids(parsed_json: Any, validation_issues: list[str]) -> None:
+    if not isinstance(parsed_json, dict):
+        return
+
+    source_ids = get_string_set(parsed_json.get("sources"), "id")
+    concept_ids = get_string_set(parsed_json.get("concepts"), "id")
+    relation_ids = get_string_set(parsed_json.get("relations"), "id")
+    constraint_ids = get_string_set(parsed_json.get("constraints"), "id")
+
+    def require_known(values: Any, known: set[str], path: str, kind: str) -> None:
+        for index, value in enumerate(get_list_items(values)):
+            if isinstance(value, str) and value not in known:
+                add_validation_error(validation_issues, f"{path}[{index}]", f"references unknown {kind} '{value}'")
+
+    for index, conflict in enumerate(get_list_items(parsed_json.get("conflicts"))):
+        if isinstance(conflict, dict):
+            require_known(conflict.get("source_ids"), source_ids, f"$.conflicts[{index}].source_ids", "source id")
+
+    for index, include in enumerate(get_list_items(get_raw_object_value(parsed_json.get("scope"), "include"))):
+        if not isinstance(include, dict):
+            continue
+        item_type = include.get("type")
+        item_id = include.get("id")
+        if not isinstance(item_id, str):
+            continue
+        if item_type == "concept" and item_id not in concept_ids:
+            add_validation_error(validation_issues, f"$.scope.include[{index}].id", f"references unknown concept id '{item_id}'")
+        if item_type == "relation" and item_id not in relation_ids:
+            add_validation_error(validation_issues, f"$.scope.include[{index}].id", f"references unknown relation id '{item_id}'")
+        if item_type == "constraint" and item_id not in constraint_ids:
+            add_validation_error(validation_issues, f"$.scope.include[{index}].id", f"references unknown constraint id '{item_id}'")
+
+    for index, concept in enumerate(get_list_items(parsed_json.get("concepts"))):
+        if not isinstance(concept, dict):
+            continue
+        parent_id = concept.get("parent_concept_id")
+        if isinstance(parent_id, str) and parent_id not in concept_ids:
+            add_validation_error(validation_issues, f"$.concepts[{index}].parent_concept_id", f"references unknown concept id '{parent_id}'")
+        require_known(concept.get("source_ids"), source_ids, f"$.concepts[{index}].source_ids", "source id")
+
+    for index, relation in enumerate(get_list_items(parsed_json.get("relations"))):
+        if not isinstance(relation, dict):
+            continue
+        subject_id = relation.get("subject_concept_id")
+        object_id = relation.get("object_concept_id")
+        if isinstance(subject_id, str) and subject_id not in concept_ids:
+            add_validation_error(validation_issues, f"$.relations[{index}].subject_concept_id", f"references unknown concept id '{subject_id}'")
+        if isinstance(object_id, str) and object_id not in concept_ids:
+            add_validation_error(validation_issues, f"$.relations[{index}].object_concept_id", f"references unknown concept id '{object_id}'")
+        require_known(relation.get("source_ids"), source_ids, f"$.relations[{index}].source_ids", "source id")
+
+    for index, constraint in enumerate(get_list_items(parsed_json.get("constraints"))):
+        if not isinstance(constraint, dict):
+            continue
+        applies_to = constraint.get("applies_to")
+        require_known(get_raw_object_value(applies_to, "concept_ids"), concept_ids, f"$.constraints[{index}].applies_to.concept_ids", "concept id")
+        require_known(get_raw_object_value(applies_to, "relation_ids"), relation_ids, f"$.constraints[{index}].applies_to.relation_ids", "relation id")
+        require_known(constraint.get("source_ids"), source_ids, f"$.constraints[{index}].source_ids", "source id")
+
+    for index, mapping in enumerate(get_list_items(parsed_json.get("term_mappings"))):
+        if not isinstance(mapping, dict):
+            continue
+        require_known(mapping.get("candidate_concept_ids"), concept_ids, f"$.term_mappings[{index}].candidate_concept_ids", "concept id")
+        selected_id = mapping.get("selected_concept_id")
+        if isinstance(selected_id, str) and selected_id not in concept_ids:
+            add_validation_error(validation_issues, f"$.term_mappings[{index}].selected_concept_id", f"references unknown concept id '{selected_id}'")
+
+    handoff = get_raw_object_value(parsed_json.get("meta"), "handoff")
+    if isinstance(handoff, dict):
+        todo_ids = set(value for value in get_list_items(handoff.get("todo_ids")) if isinstance(value, str))
+        result_ids = get_string_set(handoff.get("todos"), "id")
+        for todo_id in sorted(todo_ids - result_ids):
+            add_validation_error(validation_issues, "$.meta.handoff.todos", f"missing handoff todo '{todo_id}' listed in todo_ids")
+        for todo_id in sorted(result_ids - todo_ids):
+            add_validation_error(validation_issues, "$.meta.handoff.todo_ids", f"missing todo id '{todo_id}' listed in todos")
+
+
 def get_heuristic_review_verdict(structure_passed: bool, parsed_json: Any, resolved_input_path: Path) -> ReviewVerdict:
     result = ReviewVerdict(label="FAIL", basis=[])
 
@@ -358,6 +446,8 @@ def main() -> int:
 
         validation_issues: list[str] = []
         test_schema_node(parsed_json, schema_root, schema_root, "$", validation_issues)
+        if not validation_issues:
+            validate_known_ids(parsed_json, validation_issues)
 
         if not validation_issues:
             print(f"[PASS] {display_path}")

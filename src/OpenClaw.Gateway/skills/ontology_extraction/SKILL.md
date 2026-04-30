@@ -58,44 +58,82 @@ Markdown 可先用 `templates/TEMPLATE.md` 草拟，但交付前必须同步落�
 
 ## Employment Coach Handoff Contract
 
-当本 skill 由 `employment-coach-conversation` 通过 `<dispatch>` 调起时，输入是一组 `target_skill: ontology_extraction` 的 material handoff todos。每条 todo 至少包含：
+当本 skill 由 `employment-coach-conversation` 通过 `<dispatch target=ontology_extraction>` 调起时，输入是一组阶段一 material handoff todos。优先按 handoff todo 处理，不要把它当普通会话描述重新追问或重新归类。
+
+输入形态：
 
 ```yaml
-id: <stable todo id>
-intent: <给用户读的一句话目标>
-category: <业务对象定义 | 决策规则 | 流程 SOP | 案例库 | 边界与约束 | 风格语料 | 其他>
-payload:
-  objective: <从这些资料里抽什么>
-  source_files: [<上传文件或沙箱可读路径>]
-  scene_hint: <客服 | 销售 | 内勤 | 营销 | 法务 | 技术 | 模糊>
-  mode: incremental | full_replace
-acceptance: <完成后如何判定通过>
+dispatch:
+  target: ontology_extraction
+  todos: [m_cs_nonstandard_rules_001, m_cs_dialogue_style_001]
+  mode: incremental
+
+handoff_todos:
+  - id: m_cs_nonstandard_rules_001
+    stage: material
+    target_skill: ontology_extraction
+    intent: 抽出非标退货场景的判定规则与处置路径
+    category: 决策规则
+    payload:
+      objective: 抽取《非标退货处理规则》里的判定条件、处置档位、分流到经理的触发条件
+      source_files: [非标退货处理规则.docx]
+      scene_hint: customer_service
+      mode: incremental
+    source: 用户上传《非标退货处理规则.docx》并说明先处理这批资料
+    acceptance: ontology 中包含退货判定条件、处置档位和人工分流触发节点，并给出 slice 文件
+    status: ready_to_dispatch
 ```
 
 处理规则：
 
-1. 按 todo 的 `payload.source_files` 收集上传资料；文件路径可能来自沙箱上传通道，也可能是系统解析后的可读路径。
-2. 先调用 `ontology_ingest` 写入当前沙箱 `ontology/`。`incremental` 只移除同源文件本轮消失的旧节点；`full_replace` 会归档并移除 `ontology_ingest` 生成的旧节点，再保留本轮抽出的节点。非 `ontology_ingest` 生成的人工文件不作为 full replace 的删除对象。
-3. `ontology_ingest` 产出的 `ontology/*.json` 节点只是资料入库结果，不等同于最终 ontology slice。后续仍必须围绕 todo 的 `objective`、`category`、`scene_hint` 和 `acceptance` 构造最小可验证 slice。
-4. 每条 todo 产出的 slice 必须同时落盘 `.md` 与 `.json`，并在 `sources` 中回指本轮资料、ingest 节点或其他权威来源。
-5. 如果多个 todo 属于同一业务主题，可以合并为一份 slice，但必须在 `meta.notes` 或人读版中列出覆盖的 todo id，避免回传时无法确认。
+1. 入口先校验 dispatch target 与 todo 范围：只处理本次 `dispatch.todos` 中存在、且 `stage: material`、`target_skill: ontology_extraction`、`status: ready_to_dispatch | dirty` 的 todo。
+2. `drafting`、`dispatched`、`confirmed`、`needs_review`、`dismissed` 或 stage / target_skill 不匹配的 todo 不得落盘正式 slice；必须在 `todo_results` 中标为 `skipped` 或 `failed`，并给出可读原因。
+3. 每条 todo 必须保留 `id`、`intent`、`category`、`payload`、`source`、`acceptance` 和 `status`；`source` 与 `acceptance` 必须进入 slice 的来源说明、`meta.notes` 或人读版，方便上游确认。
+4. 按 todo 的 `payload.source_files` 收集上传资料；文件路径可能来自沙箱上传通道，也可能是系统解析后的可读路径。
+5. 先调用 `ontology_ingest` 写入当前沙箱 `ontology/`。`payload.mode` 优先，缺失时使用 dispatch `mode`，仍缺失时默认为 `incremental`。`incremental` 只移除同源文件本轮消失的旧节点；`full_replace` 会归档并移除 `ontology_ingest` 生成的旧节点，再保留本轮抽出的节点。非 `ontology_ingest` 生成的人工文件不作为 full replace 的删除对象。
+6. `ontology_ingest` 产出的 `ontology/*.json` 节点只是资料入库结果，不等同于最终 ontology slice。后续仍必须围绕 todo 的 `objective`、`category`、`scene_hint`、`source` 和 `acceptance` 构造最小可验证 slice。
+7. 每条 todo 产出的 slice 必须同时落盘 `.md` 与 `.json`，并在 `sources` 中回指本轮资料、ingest 节点或其他权威来源。
+8. 如果多个 todo 属于同一业务主题，可以合并为一份 slice，但必须在 `meta.notes`、人读版和回传 `todo_results[].artifacts` 中列出覆盖的 todo id，避免回传时无法逐条确认。
 
-回传给主 skill 时输出结构化摘要，至少包含：
+回传给主 skill 时输出 `dispatch_callback` 兼容结构化摘要，必须支持批量 todo 的部分成功 / 部分失败：
 
-```json
-{
-  "technical_artifact": {
-    "todo_ids": ["m_example_001"],
-    "ontology_dir": "ontology",
-    "slice_files": ["ontology/<topic>.slice.json", "ontology/<topic>.slice.md"],
-    "ingest_summary": "新增 / 修改 / 移除 摘要",
-    "validation": "PASS | WARNING | FAIL"
-  },
-  "user_summary": "已从这批资料中抽出若干业务对象、判定规则和约束；结果已写入 ontology，并标出仍需确认的边界。"
-}
+```yaml
+dispatch_callback:
+  source_dispatch_target: ontology_extraction
+  todo_ids: [m_cs_nonstandard_rules_001, m_cs_dialogue_style_001]
+  user_summary: 已从这批资料中抽出退货判定条件、处置档位和话术风格特征；结果已写入 ontology，并标出仍需确认的边界。
+  technical_artifact:
+    ontology_dir: ontology
+    ingest_summary: 新增 / 修改 / 移除 摘要
+    validation: PASS | WARNING | FAIL
+  artifacts:
+    - path: ontology/return-policy.slice.json
+      kind: ontology_slice_json
+    - path: ontology/return-policy.slice.md
+      kind: ontology_slice_markdown
+  todo_results:
+    - todo_id: m_cs_nonstandard_rules_001
+      status: success | warning | failed | skipped
+      validation: PASS | WARNING | FAIL
+      artifacts:
+        - path: ontology/return-policy.slice.json
+          kind: ontology_slice_json
+        - path: ontology/return-policy.slice.md
+          kind: ontology_slice_markdown
+      ingest_summary: 新增 / 修改 / 移除 摘要
+      errors: []
+    - todo_id: m_cs_dialogue_style_001
+      status: failed
+      validation: FAIL
+      artifacts: []
+      ingest_summary: 无
+      errors:
+        - 来源文件无法读取，或资料不足以支撑该 todo 的 acceptance
+  status: success | partial | failed
+  errors: []
 ```
 
-`user_summary` 必须能被雇佣教练用一两句话复述给业务用户；不要只返回文件列表。若 schema 校验失败或来源不足以支撑结论，`technical_artifact.validation` 标为 `FAIL` 或 `WARNING`，并在 `user_summary` 中说明需要补什么。
+`user_summary` 必须能被雇佣教练用一两句话复述给业务用户；不要只返回文件列表。`todo_results` 必须覆盖本次 dispatch 的每个 todo id，让主 skill 能单独确认成功项、重发 dirty / failed 项，或跳过不合法项。若 schema 校验失败、来源不足以支撑结论，或某条 todo 的 `acceptance` 未达成，对应 `todo_results[].validation` 标为 `FAIL` 或 `WARNING`，并在 `todo_results[].errors` 与 `user_summary` 中说明需要补什么。整体 `status` 规则：全部成功为 `success`，成功与失败 / warning 混合为 `partial`，全部失败为 `failed`。
 
 ## Workflow
 
@@ -185,7 +223,7 @@ acceptance: <完成后如何判定通过>
 - 冲突、歧义、不确定项已显式记录
 - Markdown 与 JSON 文件同时存在，且表达的是同一个 ontology slice
 - 如果本轮先执行过 `ontology_ingest`，确认 `ontology/`、`ontology/_archived/` 和 `新增 / 修改 / 移除` 摘要彼此一致
-- 能通过 `{baseDir}/templates/TEMPLATE.schema.json` 对应校验，或直接运行 `{baseDir}/scripts/validate-slice.ps1` / `{baseDir}/scripts/validate-slice.py`；如果从仓库根目录执行，则使用 `scripts/validate-ontology-slice.ps1` / `scripts/validate-ontology-slice.py`
+- 能通过 `{baseDir}/templates/TEMPLATE.schema.json` 对应校验，或直接运行 `{baseDir}/scripts/validate-slice.py`；如果从仓库根目录执行，则使用 `scripts/validate-ontology-slice.py`
 
 ## Quality Rules
 
@@ -227,9 +265,7 @@ acceptance: <完成后如何判定通过>
 - `{baseDir}/references/CONSUMER_PROJECTION_LAYOUT_GUIDE.md`：consumer skill 专用 projection 目录与命名规范
 - `{baseDir}/references/SCHEMA_MIGRATION.md`：slice 与 projection 的 schema 版本迁移说明
 - `{baseDir}/examples/ready/sample.json`：READY 基线样例
-- `{baseDir}/scripts/validate-slice.ps1`：skill 目录内真实 PowerShell 校验器，支持 `-SchemaPath` 与 `-ReviewMode`
 - `{baseDir}/scripts/validate-slice.py`：skill 目录内真实 Python 校验器，支持 `--schema-path` 与 `--review-mode`
-- `scripts/validate-ontology-slice.ps1`：仓库根目录 PowerShell 包装入口，适合从任意当前目录直接校验，支持 `Paths` 与 `-SchemaPath`
 - `scripts/validate-ontology-slice.py`：仓库根目录 Python 包装入口，适合从任意当前目录直接校验，支持 `paths` 与 `--schema-path`
 - `ontology_ingest`：内置 agent tool，用于把上传文件递归解析并按 `incremental` / `full_replace` 写入沙箱 `ontology/`，自动把被覆盖、被同源增量移除或被全量替换移除的 ingest 节点归档到 `ontology/_archived/`
 - `{baseDir}/README.md`：规范包总览
@@ -240,9 +276,9 @@ acceptance: <完成后如何判定通过>
 
 进行结构校验时，优先按所在层级选择入口：
 
-- 在 skill 目录内直接工作时，使用 `{baseDir}/scripts/validate-slice.ps1` 或 `{baseDir}/scripts/validate-slice.py`
-- 需要从仓库根目录或任意当前目录直接校验时，使用 `scripts/validate-ontology-slice.ps1` 或 `scripts/validate-ontology-slice.py`
-- review 辅助模式仅真实校验器支持：PowerShell 使用 `-ReviewMode`，Python 使用 `--review-mode`
+- 在 skill 目录内直接工作时，使用 `{baseDir}/scripts/validate-slice.py`
+- 需要从仓库根目录或任意当前目录直接校验时，使用 `scripts/validate-ontology-slice.py`
+- review 辅助模式仅真实校验器支持：使用 `--review-mode`
 - 两类入口默认都落到 `templates/TEMPLATE.schema.json`，默认样例都是 `examples/ready/sample.json`
 
 它不会自动发明缺失 ontology，也不会在没有来源的情况下把经验性描述写成本体结论。

@@ -11,18 +11,18 @@
 ## 使用方式
 
 ```powershell
-..\..\scripts\validate-slice.ps1 .\invalid-sample.json
+..\..\scripts\validate-slice.py .\invalid-sample.json
 ```
 
-上面的命令适用于当前目录位于 `ontology_extraction` 技能根目录内，调用的是技能目录下的真实校验器；如果需要启发式评审结论，可改用 `-ReviewMode`。
+上面的命令适用于当前目录位于 `ontology_extraction` 技能根目录内，调用的是技能目录下的真实校验器；如果需要启发式评审结论，可改用 `--review-mode`。
 
 如果从仓库根目录执行：
 
 ```powershell
-.\scripts\validate-ontology-slice.ps1 .\src\OpenClaw.Gateway\skills\ontology_extraction\examples\invalid\invalid-sample.json
+.\scripts\validate-ontology-slice.py .\src\OpenClaw.Gateway\skills\ontology_extraction\examples\invalid\invalid-sample.json
 ```
 
-仓库根目录包装入口只承载普通结构校验，不暴露 `-ReviewMode`。
+仓库根目录包装入口只承载普通结构校验，不暴露 `--review-mode`。
 
 ---
 
@@ -119,7 +119,7 @@
 如果运行下面这条命令：
 
 ```powershell
-..\..\scripts\validate-slice.ps1 .\invalid-sample.json -ReviewMode
+..\..\scripts\validate-slice.py .\invalid-sample.json --review-mode
 ```
 
 脚本会给出 `Heuristic verdict: FAIL`。对这个样例来说，`FAIL` 不是一种“偏保守的黄灯判断”，而是一个非常直接的结论：结构层已经失败，因此不应该进入后续语义评审。
