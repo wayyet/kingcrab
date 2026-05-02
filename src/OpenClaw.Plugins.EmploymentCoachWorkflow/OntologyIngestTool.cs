@@ -8,7 +8,7 @@ using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Models;
 using OpenClaw.Core.Security;
 
-namespace OpenClaw.Plugins.OntologyIngest;
+namespace OpenClaw.Plugins.EmploymentCoachWorkflow;
 
 /// <summary>
 /// Ingests arbitrary uploaded files into sandbox ontology slices.

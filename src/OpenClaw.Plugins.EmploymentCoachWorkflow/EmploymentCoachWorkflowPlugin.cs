@@ -2,9 +2,9 @@ using System.Text.Json;
 using OpenClaw.Core.Models;
 using OpenClaw.PluginKit;
 
-namespace OpenClaw.Plugins.OntologyIngest;
+namespace OpenClaw.Plugins.EmploymentCoachWorkflow;
 
-public sealed class OntologyIngestPlugin : INativeDynamicPlugin
+public sealed class EmploymentCoachWorkflowPlugin : INativeDynamicPlugin
 {
     private static readonly JsonSerializerOptions ConfigJsonOptions = new(JsonSerializerDefaults.Web)
     {

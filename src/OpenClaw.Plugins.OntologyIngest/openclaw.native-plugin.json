@@ -1,9 +1,0 @@
-{
-  "id": "ontology-ingest",
-  "name": "Ontology Ingest",
-  "version": "1.0.0",
-  "assemblyPath": "OpenClaw.Plugins.OntologyIngest.dll",
-  "typeName": "OpenClaw.Plugins.OntologyIngest.OntologyIngestPlugin, OpenClaw.Plugins.OntologyIngest",
-  "capabilities": ["tools"],
-  "jitOnly": true
-}

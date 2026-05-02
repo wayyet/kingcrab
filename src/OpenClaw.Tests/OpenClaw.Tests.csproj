@@ -15,7 +15,7 @@
     <ProjectReference Include="..\OpenClaw.Companion\OpenClaw.Companion.csproj" />
     <ProjectReference Include="..\OpenClaw.Gateway\OpenClaw.Gateway.csproj" />
     <ProjectReference Include="..\OpenClaw.PluginKit\OpenClaw.PluginKit.csproj" />
-    <ProjectReference Include="..\OpenClaw.Plugins.OntologyIngest\OpenClaw.Plugins.OntologyIngest.csproj" />
+    <ProjectReference Include="..\OpenClaw.Plugins.EmploymentCoachWorkflow\OpenClaw.Plugins.EmploymentCoachWorkflow.csproj" />
     <ProjectReference Include="..\OpenClaw.TestPluginFixtures\OpenClaw.TestPluginFixtures.csproj" />
   </ItemGroup>
 

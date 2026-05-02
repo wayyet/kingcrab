@@ -304,7 +304,7 @@ c:/python314/python.exe .\scripts\validate-slice.py .\examples\ready\sample.json
 ```text
 c:/python314/python.exe .\scripts\validate-ontology-slice.py
 c:/python314/python.exe .\scripts\validate-ontology-slice.py .\path\to\team-slice.json
-c:/python314/python.exe .\scripts\validate-ontology-slice.py .\src\OpenClaw.Gateway\skills\ontology_extraction\examples\invalid\invalid-sample.json
+c:/python314/python.exe .\scripts\validate-ontology-slice.py .\src\OpenClaw.Plugins.EmploymentCoachWorkflow\skills\ontology_extraction\examples\invalid\invalid-sample.json
 ```
 
 根目录包装脚本仍保持“普通结构校验入口”的角色，不额外承载 `--review-mode`。
@@ -347,7 +347,7 @@ c:/python314/python.exe .\scripts\validate-projection.py .\examples\ready\sample
 ```text
 c:/python314/python.exe .\scripts\validate-ontology-projection.py
 c:/python314/python.exe .\scripts\validate-ontology-projection.py .\path\to\team-projection.json
-c:/python314/python.exe .\scripts\validate-ontology-projection.py .\src\OpenClaw.Gateway\skills\ontology_extraction\examples\invalid\invalid-projection.json
+c:/python314/python.exe .\scripts\validate-ontology-projection.py .\src\OpenClaw.Plugins.EmploymentCoachWorkflow\skills\ontology_extraction\examples\invalid\invalid-projection.json
 ```
 
 根目录 projection 包装脚本同样保持“普通结构校验入口”的角色，不额外承载 `--review-mode`。
