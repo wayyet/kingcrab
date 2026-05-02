@@ -1,5 +1,5 @@
-using OpenClaw.Agent.Tools;
 using OpenClaw.Core.Models;
+using OpenClaw.Core.Security;
 using Xunit;
 
 namespace OpenClaw.Tests;

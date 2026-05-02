@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>OpenClaw.Plugins.OntologyIngest</RootNamespace>
+    <IsPackable>true</IsPackable>
+    <PackageId>OpenClaw.Plugins.OntologyIngest</PackageId>
+    <Description>Dynamic native OpenClaw plugin that ingests uploaded files into sandbox ontology slices.</Description>
+    <PackageTags>openclaw;plugins;ontology;ingest;dotnet</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OpenClaw.Core\OpenClaw.Core.csproj" />
+    <ProjectReference Include="..\OpenClaw.PluginKit\OpenClaw.PluginKit.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="openclaw.native-plugin.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

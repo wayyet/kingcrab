@@ -2,7 +2,6 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Models;
-using OpenClaw.Agent.Tools;
 
 namespace OpenClaw.Agent;
 
@@ -223,7 +222,7 @@ public sealed class ContractScopeHook : IToolHookWithContext
 
                 var value = item.GetString();
                 if (!string.IsNullOrWhiteSpace(value))
-                    collected.Add(OntologyIngestTool.ResolveInputPath(value!) ?? value!);
+                    collected.Add(OntologyIngestPathResolver.ResolveInputPath(value!) ?? value!);
             }
         }
 

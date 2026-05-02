@@ -8,6 +8,7 @@ using OpenClaw.Core.Pipeline;
 using OpenClaw.Core.Plugins;
 using OpenClaw.Core.Sessions;
 using OpenClaw.Core.Skills;
+using OpenClaw.Plugins.OntologyIngest;
 using OpenClaw.TestPluginFixtures;
 using Xunit;
 
@@ -155,6 +156,52 @@ public sealed class NativeDynamicPluginHostTests : IDisposable
         Assert.Empty(tools);
         var report = Assert.Single(host.Reports);
         Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "assembly_outside_root");
+    }
+
+    [Fact]
+    public async Task LoadAsync_JitMode_LoadsOntologyIngestPluginTool()
+    {
+        var workspaceRoot = Path.Combine(_tempDir, "workspace");
+        Directory.CreateDirectory(workspaceRoot);
+        var pluginDir = CreateNativePlugin(
+            "ontology-ingest",
+            typeof(OntologyIngestPlugin).Assembly.Location,
+            typeof(OntologyIngestPlugin).FullName!,
+            ["tools"]);
+
+        var config = new NativeDynamicPluginsConfig
+        {
+            Enabled = true,
+            Load = new PluginLoadConfig { Paths = [pluginDir] },
+            Entries = new Dictionary<string, PluginEntryConfig>(StringComparer.Ordinal)
+            {
+                ["ontology-ingest"] = new()
+                {
+                    Config = JsonSerializer.SerializeToElement(new
+                    {
+                        tooling = new
+                        {
+                            workspaceRoot,
+                            allowedReadRoots = new[] { workspaceRoot },
+                            allowedWriteRoots = new[] { workspaceRoot }
+                        }
+                    })
+                }
+            }
+        };
+
+        await using var host = new NativeDynamicPluginHost(
+            config,
+            RuntimeModeResolver.Resolve(new RuntimeConfig { Mode = "jit" }, dynamicCodeSupported: true),
+            new TestLogger());
+
+        var tools = await host.LoadAsync(null, CancellationToken.None);
+
+        var tool = Assert.Single(tools);
+        Assert.Equal("ontology_ingest", tool.Name);
+        var report = Assert.Single(host.Reports, r => r.PluginId == "ontology-ingest" && r.Loaded);
+        Assert.Equal(1, report.ToolCount);
+        Assert.Contains(PluginCapabilityPolicy.Tools, report.RequestedCapabilities);
     }
 
     private string CreateNativePlugin(
