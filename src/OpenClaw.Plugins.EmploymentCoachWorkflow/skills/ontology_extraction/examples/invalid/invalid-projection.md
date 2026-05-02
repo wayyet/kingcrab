@@ -19,7 +19,7 @@
 如果从仓库根目录执行：
 
 ```powershell
-.\scripts\validate-ontology-projection.py .\src\OpenClaw.Gateway\skills\ontology_extraction\examples\invalid\invalid-projection.json
+.\scripts\validate-ontology-projection.py .\src\OpenClaw.Plugins.EmploymentCoachWorkflow\skills\ontology_extraction\examples\invalid\invalid-projection.json
 ```
 
 仓库根目录包装入口只承载普通结构校验，不暴露 `--review-mode`。

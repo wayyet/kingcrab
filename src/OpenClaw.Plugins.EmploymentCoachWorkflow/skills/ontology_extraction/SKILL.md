@@ -267,7 +267,7 @@ dispatch_callback:
 - `{baseDir}/examples/ready/sample.json`：READY 基线样例
 - `{baseDir}/scripts/validate-slice.py`：skill 目录内真实 Python 校验器，支持 `--schema-path` 与 `--review-mode`
 - `scripts/validate-ontology-slice.py`：仓库根目录 Python 包装入口，适合从任意当前目录直接校验，支持 `paths` 与 `--schema-path`
-- `ontology_ingest`：内置 agent tool，用于把上传文件递归解析并按 `incremental` / `full_replace` 写入沙箱 `ontology/`，自动把被覆盖、被同源增量移除或被全量替换移除的 ingest 节点归档到 `ontology/_archived/`
+- `ontology_ingest`：由动态原生插件提供的 agent tool，用于把上传文件递归解析并按 `incremental` / `full_replace` 写入沙箱 `ontology/`，自动把被覆盖、被同源增量移除或被全量替换移除的 ingest 节点归档到 `ontology/_archived/`
 - `{baseDir}/README.md`：规范包总览
 
 ## Instruction Scope

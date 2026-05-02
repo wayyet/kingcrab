@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>OpenClaw.Plugins.EmploymentCoachWorkflow</RootNamespace>
+    <IsPackable>true</IsPackable>
+    <PackageId>OpenClaw.Plugins.EmploymentCoachWorkflow</PackageId>
+    <Description>Dynamic native OpenClaw plugin that packages the employment coach workflow skills and ontology ingest tool.</Description>
+    <PackageTags>openclaw;plugins;employment-coach;workflow;ontology;dotnet</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OpenClaw.Core\OpenClaw.Core.csproj" />
+    <ProjectReference Include="..\OpenClaw.PluginKit\OpenClaw.PluginKit.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="openclaw.native-plugin.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="skills\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

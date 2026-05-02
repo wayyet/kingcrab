@@ -1,7 +1,7 @@
 using System.IO.Compression;
 using System.Text.Json;
-using OpenClaw.Agent.Tools;
 using OpenClaw.Core.Models;
+using OpenClaw.Plugins.EmploymentCoachWorkflow;
 using Xunit;
 
 namespace OpenClaw.Tests;

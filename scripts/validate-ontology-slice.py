@@ -22,7 +22,7 @@ def main() -> int:
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parent.parent
-    validator_path = repo_root / "src" / "OpenClaw.Gateway" / "skills" / "ontology_extraction" / "scripts" / "validate-slice.py"
+    validator_path = repo_root / "src" / "OpenClaw.Plugins.EmploymentCoachWorkflow" / "skills" / "ontology_extraction" / "scripts" / "validate-slice.py"
 
     if not validator_path.exists():
         raise FileNotFoundError(f"Validator script not found: {validator_path}")

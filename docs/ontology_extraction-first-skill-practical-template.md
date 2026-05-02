@@ -80,8 +80,8 @@
 
 producer 侧入口在：
 
-- [src/OpenClaw.Gateway/skills/ontology_extraction/SKILL.md](src/OpenClaw.Gateway/skills/ontology_extraction/SKILL.md)
-- [src/OpenClaw.Gateway/skills/ontology_extraction/README.md](src/OpenClaw.Gateway/skills/ontology_extraction/README.md)
+- [src/OpenClaw.Plugins.EmploymentCoachWorkflow/skills/ontology_extraction/SKILL.md](src/OpenClaw.Plugins.EmploymentCoachWorkflow/skills/ontology_extraction/SKILL.md)
+- [src/OpenClaw.Plugins.EmploymentCoachWorkflow/skills/ontology_extraction/README.md](src/OpenClaw.Plugins.EmploymentCoachWorkflow/skills/ontology_extraction/README.md)
 
 第一份 slice 推荐从这两个模板之一开始：
 
@@ -103,7 +103,7 @@ producer 侧入口在：
 
 通过结构校验的最低标准见：
 
-- [src/OpenClaw.Gateway/skills/ontology_extraction/README.md](src/OpenClaw.Gateway/skills/ontology_extraction/README.md)
+- [src/OpenClaw.Plugins.EmploymentCoachWorkflow/skills/ontology_extraction/README.md](src/OpenClaw.Plugins.EmploymentCoachWorkflow/skills/ontology_extraction/README.md)
 
 ## 4. 第二步：把 Slice 投影成第一个 Projection
 

@@ -31,7 +31,7 @@
 
 ### 2.1 producer skill：ontology_extraction
 
-producer 侧位于 [src/OpenClaw.Gateway/skills/ontology_extraction/README.md](src/OpenClaw.Gateway/skills/ontology_extraction/README.md) 和 [src/OpenClaw.Gateway/skills/ontology_extraction/SKILL.md](src/OpenClaw.Gateway/skills/ontology_extraction/SKILL.md)。
+producer 侧位于 [src/OpenClaw.Plugins.EmploymentCoachWorkflow/skills/ontology_extraction/README.md](src/OpenClaw.Plugins.EmploymentCoachWorkflow/skills/ontology_extraction/README.md) 和 [src/OpenClaw.Plugins.EmploymentCoachWorkflow/skills/ontology_extraction/SKILL.md](src/OpenClaw.Plugins.EmploymentCoachWorkflow/skills/ontology_extraction/SKILL.md)。
 
 它的职责不是直接替业务 Skill 写 prompt，而是：
 
@@ -78,7 +78,7 @@ consumer 侧在当前仓库里的实例如下：
 - `templates/TEMPLATE.md`
 - 或 `templates/TEMPLATE.json`
 
-对应入口见 [src/OpenClaw.Gateway/skills/ontology_extraction/README.md](src/OpenClaw.Gateway/skills/ontology_extraction/README.md)。
+对应入口见 [src/OpenClaw.Plugins.EmploymentCoachWorkflow/skills/ontology_extraction/README.md](src/OpenClaw.Plugins.EmploymentCoachWorkflow/skills/ontology_extraction/README.md)。
 
 ### 3.2 抽取最小可验证子图
 
@@ -105,7 +105,7 @@ producer 侧的判断标准是：
 
 - `templates/TEMPLATE.json`
 - `templates/TEMPLATE.schema.json`
-- `src/OpenClaw.Gateway/skills/ontology_extraction/scripts/validate-slice.py`：技能根目录内真实校验器
+- `src/OpenClaw.Plugins.EmploymentCoachWorkflow/skills/ontology_extraction/scripts/validate-slice.py`：技能根目录内真实校验器
 - `scripts/validate-ontology-slice.py`：仓库根目录包装入口
 - `examples/ready|warning|invalid`
 

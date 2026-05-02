@@ -523,7 +523,6 @@ internal static class RuntimeInitializationExtensions
             new FileReadTool(config.Tooling),
             new FileWriteTool(config.Tooling),
             new PublishFileTool(config.Tooling),
-            new OntologyIngestTool(config.Tooling),
             new ProcessTool(services.ProcessService, config.Tooling),
             new MemoryNoteTool(services.MemoryStore),
             new MemorySearchTool((IMemoryNoteSearch)services.MemoryStore),

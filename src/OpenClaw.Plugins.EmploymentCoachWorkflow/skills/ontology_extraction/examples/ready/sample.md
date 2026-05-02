@@ -21,7 +21,7 @@
 如果从仓库根目录执行普通结构校验：
 
 ```powershell
-.\scripts\validate-ontology-slice.py .\src\OpenClaw.Gateway\skills\ontology_extraction\examples\ready\sample.json
+.\scripts\validate-ontology-slice.py .\src\OpenClaw.Plugins.EmploymentCoachWorkflow\skills\ontology_extraction\examples\ready\sample.json
 ```
 
 仓库根目录包装入口只承载普通结构校验，不暴露 `--review-mode`。
