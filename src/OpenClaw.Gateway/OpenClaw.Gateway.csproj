@@ -34,20 +34,20 @@
     <DefineConstants>$(DefineConstants);OPENCLAW_ENABLE_MAF_EXPERIMENT</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Anthropic" Version="12.16.0" />
+    <PackageReference Include="Anthropic" Version="12.19.0" />
     <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
-    <PackageReference Include="GeminiDotnet.Extensions.AI" Version="0.23.0" />
-    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.6" />
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.6" />
+    <PackageReference Include="GeminiDotnet.Extensions.AI" Version="0.25.0" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.7" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.7" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="1.2.0" />		
-	<PackageReference Include="Microsoft.Agents.AI.DevUI" Version="1.0.0-preview.260330.1" />
-    <PackageReference Include="Microsoft.Agents.AI.Hosting" Version="1.0.0-preview.260330.1" />
-	<PackageReference Include="Microsoft.Agents.AI.Hosting.OpenAI" Version="1.0.0-alpha.260330.1" />    
+	<PackageReference Include="Microsoft.Agents.AI.DevUI" Version="1.4.0-preview.260505.1" />
+    <PackageReference Include="Microsoft.Agents.AI.Hosting" Version="1.4.0-preview.260505.1" />
+	<PackageReference Include="Microsoft.Agents.AI.Hosting.OpenAI" Version="1.4.0-alpha.260505.1" />    
 	<PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.3" />
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.15.3" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.15.1" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.15.0" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.15.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.15.2" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.15.1" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.15.1" />
     <PackageReference Include="QRCoder" Version="1.8.0" />
   </ItemGroup>
   <PropertyGroup Condition="'$(OpenClawEnableOpenSandbox)' == 'true'">
