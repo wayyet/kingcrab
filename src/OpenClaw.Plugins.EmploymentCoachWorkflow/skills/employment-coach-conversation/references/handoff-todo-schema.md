@@ -1,10 +1,11 @@
 # Handoff Todo 完整 schema
 
-本 skill 维护的所有 handoff todo 共用一套结构，下游 skill 把它当输入合约消化。
+本 skill 维护的所有 handoff todo 必须由系统 `todo` 工具承载。系统 todo 负责 session 级持久化、展示和可见完成态；本文件定义的是写入 todo `notes` 的结构化输入合约，下游 skill 按这个合约消化。
 
 ## 目录
 
-- [通用结构](#通用结构)
+- [系统 todo 工具映射](#系统-todo-工具映射)
+- [notes 通用结构](#notes-通用结构)
 - [状态机](#状态机)
 - [ID 稳定性原则](#id-稳定性原则)
 - [与诊断 skill 的 todo 区分](#与诊断-skill-的-todo-区分)
@@ -12,11 +13,29 @@
 - [阶段 2：skill](#阶段-2skill)
 - [阶段 3：external](#阶段-3external)
 
-## 通用结构
+## 系统 todo 工具映射
 
-```
+每条 handoff todo 对应一条系统 todo：
+
+- `id`：由 `todo.add` 返回，作为 dispatch 块中的 todo id；不要自己伪造
+- `text`：给用户和侧边栏看的短标题，例如`资料：退货规则手册抽取退款节点`、`技能：退货资格初判`
+- `notes`：一段 JSON 字符串，内容见 [notes 通用结构](#notes-通用结构)
+- `Completed`：仅在 handoff `status = confirmed` 且用户确认后，通过 `todo.complete` 置为 done
+
+工具调用规则：
+
+- 新建：`todo.add`，写入 `text` 和完整 `notes`
+- 修改字段 / payload / handoff 状态：`todo.update`，保持同一个系统 todo `id`
+- 确认完成：先 `todo.update` 把 `notes.status` 写成 `confirmed`，再 `todo.complete`
+- 用户撤销：`todo.update` 把 `notes.status` 写成 `dismissed`；如果不需要继续展示，再 `todo.remove`
+- 查询当前清单：`todo.list` 可核对系统 todo id、标题和 open / done 状态；结构化状态以该 todo 的 `notes.status` 为准，更新时继续使用同一个 id
+
+系统 todo 只有 `open / done` 两个可见状态，因此 `drafting / ready_to_dispatch / dispatched / dirty / confirmed / needs_review / dismissed` 必须放在 `notes.status`。
+
+## notes 通用结构
+
+```json
 {
-  id,                  // 稳定 ID：基于 stage + 内容指纹生成，重复发现同一意图时不会变
   stage,               // material | skill | external
   target_skill,        // ontology_extraction | skill_generation | external_config
   intent,              // 一句话目标，给用户读
@@ -25,6 +44,7 @@
   source,              // 来自对话的哪一段（消息片段或上传文件名）
   acceptance,          // 完成判定信号，供下游 skill 自检
   status,              // 见状态机
+  fingerprint,         // 稳定内容指纹：基于 stage + 核心意图生成，用于识别同一意图
   created_at,
   updated_at
 }
@@ -53,14 +73,15 @@
 
 ## ID 稳定性原则
 
-- 同一意图（如"退货资格初判"这条 skill）在多轮对话中被反复修改，id 不变，payload 字段被更新
-- 用户撤回某条意图（"算了不要这条"）→ status 改为 `dismissed`，id 保留，不再 dispatch
+- 同一意图（如"退货资格初判"这条 skill）在多轮对话中被反复修改时，继续更新同一个系统 todo id，payload 字段被覆盖
+- 用 `notes.fingerprint` 识别重复意图，避免因为用户换个说法就新建一条 todo
+- 用户撤回某条意图（"算了不要这条"）→ `notes.status` 改为 `dismissed`，系统 todo id 保留；如 UI 不需要继续展示，再用 `todo.remove` 移除
 
 ## 与诊断 skill 的 todo 区分
 
 - 诊断 todo 回答"还差什么"
 - 本 skill 的 handoff todo 回答"差的部分要交给谁、要带什么去"
-- 两类 todo 由系统层决定如何在 UI 上合并展示，本 skill 不关心
+- 两类 todo 可以共用系统 `todo` 工具承载，但 `notes.target_skill` / `notes.stage` 必须区分清楚；本 skill 只维护自己的 handoff todo
 
 ---
 
@@ -129,7 +150,7 @@
 | `category` | read / write / notify / search / transform 中之一 |
 | `objective` | 一句话目标，例如"在用户咨询时，从 CRM 拉到该用户的最近 3 个订单" |
 | `target_system` | 目标系统名（CRM / ERP / 企微 / 钉钉 / 自有 OA 等，含厂商或自研标识） |
-| `linked_skills` | 这个能力被哪条 skill 用到（指 skill todo id 列表） |
+| `linked_skills` | 这个能力被哪条 skill 用到（指对应 skill handoff 的系统 todo id 列表） |
 | `auth_kind` | 凭据形式（OAuth / Bearer Token / 长期 Key 等），**不含凭据值** |
 | `kind` | normal / skip |
 

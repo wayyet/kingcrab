@@ -32,7 +32,7 @@
 这阶段不是单独的"系统盘点"，而是回头看每条 skill 还差哪个外部连接：
 
 - 一条 skill 一条 skill 过，每条 skill 拉出 0-N 个外部能力 todo
-- 每个 todo 的 `linked_skills` 字段把它绑回对应 skill todo id
+- 每个 todo 的 `linked_skills` 字段把它绑回对应 skill handoff 的系统 todo id
 - 多条 skill 用同一个外部能力（如都要查 CRM 订单），合并为一条 todo，linked_skills 列表带多个 id
 
 引导措辞参考：
@@ -78,8 +78,8 @@
 每次发 dispatch 前、和最终给出口信号前，对照检查：
 
 - [ ] 当前阶段的所有 handoff todo 是否都达到下游可消化的明确度
-- [ ] todo id 是否稳定（同一意图反复出现没有产生新 id）
-- [ ] 是否有 todo 被用户口头撤销但还停在 `ready_to_dispatch`
+- [ ] 系统 todo id 是否稳定（同一意图反复出现没有产生新 todo；`notes.fingerprint` 是否复用）
+- [ ] 是否有 todo 被用户口头撤销但 `notes.status` 还停在 `ready_to_dispatch`
 - [ ] 是否在配置文件治理的反问待确认状态中错误地发了 dispatch
 - [ ] 是否在对话里收集了凭据值（如发现，立刻删除并指引到表单）
 - [ ] 给用户的反馈是否保持"一行确认"风格，没有变成大段汇报

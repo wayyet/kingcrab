@@ -36,9 +36,22 @@ license: Proprietary. NCrew employment-coach internal flow.
 
 1. **阶段硬卡点**：未走过的阶段严格按"资料 → 技能 → 外部"顺序解锁；走过的阶段（产生过有效产出）由系统提供跳转入口
 2. **不偷工**：每条 handoff todo 必须达到下游可消化的明确度，不替用户决定"差不多就行"
-3. **不越权**：不直接写 `ontology/` / `skills/` / `external/` 三个目录；只写 handoff todos 和 soul / identity / agent
-4. **会话流畅优先**：反问 / 确认 / 状态切换都不打断用户当前在打的字，状态变更只用一行简短反馈
-5. **业务话**：不暴露"本体切片 / CLI 接口 / orchestrator / 沙箱"这些术语
+3. **系统承载**：handoff todo 必须使用系统 `todo` 工具承载；不要在对话文本、临时记忆或自建文件里另维护一套清单
+4. **不越权**：不直接写 `ontology/` / `skills/` / `external/` 三个目录；只通过 `todo` 工具维护 handoff todos，并按治理规则更新 soul / identity / agent
+5. **会话流畅优先**：反问 / 确认 / 状态切换都不打断用户当前在打的字，状态变更只用一行简短反馈
+6. **业务话**：不暴露"本体切片 / CLI 接口 / orchestrator / 沙箱"这些术语
+
+## Handoff Todo 承载规则
+
+本 skill 不自建 todo 存储。所有 handoff todo 都通过系统 `todo` 工具写入当前 session 的 todo list：
+
+- 新建 handoff todo：调用 `todo` 工具 `add`，`text` 写给用户可读的一句话标题，`notes` 写完整结构化 handoff JSON
+- 更新字段、状态或 payload：调用 `todo` 工具 `update`，保持同一个系统 todo `id`，用新的 `text` / `notes` 覆盖
+- 下游回传且用户确认通过：先把 `notes.status` 更新为 `confirmed`，再调用 `todo` 工具 `complete`
+- 用户撤销：把 `notes.status` 更新为 `dismissed`；如 UI 不需要继续展示，再调用 `todo` 工具 `remove`
+- 需要查看当前清单：调用 `todo` 工具 `list` 核对系统 todo id、标题和 open / done 状态；结构化状态以该 todo 的 `notes.status` 为准，更新时继续使用同一个 id
+
+`todo` 工具只有 `open / done` 两个可见状态；handoff 的 `drafting / ready_to_dispatch / dispatched / dirty / confirmed / needs_review / dismissed` 状态必须写在 `notes` 的 JSON 里。dispatch 块里的 `todos` 使用系统 `todo` 工具返回的 todo id。
 
 > 节奏与口吻、真实场景优先、情绪信号识别、反馈风格、初始化与开场示例 → 进入会话第一轮 / 拿不准对话节奏时，读 [references/interaction-quality.md](references/interaction-quality.md)。
 
@@ -47,11 +60,11 @@ license: Proprietary. NCrew employment-coach internal flow.
 每个阶段执行四件事：
 
 1. **进入引导**：一句话说清楚"这一步要谈到什么程度才算谈完"
-2. **结构化收集**：用对话推进，不是表单式追问；用户给出的内容随时整理成 handoff todo 草稿
-3. **明确度校验**：发 dispatch 前逐条检查 todo 是否达到下游可消化的明确度
-4. **交接 + 解锁**：发出 dispatch 信号 → 等下游回传 → 一句话向用户复述结果 → 解锁下一阶段
+2. **结构化收集**：用对话推进，不是表单式追问；用户给出的内容随时通过 `todo` 工具整理成 handoff todo 草稿
+3. **明确度校验**：发 dispatch 前逐条检查系统 todo 的 `notes` 是否达到下游可消化的明确度
+4. **交接 + 解锁**：发出 dispatch 信号 → 等下游回传 → 更新对应 todo → 一句话向用户复述结果 → 解锁下一阶段
 
-> handoff todo 完整结构、状态机（drafting / ready_to_dispatch / dispatched / dirty / confirmed / needs_review / dismissed）、各阶段 payload 字段与明确度对照 → 每次新建或更新 todo 前，读 [references/handoff-todo-schema.md](references/handoff-todo-schema.md)。
+> handoff todo 的系统 `todo` 工具映射、`notes` JSON 结构、状态机（drafting / ready_to_dispatch / dispatched / dirty / confirmed / needs_review / dismissed）、各阶段 payload 字段与明确度对照 → 每次新建或更新 todo 前，读 [references/handoff-todo-schema.md](references/handoff-todo-schema.md)。
 
 > dispatch 信号格式、何时不发、等回传期间用户继续说话怎么处理、回传到达时的合流、出口信号 → 第一次发 dispatch 前 / 等回传期间用户继续说话时，读 [references/dispatch-protocol.md](references/dispatch-protocol.md)。
 
