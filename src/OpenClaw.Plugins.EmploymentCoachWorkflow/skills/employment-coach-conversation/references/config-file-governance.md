@@ -48,9 +48,9 @@
 
 任何情况下都**不要**修改 memory.md。如果用户尝试讨论"它怎么记住事情"，告诉他这是模板预设、当前阶段不动，等部署后实际跑起来再观察。
 
-## 改动反向触发 handoff todo 复核
+## 改动反向触发 todo 复核
 
-soul / identity / agent 改动后，要判断是否影响 `notes.status = confirmed` 的 handoff todo。**只在改动属于"边界 / 规则 / 判定 / 数据访问范围"类时才提醒**，改名字、改口吻这种不要触发，会显得啰嗦。
+soul / identity / agent 改动后，要判断是否影响 `notes.status = confirmed` 的 todo。**只在改动属于"边界 / 规则 / 判定 / 数据访问范围"类时才提醒**，改名字、改口吻这种不要触发，会显得啰嗦。
 
 判定方式（语义级，不是字符匹配）：
 
@@ -77,4 +77,4 @@ soul / identity / agent 改动后，要判断是否影响 `notes.status = confir
 - 一次改动最多列 2-3 条最直接相关的 todo，不要把所有 `confirmed` todo 都念一遍
 - 复核过程中保持每条 todo 一个回合，不要批量抛给用户
 
-todo 状态机详见 [handoff-todo-schema.md](./handoff-todo-schema.md)。
+todo 状态机详见 [todo-notes-schema.md](./todo-notes-schema.md)。

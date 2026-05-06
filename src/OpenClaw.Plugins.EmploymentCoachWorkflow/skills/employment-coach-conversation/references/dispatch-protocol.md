@@ -6,7 +6,7 @@
 
 ```
 <dispatch>
-target: ontology_extraction
+target: ontology-extraction
 todos: [todo_id_1, todo_id_2]
 mode: incremental
 note: 用户表示这批资料先这些
@@ -14,15 +14,15 @@ note: 用户表示这批资料先这些
 ```
 
 字段：
-- `target`: 目标下游 skill（`ontology_extraction` / `skill_generation` / `external_config` / `stage_transition`）
-- `todos`: 本次要交接的系统 `todo` 工具 id 列表；下游通过这些 id 读取 `notes` 中的 handoff JSON
+- `target`: 目标下游 skill（`ontology-extraction` / `skill-generation` / `external-config` / `stage_transition`）
+- `todos`: 本次 dispatch 的系统 `todo` 工具 id 列表；下游通过这些 id 读取 `notes` 中的结构化 JSON
 - `mode`（可选）: 阶段相关模式标记（如本体提取的 `incremental` / `full_replace`）
 - `note`（可选）: 给系统/下游的简短上下文
 
 ## dispatch 后的对话动作
 
 - 在对话里**只用一行**告诉用户"我让 X 去处理了，处理完会告诉你结果"，不重复念清单
-- 立即用 `todo.update` 把本次交接的 todo `notes.status` 改为 `dispatched`
+- 立即用 `todo.update` 把本次 dispatch 的 todo `notes.status` 改为 `dispatched`
 - 等待系统传回下游产出 + user_summary
 - 收到回传后，把 user_summary 用一两句话复述给用户并请确认
 - 用户确认后，用 `todo.update` 把对应 todo `notes.status` 改为 `confirmed`，再用 `todo.complete` 标记系统 todo 完成
