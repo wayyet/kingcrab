@@ -25,7 +25,7 @@
 
         const OIDC_CONFIG = {
             enabled: true,
-            authority: 'http://test-passport.zyagi.cn:1080/realms/ai4cbrain',
+            authority: 'https://passport.ai4c.cn/realms/ai4c-saas',
             //authority: 'http://localhost:8080/realms/ai4cbrain', // local-keycloak
             clientId: 'kingcrab-console',
             scope: 'openid profile email'
