@@ -2101,8 +2101,58 @@
             const fAppId         = document.getElementById('feishu-appid');
             const fAppSecret     = document.getElementById('feishu-appsecret');
             const fAppSecretRef  = document.getElementById('feishu-appsecret-ref');
+            const fForm          = document.getElementById('ch-feishu-form');
+            const dForm          = document.getElementById('ch-dingtalk-form');
+
+            // DingTalk field refs
+            const dAppId           = document.getElementById('dingtalk-appid');
+            const dAppIdRef        = document.getElementById('dingtalk-appid-ref');
+            const dAppKey           = document.getElementById('dingtalk-appkey');
+            const dAppKeyRef        = document.getElementById('dingtalk-appkey-ref');
+            const dAppSecret        = document.getElementById('dingtalk-appsecret');
+            const dAppSecretRef     = document.getElementById('dingtalk-appsecret-ref');
+            const dGroupPolicy      = document.getElementById('dingtalk-group-policy');
+            const dAllowedFromUsers = document.getElementById('dingtalk-allowed-from-user-ids');
+            const dAllowedGroupIds  = document.getElementById('dingtalk-allowed-group-ids');
+            const dMaxInboundChars  = document.getElementById('dingtalk-max-inbound-chars');
+            const dRequireMention   = document.getElementById('dingtalk-require-mention');
+            const dExposeMedia      = document.getElementById('dingtalk-expose-media');
+            const dStreamPollMs     = document.getElementById('dingtalk-stream-poll-interval-ms');
+
+            // DingTalk field refs
+            const dAppKey            = document.getElementById('dingtalk-appkey');
+            const dAppKeyRef         = document.getElementById('dingtalk-appkey-ref');
+            const dAppSecret         = document.getElementById('dingtalk-appsecret');
+            const dAppSecretRef      = document.getElementById('dingtalk-appsecret-ref');
+            const dRobotCode         = document.getElementById('dingtalk-robotcode');
+            const dRobotCodeRef      = document.getElementById('dingtalk-robotcode-ref');
+            const dGroupPolicy       = document.getElementById('dingtalk-group-policy');
+            const dAllowedFromUsers  = document.getElementById('dingtalk-allowed-from-user-ids');
+            const dAllowedGroupIds   = document.getElementById('dingtalk-allowed-group-ids');
+            const dMaxInboundChars   = document.getElementById('dingtalk-max-inbound-chars');
+            const dRequireMention    = document.getElementById('dingtalk-require-mention');
+            const dExposeMedia       = document.getElementById('dingtalk-expose-media');
+            const dStreamPollMs      = document.getElementById('dingtalk-stream-poll-interval-ms');
 
             let activeChannel = 'feishu';
+
+            function csvToList(value) {
+                return String(value ?? '')
+                    .split(',')
+                    .map(x => x.trim())
+                    .filter(Boolean);
+            }
+
+            function listToCsv(value) {
+                if (Array.isArray(value)) return value.join(', ');
+                if (typeof value === 'string') return value;
+                return '';
+            }
+
+            function setChannelFormVisibility() {
+                fForm.style.display = activeChannel === 'feishu' ? '' : 'none';
+                dForm.style.display = activeChannel === 'dingtalk' ? '' : 'none';
+            }
 
             function showStatus(msg, isErr) {
                 statusBar.textContent = msg;
@@ -2152,6 +2202,7 @@
                     }
                     const cfg = await resp.json();
                     if (activeChannel === 'feishu') populateFeishuForm(cfg);
+                    if (activeChannel === 'dingtalk') populateDingTalkForm(cfg);
                     showStatus('加载成功 — 当前为生效中的配置', false);
                 } catch (e) {
                     showStatus('加载失败: ' + e.message, true);
@@ -2163,6 +2214,8 @@
                 let body;
                 if (activeChannel === 'feishu') {
                     body = buildFeishuConfig();
+                } else if (activeChannel === 'dingtalk') {
+                    body = buildDingTalkConfig();
                 } else {
                     showFormError('未知渠道: ' + activeChannel);
                     return;
@@ -2212,6 +2265,7 @@
                 statusBar.style.display = 'none';
                 clearFormError();
                 overlay.classList.add('open');
+                setChannelFormVisibility();
                 await loadChannelConfig();
             });
 
@@ -2233,6 +2287,7 @@
                     activeChannel = tab.dataset.channel;
                     clearFormError();
                     statusBar.style.display = 'none';
+                    setChannelFormVisibility();
                     await loadChannelConfig();
                 });
             });

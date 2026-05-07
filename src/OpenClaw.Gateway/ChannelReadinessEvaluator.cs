@@ -11,7 +11,8 @@ internal static class ChannelReadinessEvaluator
         [
             EvaluateSms(config, isNonLoopbackBind),
             EvaluateTelegram(config, isNonLoopbackBind),
-            EvaluateWhatsApp(config, isNonLoopbackBind)
+            EvaluateWhatsApp(config, isNonLoopbackBind),
+            EvaluateDingTalk(config, isNonLoopbackBind)
         ];
     }
 
@@ -269,6 +270,64 @@ internal static class ChannelReadinessEvaluator
         }
 
         return ChannelReadinessState.From("whatsapp", "WhatsApp", whatsapp.Type, missing, warnings, guidance);
+    }
+
+    private static ChannelReadinessState EvaluateDingTalk(GatewayConfig config, bool isNonLoopbackBind)
+    {
+        var dingtalk = config.Channels.DingTalk;
+        if (!dingtalk.Enabled)
+            return ChannelReadinessState.Disabled("dingtalk", "DingTalk", "official", [
+                new ChannelFixGuidance
+                {
+                    Label = "Enable DingTalk channel",
+                    Href = "#dingtalk-enabled-input",
+                    Reference = "OpenClaw:Channels:DingTalk:Enabled"
+                }
+            ]);
+
+        var missing = new List<string>();
+        var warnings = new List<string>();
+        var guidance = new List<ChannelFixGuidance>();
+
+        if (string.IsNullOrWhiteSpace(ResolveSecretRefOrNull(dingtalk.AppKeyRef) ?? dingtalk.AppKey))
+        {
+            missing.Add("DingTalk AppKey or AppKeyRef");
+            guidance.Add(new ChannelFixGuidance
+            {
+                Label = "Set DingTalk app key",
+                Href = "#setup-ref-dingtalk-app-key",
+                Reference = "OpenClaw:Channels:DingTalk:AppKeyRef = env:DINGTALK_APP_KEY"
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(ResolveSecretRefOrNull(dingtalk.AppSecretRef) ?? dingtalk.AppSecret))
+        {
+            missing.Add("DingTalk AppSecret or AppSecretRef");
+            guidance.Add(new ChannelFixGuidance
+            {
+                Label = "Set DingTalk app secret",
+                Href = "#setup-ref-dingtalk-app-secret",
+                Reference = "OpenClaw:Channels:DingTalk:AppSecretRef = env:DINGTALK_APP_SECRET"
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(ResolveSecretRefOrNull(dingtalk.RobotCodeRef) ?? dingtalk.RobotCode))
+        {
+            missing.Add("DingTalk RobotCode or RobotCodeRef");
+            guidance.Add(new ChannelFixGuidance
+            {
+                Label = "Set DingTalk robot code",
+                Href = "#setup-ref-dingtalk-robot-code",
+                Reference = "OpenClaw:Channels:DingTalk:RobotCodeRef = env:DINGTALK_ROBOT_CODE"
+            });
+        }
+
+        if (dingtalk.RequireMentionInGroup && isNonLoopbackBind)
+        {
+            warnings.Add("DingTalk group @mention filtering depends on the bot user id fetched from the DingTalk API.");
+        }
+
+        return ChannelReadinessState.From("dingtalk", "DingTalk", "official", missing, warnings, guidance);
     }
 
     private static string? ResolveSecretRefOrNull(string? value)
