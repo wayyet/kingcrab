@@ -27,6 +27,7 @@ internal static class AdminChannelEndpoints
 
         // Resolve channel adapters once at startup (only channels that support runtime updates).
         var feishu = app.Services.GetRequiredService<FeishuChannel>();
+        var dingtalk = app.Services.GetRequiredService<DingTalkChannel>();
         var channelStore = app.Services.GetRequiredService<ChannelConfigStore>();
         var defaultDingTalkConfig = CloneDingTalkConfig(startup.Config.Channels.DingTalk);
 

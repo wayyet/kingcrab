@@ -300,6 +300,7 @@ internal static class RuntimeInitializationExtensions
 
         // Feishu is always added to adapters (enables hot-enable via config without restart)
         channelAdapters["feishu"] = app.Services.GetRequiredService<FeishuChannel>();
+        channelAdapters["dingtalk"] = app.Services.GetRequiredService<DingTalkChannel>();
 
         // DingTalk is also always added so Stream mode can start and be hot-reloaded via admin API.
         channelAdapters["dingtalk"] = app.Services.GetRequiredService<DingTalkChannel>();

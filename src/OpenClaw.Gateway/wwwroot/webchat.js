@@ -2119,6 +2119,21 @@
             const dExposeMedia      = document.getElementById('dingtalk-expose-media');
             const dStreamPollMs     = document.getElementById('dingtalk-stream-poll-interval-ms');
 
+            // DingTalk field refs
+            const dAppKey            = document.getElementById('dingtalk-appkey');
+            const dAppKeyRef         = document.getElementById('dingtalk-appkey-ref');
+            const dAppSecret         = document.getElementById('dingtalk-appsecret');
+            const dAppSecretRef      = document.getElementById('dingtalk-appsecret-ref');
+            const dRobotCode         = document.getElementById('dingtalk-robotcode');
+            const dRobotCodeRef      = document.getElementById('dingtalk-robotcode-ref');
+            const dGroupPolicy       = document.getElementById('dingtalk-group-policy');
+            const dAllowedFromUsers  = document.getElementById('dingtalk-allowed-from-user-ids');
+            const dAllowedGroupIds   = document.getElementById('dingtalk-allowed-group-ids');
+            const dMaxInboundChars   = document.getElementById('dingtalk-max-inbound-chars');
+            const dRequireMention    = document.getElementById('dingtalk-require-mention');
+            const dExposeMedia       = document.getElementById('dingtalk-expose-media');
+            const dStreamPollMs      = document.getElementById('dingtalk-stream-poll-interval-ms');
+
             let activeChannel = 'feishu';
 
             function csvToList(value) {
@@ -2161,22 +2176,6 @@
                 fAppSecretRef.value = cfg.AppSecretRef ?? cfg.appSecretRef ?? '';
             }
 
-            function populateDingTalkForm(cfg) {
-                dAppId.value            = cfg.AppId ?? cfg.appId ?? '';
-                dAppIdRef.value         = cfg.AppIdRef ?? cfg.appIdRef ?? '';
-                dAppKey.value           = cfg.AppKey ?? cfg.appKey ?? '';
-                dAppKeyRef.value        = cfg.AppKeyRef ?? cfg.appKeyRef ?? '';
-                dAppSecret.value        = cfg.AppSecret ?? cfg.appSecret ?? '';
-                dAppSecretRef.value     = cfg.AppSecretRef ?? cfg.appSecretRef ?? '';
-                dGroupPolicy.value      = cfg.GroupPolicy ?? cfg.groupPolicy ?? 'open';
-                dAllowedFromUsers.value = listToCsv(cfg.AllowedFromUserIds ?? cfg.allowedFromUserIds ?? []);
-                dAllowedGroupIds.value  = listToCsv(cfg.AllowedGroupIds ?? cfg.allowedGroupIds ?? []);
-                dMaxInboundChars.value  = cfg.MaxInboundChars ?? cfg.maxInboundChars ?? 4096;
-                dRequireMention.checked = cfg.RequireMentionInGroup ?? cfg.requireMentionInGroup ?? true;
-                dExposeMedia.checked    = cfg.ExposeInboundMediaUrls ?? cfg.exposeInboundMediaUrls ?? true;
-                dStreamPollMs.value     = cfg.StreamPollIntervalMs ?? cfg.streamPollIntervalMs ?? 500;
-            }
-
             // Build config object from the Feishu form
             function buildFeishuConfig() {
                 // Always enable when saving from this simple form; all other fields use C# defaults.
@@ -2188,41 +2187,6 @@
                 if (appSecret) cfg.appSecret = appSecret;
                 const appSecretRef = fAppSecretRef.value.trim();
                 if (appSecretRef) cfg.appSecretRef = appSecretRef;
-                return cfg;
-            }
-
-            function buildDingTalkConfig() {
-                const cfg = {
-                    enabled: true,
-                    groupPolicy: dGroupPolicy.value || 'open',
-                    requireMentionInGroup: !!dRequireMention.checked,
-                    exposeInboundMediaUrls: !!dExposeMedia.checked
-                };
-
-                const appId = dAppId.value.trim();
-                if (appId) cfg.appId = appId;
-                const appIdRef = dAppIdRef.value.trim();
-                if (appIdRef) cfg.appIdRef = appIdRef;
-                const appKey = dAppKey.value.trim();
-                if (appKey) cfg.appKey = appKey;
-                const appKeyRef = dAppKeyRef.value.trim();
-                if (appKeyRef) cfg.appKeyRef = appKeyRef;
-                const appSecret = dAppSecret.value.trim();
-                if (appSecret) cfg.appSecret = appSecret;
-                const appSecretRef = dAppSecretRef.value.trim();
-                if (appSecretRef) cfg.appSecretRef = appSecretRef;
-
-                const allowedFromUserIds = csvToList(dAllowedFromUsers.value);
-                if (allowedFromUserIds.length) cfg.allowedFromUserIds = allowedFromUserIds;
-                const allowedGroupIds = csvToList(dAllowedGroupIds.value);
-                if (allowedGroupIds.length) cfg.allowedGroupIds = allowedGroupIds;
-
-                const maxInboundChars = parseInt(dMaxInboundChars.value, 10);
-                if (!Number.isNaN(maxInboundChars) && maxInboundChars > 0) cfg.maxInboundChars = maxInboundChars;
-
-                const streamPollIntervalMs = parseInt(dStreamPollMs.value, 10);
-                if (!Number.isNaN(streamPollIntervalMs) && streamPollIntervalMs > 0) cfg.streamPollIntervalMs = streamPollIntervalMs;
-
                 return cfg;
             }
 
