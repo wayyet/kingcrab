@@ -28,6 +28,7 @@ internal static class AdminChannelEndpoints
         // Resolve channel adapters once at startup (only channels that support runtime updates).
         var feishu = app.Services.GetRequiredService<FeishuChannel>();
         var channelStore = app.Services.GetRequiredService<ChannelConfigStore>();
+        var defaultDingTalkConfig = CloneDingTalkConfig(startup.Config.Channels.DingTalk);
 
         // ── GET /admin/channels/{channel} ─────────────────────────────────────
         // Returns the currently effective config for the named channel.
@@ -40,6 +41,7 @@ internal static class AdminChannelEndpoints
             return channel switch
             {
                 "feishu" => Results.Json(feishu.GetEffectiveConfigForAdmin(), CoreJsonContext.Default.FeishuChannelConfig),
+                "dingtalk" => Results.Json(GetEffectiveDingTalkConfig(channelStore, defaultDingTalkConfig), CoreJsonContext.Default.DingTalkChannelConfig),
 
                 // Add new channels here:
                 // "slack"   => Results.Json(slack.GetEffectiveConfig(), CoreJsonContext.Default.SlackChannelConfig),
@@ -69,6 +71,7 @@ internal static class AdminChannelEndpoints
             return channel switch
             {
                 "feishu" => await HandleFeishuUpdateAsync(ctx, feishu, channelStore),
+                "dingtalk" => await HandleDingTalkUpdateAsync(ctx, startup.Config.Channels, channelStore),
 
                 // Add new channels here:
                 // "slack"   => await HandleSlackUpdateAsync(ctx, slack, channelStore),
@@ -102,6 +105,10 @@ internal static class AdminChannelEndpoints
                     // Clear override so IOptionsMonitor / appsettings takes over again.
                     feishu.SetRuntimeConfig(null);
                     await feishu.RestartAsync(ctx.RequestAborted);
+                    break;
+                case "dingtalk":
+                    channelStore.Delete("dingtalk");
+                    startup.Config.Channels.DingTalk = CloneDingTalkConfig(defaultDingTalkConfig);
                     break;
 
                 // Add new channels here
@@ -153,5 +160,69 @@ internal static class AdminChannelEndpoints
         return Results.Json(
             new OperationStatusResponse { Success = true, Message = "Feishu config persisted and channel reconnected." },
             CoreJsonContext.Default.OperationStatusResponse);
+    }
+
+    private static async Task<IResult> HandleDingTalkUpdateAsync(HttpContext ctx, ChannelsConfig channelsConfig, ChannelConfigStore channelStore)
+    {
+        DingTalkChannelConfig? patch;
+        try
+        {
+            patch = await ctx.Request.ReadFromJsonAsync(CoreJsonContext.Default.DingTalkChannelConfig, ctx.RequestAborted);
+        }
+        catch (Exception ex)
+        {
+            return Results.Json(
+                new OperationStatusResponse { Success = false, Error = $"Invalid JSON: {ex.Message}" },
+                CoreJsonContext.Default.OperationStatusResponse,
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        if (patch is null)
+            return Results.Json(
+                new OperationStatusResponse { Success = false, Error = "Request body is required." },
+                CoreJsonContext.Default.OperationStatusResponse,
+                statusCode: StatusCodes.Status400BadRequest);
+
+        patch = NormalizeDingTalkConfig(patch);
+        channelStore.Save("dingtalk", patch, CoreJsonContext.Default.DingTalkChannelConfig);
+        channelsConfig.DingTalk = patch;
+
+        return Results.Json(
+            new OperationStatusResponse { Success = true, Message = "DingTalk config persisted." },
+            CoreJsonContext.Default.OperationStatusResponse);
+    }
+
+    private static DingTalkChannelConfig GetEffectiveDingTalkConfig(ChannelConfigStore channelStore, DingTalkChannelConfig defaultConfig)
+    {
+        var loaded = channelStore.TryLoad("dingtalk", CoreJsonContext.Default.DingTalkChannelConfig);
+        return NormalizeDingTalkConfig(loaded ?? defaultConfig);
+    }
+
+    private static DingTalkChannelConfig CloneDingTalkConfig(DingTalkChannelConfig source)
+    {
+        return NormalizeDingTalkConfig(new DingTalkChannelConfig
+        {
+            Enabled = source.Enabled,
+            AppId = source.AppId,
+            AppIdRef = source.AppIdRef,
+            AppKey = source.AppKey,
+            AppKeyRef = source.AppKeyRef,
+            AppSecret = source.AppSecret,
+            AppSecretRef = source.AppSecretRef,
+            RobotCode = source.RobotCode,
+            RobotCodeRef = source.RobotCodeRef,
+            GroupPolicy = source.GroupPolicy,
+            AllowedFromUserIds = source.AllowedFromUserIds.ToArray(),
+            AllowedGroupIds = source.AllowedGroupIds.ToArray(),
+            MaxInboundChars = source.MaxInboundChars,
+            RequireMentionInGroup = source.RequireMentionInGroup,
+            ExposeInboundMediaUrls = source.ExposeInboundMediaUrls,
+            StreamPollIntervalMs = source.StreamPollIntervalMs,
+        });
+    }
+
+    private static DingTalkChannelConfig NormalizeDingTalkConfig(DingTalkChannelConfig source)
+    {
+        return source;
     }
 }

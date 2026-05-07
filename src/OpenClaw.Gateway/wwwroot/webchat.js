@@ -2101,8 +2101,43 @@
             const fAppId         = document.getElementById('feishu-appid');
             const fAppSecret     = document.getElementById('feishu-appsecret');
             const fAppSecretRef  = document.getElementById('feishu-appsecret-ref');
+            const fForm          = document.getElementById('ch-feishu-form');
+            const dForm          = document.getElementById('ch-dingtalk-form');
+
+            // DingTalk field refs
+            const dAppId           = document.getElementById('dingtalk-appid');
+            const dAppIdRef        = document.getElementById('dingtalk-appid-ref');
+            const dAppKey           = document.getElementById('dingtalk-appkey');
+            const dAppKeyRef        = document.getElementById('dingtalk-appkey-ref');
+            const dAppSecret        = document.getElementById('dingtalk-appsecret');
+            const dAppSecretRef     = document.getElementById('dingtalk-appsecret-ref');
+            const dGroupPolicy      = document.getElementById('dingtalk-group-policy');
+            const dAllowedFromUsers = document.getElementById('dingtalk-allowed-from-user-ids');
+            const dAllowedGroupIds  = document.getElementById('dingtalk-allowed-group-ids');
+            const dMaxInboundChars  = document.getElementById('dingtalk-max-inbound-chars');
+            const dRequireMention   = document.getElementById('dingtalk-require-mention');
+            const dExposeMedia      = document.getElementById('dingtalk-expose-media');
+            const dStreamPollMs     = document.getElementById('dingtalk-stream-poll-interval-ms');
 
             let activeChannel = 'feishu';
+
+            function csvToList(value) {
+                return String(value ?? '')
+                    .split(',')
+                    .map(x => x.trim())
+                    .filter(Boolean);
+            }
+
+            function listToCsv(value) {
+                if (Array.isArray(value)) return value.join(', ');
+                if (typeof value === 'string') return value;
+                return '';
+            }
+
+            function setChannelFormVisibility() {
+                fForm.style.display = activeChannel === 'feishu' ? '' : 'none';
+                dForm.style.display = activeChannel === 'dingtalk' ? '' : 'none';
+            }
 
             function showStatus(msg, isErr) {
                 statusBar.textContent = msg;
@@ -2126,6 +2161,22 @@
                 fAppSecretRef.value = cfg.AppSecretRef ?? cfg.appSecretRef ?? '';
             }
 
+            function populateDingTalkForm(cfg) {
+                dAppId.value            = cfg.AppId ?? cfg.appId ?? '';
+                dAppIdRef.value         = cfg.AppIdRef ?? cfg.appIdRef ?? '';
+                dAppKey.value           = cfg.AppKey ?? cfg.appKey ?? '';
+                dAppKeyRef.value        = cfg.AppKeyRef ?? cfg.appKeyRef ?? '';
+                dAppSecret.value        = cfg.AppSecret ?? cfg.appSecret ?? '';
+                dAppSecretRef.value     = cfg.AppSecretRef ?? cfg.appSecretRef ?? '';
+                dGroupPolicy.value      = cfg.GroupPolicy ?? cfg.groupPolicy ?? 'open';
+                dAllowedFromUsers.value = listToCsv(cfg.AllowedFromUserIds ?? cfg.allowedFromUserIds ?? []);
+                dAllowedGroupIds.value  = listToCsv(cfg.AllowedGroupIds ?? cfg.allowedGroupIds ?? []);
+                dMaxInboundChars.value  = cfg.MaxInboundChars ?? cfg.maxInboundChars ?? 4096;
+                dRequireMention.checked = cfg.RequireMentionInGroup ?? cfg.requireMentionInGroup ?? true;
+                dExposeMedia.checked    = cfg.ExposeInboundMediaUrls ?? cfg.exposeInboundMediaUrls ?? true;
+                dStreamPollMs.value     = cfg.StreamPollIntervalMs ?? cfg.streamPollIntervalMs ?? 500;
+            }
+
             // Build config object from the Feishu form
             function buildFeishuConfig() {
                 // Always enable when saving from this simple form; all other fields use C# defaults.
@@ -2137,6 +2188,41 @@
                 if (appSecret) cfg.appSecret = appSecret;
                 const appSecretRef = fAppSecretRef.value.trim();
                 if (appSecretRef) cfg.appSecretRef = appSecretRef;
+                return cfg;
+            }
+
+            function buildDingTalkConfig() {
+                const cfg = {
+                    enabled: true,
+                    groupPolicy: dGroupPolicy.value || 'open',
+                    requireMentionInGroup: !!dRequireMention.checked,
+                    exposeInboundMediaUrls: !!dExposeMedia.checked
+                };
+
+                const appId = dAppId.value.trim();
+                if (appId) cfg.appId = appId;
+                const appIdRef = dAppIdRef.value.trim();
+                if (appIdRef) cfg.appIdRef = appIdRef;
+                const appKey = dAppKey.value.trim();
+                if (appKey) cfg.appKey = appKey;
+                const appKeyRef = dAppKeyRef.value.trim();
+                if (appKeyRef) cfg.appKeyRef = appKeyRef;
+                const appSecret = dAppSecret.value.trim();
+                if (appSecret) cfg.appSecret = appSecret;
+                const appSecretRef = dAppSecretRef.value.trim();
+                if (appSecretRef) cfg.appSecretRef = appSecretRef;
+
+                const allowedFromUserIds = csvToList(dAllowedFromUsers.value);
+                if (allowedFromUserIds.length) cfg.allowedFromUserIds = allowedFromUserIds;
+                const allowedGroupIds = csvToList(dAllowedGroupIds.value);
+                if (allowedGroupIds.length) cfg.allowedGroupIds = allowedGroupIds;
+
+                const maxInboundChars = parseInt(dMaxInboundChars.value, 10);
+                if (!Number.isNaN(maxInboundChars) && maxInboundChars > 0) cfg.maxInboundChars = maxInboundChars;
+
+                const streamPollIntervalMs = parseInt(dStreamPollMs.value, 10);
+                if (!Number.isNaN(streamPollIntervalMs) && streamPollIntervalMs > 0) cfg.streamPollIntervalMs = streamPollIntervalMs;
+
                 return cfg;
             }
 
@@ -2152,6 +2238,7 @@
                     }
                     const cfg = await resp.json();
                     if (activeChannel === 'feishu') populateFeishuForm(cfg);
+                    if (activeChannel === 'dingtalk') populateDingTalkForm(cfg);
                     showStatus('加载成功 — 当前为生效中的配置', false);
                 } catch (e) {
                     showStatus('加载失败: ' + e.message, true);
@@ -2163,6 +2250,8 @@
                 let body;
                 if (activeChannel === 'feishu') {
                     body = buildFeishuConfig();
+                } else if (activeChannel === 'dingtalk') {
+                    body = buildDingTalkConfig();
                 } else {
                     showFormError('未知渠道: ' + activeChannel);
                     return;
@@ -2212,6 +2301,7 @@
                 statusBar.style.display = 'none';
                 clearFormError();
                 overlay.classList.add('open');
+                setChannelFormVisibility();
                 await loadChannelConfig();
             });
 
@@ -2233,6 +2323,7 @@
                     activeChannel = tab.dataset.channel;
                     clearFormError();
                     statusBar.style.display = 'none';
+                    setChannelFormVisibility();
                     await loadChannelConfig();
                 });
             });
