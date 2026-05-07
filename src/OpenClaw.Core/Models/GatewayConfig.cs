@@ -689,60 +689,7 @@ public sealed class DingTalkChannelConfig
     public int StreamPollIntervalMs { get; set; } = 500;
 }
 
-/// <summary>
-/// Configuration for the DingTalk channel.
-/// Uses Stream mode (HTTP long-polling) to receive events without exposing a public webhook.
-/// Supports config hot-reload via UpdateConfigAsync.
-/// </summary>
-public sealed class DingTalkChannelConfig
-{
-    public bool Enabled { get; set; } = false;
 
-    /// <summary>DingTalk App Key (direct value). Takes precedence over AppKeyRef when set.</summary>
-    public string? AppKey { get; set; }
-
-    /// <summary>Secret reference for App Key (e.g. "env:DINGTALK_APP_KEY"). Used when AppKey is null.</summary>
-    public string AppKeyRef { get; set; } = "env:DINGTALK_APP_KEY";
-
-    /// <summary>DingTalk App Secret (direct value). Avoid in production; prefer AppSecretRef.</summary>
-    public string? AppSecret { get; set; }
-
-    /// <summary>Secret reference for App Secret (e.g. "env:DINGTALK_APP_SECRET").</summary>
-    public string AppSecretRef { get; set; } = "env:DINGTALK_APP_SECRET";
-
-    /// <summary>DingTalk Robot Code (the robot's code identifier).</summary>
-    public string? RobotCode { get; set; }
-
-    /// <summary>Secret reference for Robot Code (e.g. "env:DINGTALK_ROBOT_CODE").</summary>
-    public string RobotCodeRef { get; set; } = "env:DINGTALK_ROBOT_CODE";
-
-    /// <summary>Group chat policy: "open" allows all groups, "allowlist" restricts to AllowedGroupIds, "disabled" drops group messages.</summary>
-    public string GroupPolicy { get; set; } = "open";
-
-    /// <summary>Allowed sender user_ids. Empty = allow all (subject to GroupPolicy).</summary>
-    public string[] AllowedFromUserIds { get; set; } = [];
-
-    /// <summary>Allowed group chat IDs. Only used when GroupPolicy is "allowlist".</summary>
-    public string[] AllowedGroupIds { get; set; } = [];
-
-    public int MaxInboundChars { get; set; } = 4096;
-
-    /// <summary>
-    /// When true, the bot only responds to group messages where it is explicitly @mentioned.
-    /// Recommended when multiple bots share the same group.
-    /// </summary>
-    public bool RequireMentionInGroup { get; set; } = true;
-
-    /// <summary>
-    /// When true, inbound media URLs are exposed in MediaUrl field.
-    /// </summary>
-    public bool ExposeInboundMediaUrls { get; set; } = true;
-
-    /// <summary>
-    /// Stream polling interval in milliseconds (for long-polling mode).
-    /// </summary>
-    public int StreamPollIntervalMs { get; set; } = 500;
-}
 
 public sealed class CronConfig
 {
