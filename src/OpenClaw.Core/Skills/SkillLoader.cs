@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using OpenClaw.Core.Models;
 using Microsoft.Extensions.Logging;
 
 namespace OpenClaw.Core.Skills;
@@ -251,6 +252,7 @@ public static class SkillLoader
         if (homepage is not null && metadata.Homepage is null)
             metadata.Homepage = homepage;
 
+        var artifactContract = TryLoadArtifactContract(skillDir, logger);
         var projectionContractDiscovery = TryLoadProjectionContracts(skillDir, logger);
 
         // Replace {baseDir} placeholder in instructions
@@ -269,9 +271,35 @@ public static class SkillLoader
             CommandDispatch = commandDispatch,
             CommandTool = commandTool,
             CommandArgMode = commandArgMode,
+            ArtifactContract = artifactContract,
             ProjectionContracts = projectionContractDiscovery.Contracts,
             ProjectionDiscovery = projectionContractDiscovery.Discovery
         };
+    }
+
+    private static SkillArtifactContract? TryLoadArtifactContract(string skillDir, ILogger? logger)
+    {
+        var contractPath = Path.Combine(skillDir, "contracts", "artifacts.json");
+        if (!File.Exists(contractPath))
+            return null;
+
+        try
+        {
+            using var stream = File.OpenRead(contractPath);
+            var contract = JsonSerializer.Deserialize(stream, CoreJsonContext.Default.SkillArtifactContract);
+            if (contract is null)
+            {
+                logger?.LogWarning("Artifact contract at {Path} is empty or invalid.", contractPath);
+                return null;
+            }
+
+            return contract;
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex, "Failed to load artifact contract from {Path}.", contractPath);
+            return null;
+        }
     }
 
     private static ProjectionContractDiscoveryResult TryLoadProjectionContracts(string skillDir, ILogger? logger)

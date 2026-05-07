@@ -1,4 +1,5 @@
         // Set up marked to use highlight.js
+        console.log('%c[webchat.js] LOADED v-artifact-debug-2026-05-07', 'color:#14b8a6;font-weight:bold');
         marked.setOptions({
             highlight: function (code, lang) {
                 const language = hljs.getLanguage(lang) ? lang : 'plaintext';
@@ -17,6 +18,10 @@
         const oidcLoginButton = document.getElementById('oidc-login-button');
         const oidcLogoutButton = document.getElementById('oidc-logout-button');
         const typingRow = document.getElementById('typing-row');
+        const artifactPanel = document.getElementById('artifact-panel');
+        const artifactList = document.getElementById('artifact-list');
+        const artifactCount = document.getElementById('artifact-count');
+        const artifactEmptyState = document.getElementById('artifact-empty-state');
         const fileInput = document.getElementById('file-input');
         const attachBtn = document.getElementById('attach-btn');
         const imagePreviewStrip = document.getElementById('image-preview-strip');
@@ -51,6 +56,7 @@
         let streamEpoch = 0;               // incremented on session switch to discard stale stream frames
         let boundEpoch = 0;               // epoch captured at typing_start; checked on each chunk
         let sessionAutoRefreshTimer = null; // setInterval handle for 15-second session list refresh
+        let artifactItems = [];
 
         const WEBCHAT_CONFIG = {
             streamRenderDebounceMs: Math.max(20, Number(window.OPENCLAW_WEBCHAT_CONFIG?.streamRenderDebounceMs ?? 120)),
@@ -342,6 +348,340 @@
             scrollToBottom();
         }
 
+        function normalizeArtifact(raw) {
+            if (!raw || typeof raw !== 'object') return null;
+            const kind = String(raw.kind || 'file').toLowerCase() === 'data' ? 'data' : 'file';
+            return {
+                kind,
+                artifactType: String(raw.artifactType || raw.artifact_type || raw.ArtifactType || 'generic'),
+                label: raw.label || raw.Label ? String(raw.label || raw.Label) : '',
+                skillName: raw.skillName || raw.SkillName ? String(raw.skillName || raw.SkillName) : '',
+                stage: raw.stage || raw.Stage ? String(raw.stage || raw.Stage) : '',
+                isTerminal: Boolean(raw.isTerminal ?? raw.IsTerminal),
+                fileUrl: raw.fileUrl || raw.FileUrl ? String(raw.fileUrl || raw.FileUrl) : '',
+                fileName: raw.fileName || raw.FileName ? String(raw.fileName || raw.FileName) : '',
+                mimeType: raw.mimeType || raw.MimeType ? String(raw.mimeType || raw.MimeType) : '',
+                fileSizeBytes: typeof (raw.fileSizeBytes ?? raw.FileSizeBytes) === 'number' ? (raw.fileSizeBytes ?? raw.FileSizeBytes) : null,
+                data: raw.data ?? raw.Data,
+                displayHint: raw.displayHint || raw.display_hint || raw.DisplayHint ? String(raw.displayHint || raw.display_hint || raw.DisplayHint) : ''
+            };
+        }
+
+        function appendArtifactCard(rawArtifact) {
+            console.log('[artifact] appendArtifactCard called, raw:', rawArtifact);
+            const artifact = normalizeArtifact(rawArtifact);
+            if (!artifact) { console.warn('[artifact] normalizeArtifact returned null'); return; }
+            console.log('[artifact] normalized:', artifact);
+
+            artifactItems.unshift(artifact);
+            renderArtifactPanel();
+            appendArtifactNotice(artifact);
+        }
+
+        function renderArtifactPanel() {
+            console.log('[artifact] renderArtifactPanel, items:', artifactItems.length, 'list el:', artifactList, 'count el:', artifactCount);
+            if (!artifactList || !artifactCount || !artifactEmptyState) {
+                console.error('[artifact] renderArtifactPanel: DOM refs missing', { artifactList, artifactCount, artifactEmptyState });
+                return;
+            }
+            artifactCount.textContent = String(artifactItems.length);
+            artifactList.innerHTML = '';
+            if (artifactItems.length === 0) {
+                artifactList.appendChild(artifactEmptyState);
+                return;
+            }
+
+            artifactItems.forEach(artifact => {
+                artifactList.appendChild(createArtifactCardElement(artifact));
+            });
+        }
+
+        function clearArtifactPanel() {
+            artifactItems = [];
+            renderArtifactPanel();
+        }
+
+        function createArtifactCardElement(artifact) {
+            const card = document.createElement('div');
+            card.className = 'artifact-card';
+
+            const header = document.createElement('div');
+            header.className = 'artifact-header';
+
+            const icon = document.createElement('div');
+            icon.className = 'artifact-icon';
+            icon.textContent = artifact.kind === 'file' ? 'FILE' : iconTextForDisplayHint(artifact.displayHint);
+
+            const titleWrap = document.createElement('div');
+            titleWrap.className = 'artifact-title-wrap';
+            const title = document.createElement('div');
+            title.className = 'artifact-title';
+            title.textContent = artifact.label || artifact.artifactType;
+            const meta = document.createElement('div');
+            meta.className = 'artifact-meta';
+            meta.textContent = [artifact.skillName, artifact.stage, artifact.isTerminal ? 'terminal' : '']
+                .filter(Boolean)
+                .join(' · ');
+            titleWrap.appendChild(title);
+            if (meta.textContent) titleWrap.appendChild(meta);
+
+            const badge = document.createElement('span');
+            badge.className = 'artifact-type-badge';
+            badge.textContent = artifact.artifactType;
+
+            header.append(icon, titleWrap, badge);
+            card.appendChild(header);
+
+            if (artifact.kind === 'file') {
+                card.appendChild(renderArtifactFile(artifact));
+            } else {
+                card.appendChild(renderArtifactData(artifact));
+            }
+
+            return card;
+        }
+
+        function appendArtifactNotice(artifact) {
+            const row = createRow('assistant');
+            const notice = document.createElement('button');
+            notice.type = 'button';
+            notice.className = 'message assistant artifact-notice';
+            notice.title = '查看右侧阶段产物面板';
+
+            const icon = document.createElement('span');
+            icon.className = 'artifact-notice-icon';
+            icon.textContent = artifact.kind === 'file' ? 'FILE' : iconTextForDisplayHint(artifact.displayHint);
+
+            const text = document.createElement('span');
+            text.className = 'artifact-notice-text';
+            text.textContent = `产物已更新：${artifact.label || artifact.artifactType}`;
+
+            notice.append(icon, text);
+            notice.addEventListener('click', () => {
+                artifactPanel?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+                artifactPanel?.classList.add('artifact-panel-highlight');
+                setTimeout(() => artifactPanel?.classList.remove('artifact-panel-highlight'), 900);
+            });
+
+            row.appendChild(notice);
+            chatContainer.insertBefore(row, typingRow);
+            scrollToBottom();
+        }
+
+        function iconTextForDisplayHint(hint) {
+            switch ((hint || '').toLowerCase()) {
+                case 'table': return 'TAB';
+                case 'code': return 'CODE';
+                case 'tree': return 'TREE';
+                case 'badge': return 'OK';
+                case 'progress': return '%';
+                default: return 'JSON';
+            }
+        }
+
+        function renderArtifactFile(artifact) {
+            const wrap = document.createElement('div');
+            wrap.className = 'artifact-file';
+
+            const link = document.createElement('a');
+            link.href = artifact.fileUrl || '#';
+            link.textContent = artifact.fileName || artifact.label || artifact.artifactType;
+            link.className = 'artifact-file-link';
+
+            const meta = document.createElement('div');
+            meta.className = 'artifact-file-meta';
+            const sizeLabel = artifact.fileSizeBytes != null ? formatFileSize(artifact.fileSizeBytes) : '';
+            meta.textContent = [sizeLabel, artifact.mimeType].filter(Boolean).join(' · ');
+
+            wrap.appendChild(link);
+            if (meta.textContent) wrap.appendChild(meta);
+            return wrap;
+        }
+
+        function renderArtifactData(artifact) {
+            const artifactType = (artifact.artifactType || '').toLowerCase();
+            if (artifactType === 'routing_decision') return renderRoutingDecisionArtifact(artifact.data);
+            if (artifactType === 'phase_state' || artifactType === 'skill_phase_state') return renderPhaseStateArtifact(artifact.data);
+            if (artifactType.endsWith('_progress') || artifactType === 'export_progress') return renderProgressArtifact(artifact.data);
+
+            const hint = (artifact.displayHint || 'text').toLowerCase();
+            if (hint === 'progress') return renderProgressArtifact(artifact.data);
+            if (hint === 'table') return renderTableArtifact(artifact.data);
+            if (hint === 'badge') return renderBadgeArtifact(artifact.data);
+            if (hint === 'code' || hint === 'tree') return renderCodeArtifact(artifact.data);
+            return renderTextArtifact(artifact.data);
+        }
+
+        function renderRoutingDecisionArtifact(data) {
+            const record = isPlainObject(data) ? data : {};
+            const wrap = document.createElement('div');
+            wrap.className = 'artifact-detail-grid';
+
+            wrap.appendChild(renderArtifactField('当前阶段', record.currentPhase));
+            wrap.appendChild(renderArtifactField('目标技能', record.targetSkill));
+            wrap.appendChild(renderArtifactField('原因', record.reason, true));
+
+            const persistedKeys = Array.isArray(record.persistedKeys) ? record.persistedKeys : [];
+            const keysField = document.createElement('div');
+            keysField.className = 'artifact-field artifact-field-wide';
+            const label = document.createElement('div');
+            label.className = 'artifact-field-label';
+            label.textContent = '已持久化数据';
+            const list = document.createElement('div');
+            list.className = 'artifact-key-list';
+            if (persistedKeys.length === 0) {
+                const empty = document.createElement('span');
+                empty.className = 'artifact-empty';
+                empty.textContent = '无';
+                list.appendChild(empty);
+            } else {
+                persistedKeys.forEach(key => {
+                    const chip = document.createElement('span');
+                    chip.className = 'artifact-key-chip';
+                    chip.textContent = String(key);
+                    list.appendChild(chip);
+                });
+            }
+            keysField.append(label, list);
+            wrap.appendChild(keysField);
+
+            return wrap;
+        }
+
+        function renderPhaseStateArtifact(data) {
+            const record = isPlainObject(data) ? data : {};
+            const wrap = document.createElement('div');
+            wrap.className = 'artifact-detail-grid';
+            wrap.appendChild(renderArtifactField('状态', record.value ?? record.status ?? data));
+            wrap.appendChild(renderArtifactField('阶段', record.phase ?? record.currentPhase));
+            wrap.appendChild(renderArtifactField('下一阶段', record.next ?? record.nextStage));
+            return wrap;
+        }
+
+        function renderArtifactField(labelText, value, wide = false) {
+            const field = document.createElement('div');
+            field.className = wide ? 'artifact-field artifact-field-wide' : 'artifact-field';
+            const label = document.createElement('div');
+            label.className = 'artifact-field-label';
+            label.textContent = labelText;
+            const body = document.createElement('div');
+            body.className = 'artifact-field-value';
+            body.textContent = stringifyArtifactValue(value) || '—';
+            field.append(label, body);
+            return field;
+        }
+
+        function renderProgressArtifact(data) {
+            const record = isPlainObject(data) ? data : {};
+            const rawPercent = Number(record.percent ?? record.progress ?? 0);
+            const percent = Number.isFinite(rawPercent) ? Math.max(0, Math.min(100, Math.round(rawPercent))) : 0;
+            const message = stringifyArtifactValue(record.message ?? record.label ?? '');
+
+            const wrap = document.createElement('div');
+            wrap.className = 'artifact-progress';
+            const track = document.createElement('div');
+            track.className = 'artifact-progress-track';
+            const bar = document.createElement('div');
+            bar.className = 'artifact-progress-bar';
+            bar.style.width = `${percent}%`;
+            track.appendChild(bar);
+
+            const label = document.createElement('div');
+            label.className = 'artifact-progress-label';
+            const msg = document.createElement('span');
+            msg.textContent = message;
+            const pct = document.createElement('span');
+            pct.textContent = `${percent}%`;
+            label.append(msg, pct);
+
+            wrap.append(track, label);
+            return wrap;
+        }
+
+        function renderTableArtifact(data) {
+            const rows = Array.isArray(data) ? data.filter(isPlainObject) : [];
+            if (rows.length === 0) return renderCodeArtifact(data);
+
+            const columns = Array.from(new Set(rows.flatMap(row => Object.keys(row)))).slice(0, 8);
+            const wrap = document.createElement('div');
+            wrap.className = 'artifact-table-wrap';
+            const table = document.createElement('table');
+            table.className = 'artifact-table';
+
+            const thead = document.createElement('thead');
+            const headRow = document.createElement('tr');
+            columns.forEach(col => {
+                const th = document.createElement('th');
+                th.textContent = col;
+                headRow.appendChild(th);
+            });
+            thead.appendChild(headRow);
+
+            const tbody = document.createElement('tbody');
+            rows.slice(0, 12).forEach(row => {
+                const tr = document.createElement('tr');
+                columns.forEach(col => {
+                    const td = document.createElement('td');
+                    td.textContent = stringifyArtifactValue(row[col]);
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+
+            table.append(thead, tbody);
+            wrap.appendChild(table);
+            return wrap;
+        }
+
+        function renderBadgeArtifact(data) {
+            const record = isPlainObject(data) ? data : null;
+            const value = stringifyArtifactValue(record ? (record.value ?? record.status ?? data) : data);
+            const badge = document.createElement('div');
+            badge.className = 'artifact-status-badge';
+            badge.textContent = value || 'updated';
+            return badge;
+        }
+
+        function renderCodeArtifact(data) {
+            const pre = document.createElement('pre');
+            pre.className = 'artifact-code';
+            const code = document.createElement('code');
+            code.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+            pre.appendChild(code);
+            return pre;
+        }
+
+        function renderTextArtifact(data) {
+            const div = document.createElement('div');
+            div.className = 'artifact-text';
+            div.textContent = stringifyArtifactValue(data);
+            return div;
+        }
+
+        function isPlainObject(value) {
+            return value !== null && typeof value === 'object' && !Array.isArray(value);
+        }
+
+        function stringifyArtifactValue(value) {
+            if (value === null || value === undefined) return '';
+            if (typeof value === 'string') return value;
+            if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+            return JSON.stringify(value);
+        }
+
+        function appendStageGate(gate) {
+            if (!gate || typeof gate !== 'object') return;
+            const skillName = gate.skillName || gate.SkillName || '';
+            const completedStage = gate.completedStage || gate.CompletedStage || '';
+            const nextStage = gate.nextStage || gate.NextStage || '';
+            const canProceed = Boolean(gate.canProceed ?? gate.CanProceed);
+            const blockedReason = gate.blockedReason || gate.BlockedReason || '';
+            const text = canProceed
+                ? `${skillName}: ${completedStage} completed, ${nextStage} is ready.`
+                : `${skillName}: ${nextStage} is blocked. ${blockedReason}`;
+            appendSystem(text, !canProceed);
+        }
+
         function scrollToBottom(smooth = true) {
             chatWrapper.scrollTo({
                 top: chatWrapper.scrollHeight,
@@ -512,6 +852,7 @@
             ws.onmessage = (event) => {
                 try {
                     const env = JSON.parse(event.data);
+                    console.log('[ws] recv type:', JSON.stringify(env.type), 'keys:', Object.keys(env));
 
                     switch (env.type) {
                         case 'typing_start':
@@ -571,6 +912,14 @@
                         case 'tool_result':
                             break;
 
+                        case 'artifact':
+                            appendArtifactCard(env.artifact || env.Artifact || env);
+                            break;
+
+                        case 'skill_stage_gate':
+                            appendStageGate(env.stageGate || env.StageGate || env.stage_gate || env);
+                            break;
+
                         case 'file_attachment': {
                             const fileUrl = env.fileUrl || '';
                             const fileName = env.fileName || env.text || 'file';
@@ -625,6 +974,7 @@
                         }
                     }
                 } catch (e) {
+                    console.error('[ws] onmessage exception:', e, 'raw data:', event.data);
                     if (!activeResponseDiv) {
                         const row = createRow('assistant');
                         activeResponseDiv = document.createElement('div');
@@ -1174,6 +1524,7 @@
             activeRawContent = '';
             chatContainer.innerHTML = '';
             chatContainer.appendChild(typingRow);
+            clearArtifactPanel();
 
             const headers = await getAuthHeaders(10);
             try {
@@ -1239,6 +1590,7 @@
             liveChatNodes = [];
             chatContainer.innerHTML = '';
             chatContainer.appendChild(typingRow);
+            clearArtifactPanel();
             activeResponseDiv = null;
             activeRawContent = '';
             document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
@@ -1264,6 +1616,7 @@
             liveChatNodes = [];
             chatContainer.innerHTML = '';
             chatContainer.appendChild(typingRow);
+            clearArtifactPanel();
             activeResponseDiv = null;
             activeRawContent = '';
             document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));

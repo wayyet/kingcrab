@@ -127,6 +127,8 @@ public sealed class MafAgentRuntime : IAgentRuntime
 
     public IReadOnlyList<AITool> LoadedTools => _mafTools is IReadOnlyList<AITool> r ? r : [.. _mafTools];
 
+    public event Action<IReadOnlyList<SkillDefinition>>? SkillsReloaded;
+
     public Task ApplyMcpToolChangesAsync(
         IReadOnlyList<ITool> toAdd,
         IReadOnlyList<string> toRemove,
@@ -167,6 +169,9 @@ public sealed class MafAgentRuntime : IAgentRuntime
             logger.LogInformation("{Summary}", SkillPromptBuilder.BuildSummary(skills));
         else
             logger.LogInformation("No skills loaded for the MAF experiment runtime.");
+
+        try { SkillsReloaded?.Invoke(skills); }
+        catch (Exception ex) { logger.LogWarning(ex, "SkillsReloaded subscriber threw"); }
 
         return Task.FromResult<IReadOnlyList<string>>(LoadedSkillNames);
     }

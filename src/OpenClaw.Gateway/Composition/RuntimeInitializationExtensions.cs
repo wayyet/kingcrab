@@ -50,10 +50,12 @@ internal static class RuntimeInitializationExtensions
         var services = ResolveRuntimeServices(app);
         var blockedPluginIds = services.PluginHealth.GetBlockedPluginIds();
         var channelComposition = await BuildChannelCompositionAsync(app, startup, services, loggerFactory);
+        var artifactRuntime = new SkillArtifactRuntime();
         var builtInTools = CreateBuiltInTools(
             config,
             services,
-            startup.WorkspacePath);
+            startup.WorkspacePath,
+            artifactRuntime);
         if (config.Plugins.Mcp.Enabled)
             await services.McpRegistry.RegisterToolsAsync(services.NativeRegistry, app.Lifetime.ApplicationStopping);
 
@@ -98,6 +100,7 @@ internal static class RuntimeInitializationExtensions
 
         var skillLogger = loggerFactory.CreateLogger("SkillLoader");
         var skills = SkillLoader.LoadAll(config.Skills, startup.WorkspacePath, skillLogger, combinedPluginSkillRoots);
+        artifactRuntime.ReplaceSkills(skills);
         if (skills.Count > 0)
             skillLogger.LogInformation("{Summary}", SkillPromptBuilder.BuildSummary(skills));
 
@@ -145,6 +148,10 @@ internal static class RuntimeInitializationExtensions
         //}
 
         var middlewarePipeline = CreateMiddlewarePipeline(config, loggerFactory, services.ContractGovernance, services.SessionManager);
+
+        // Keep SkillArtifactRuntime in sync whenever the agent reloads skills.
+        agentRuntime.SkillsReloaded += skills => artifactRuntime.ReplaceSkills(skills);
+
         var skillWatcher = new SkillWatcherService(
             config.Skills,
             startup.WorkspacePath,
@@ -250,6 +257,7 @@ internal static class RuntimeInitializationExtensions
             ToolSandbox = app.Services.GetService<IToolSandbox>(),
             Pipeline = app.Services.GetRequiredService<MessagePipeline>(),
             WebSocketChannel = app.Services.GetRequiredService<WebSocketChannel>(),
+            MediaCache = app.Services.GetRequiredService<MediaCacheStore>(),
             NativeRegistry = app.Services.GetRequiredService<NativePluginRegistry>(),
             McpRegistry = app.Services.GetRequiredService<McpServerToolRegistry>()
         };
@@ -511,7 +519,8 @@ internal static class RuntimeInitializationExtensions
     private static IReadOnlyList<ITool> CreateBuiltInTools(
         GatewayConfig config,
         RuntimeServices services,
-        string? workspacePath)
+        string? workspacePath,
+        SkillArtifactRuntime artifactRuntime)
     {
         var projectId = config.Memory.ProjectId
             ?? Environment.GetEnvironmentVariable("OPENCLAW_PROJECT")
@@ -523,6 +532,7 @@ internal static class RuntimeInitializationExtensions
             new FileReadTool(config.Tooling),
             new FileWriteTool(config.Tooling),
             new PublishFileTool(config.Tooling),
+            new EmitArtifactTool(services.MediaCache, services.WebSocketChannel, config, artifactRuntime),
             new ProcessTool(services.ProcessService, config.Tooling),
             new MemoryNoteTool(services.MemoryStore),
             new MemorySearchTool((IMemoryNoteSearch)services.MemoryStore),
@@ -1085,6 +1095,7 @@ internal static class RuntimeInitializationExtensions
         public IToolSandbox? ToolSandbox { get; init; }
         public required MessagePipeline Pipeline { get; init; }
         public required WebSocketChannel WebSocketChannel { get; init; }
+        public required MediaCacheStore MediaCache { get; init; }
         public required NativePluginRegistry NativeRegistry { get; init; }
         public required McpServerToolRegistry McpRegistry { get; init; }
     }
