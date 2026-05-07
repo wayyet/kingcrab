@@ -354,6 +354,13 @@ public sealed class ToolingConfig
 
     public bool EnableBrowserTool { get; set; } = true;
     public bool EnableXSearch { get; set; } = true;
+
+    /// <summary>Enable the <c>publish_file</c> tool that publishes a local file as a downloadable attachment.</summary>
+    public bool EnablePublishFile { get; set; } = true;
+
+    /// <summary>Enable the <c>emit_artifact</c> tool that pushes skill artifacts (data/file) to the client over WebSocket.</summary>
+    public bool EnableEmitArtifact { get; set; } = true;
+
     public bool AllowBrowserEvaluate { get; set; } = true;
     public bool BrowserHeadless { get; set; } = true;
     public int BrowserTimeoutSeconds { get; set; } = 30;

@@ -531,8 +531,6 @@ internal static class RuntimeInitializationExtensions
             new ShellTool(config.Tooling),
             new FileReadTool(config.Tooling),
             new FileWriteTool(config.Tooling),
-            new PublishFileTool(config.Tooling),
-            new EmitArtifactTool(services.MediaCache, services.WebSocketChannel, config, artifactRuntime),
             new ProcessTool(services.ProcessService, config.Tooling),
             new MemoryNoteTool(services.MemoryStore),
             new MemorySearchTool((IMemoryNoteSearch)services.MemoryStore),
@@ -572,6 +570,12 @@ internal static class RuntimeInitializationExtensions
 
         if (config.Tooling.EnableXSearch)
             tools.Add(new XSearchTool());
+
+        if (config.Tooling.EnablePublishFile)
+            tools.Add(new PublishFileTool(config.Tooling));
+
+        if (config.Tooling.EnableEmitArtifact)
+            tools.Add(new EmitArtifactTool(services.MediaCache, services.WebSocketChannel, config, artifactRuntime));
 
         if (string.Equals(Environment.GetEnvironmentVariable("OPENCLAW_ENABLE_STREAMING_SMOKE_TOOL"), "1", StringComparison.Ordinal))
             tools.Add(new StreamingSmokeEchoTool());
