@@ -18,6 +18,7 @@ public sealed class GatewayConfig
     public SecurityConfig Security { get; set; } = new();
     public WebSocketConfig WebSocket { get; set; } = new();
     public ToolingConfig Tooling { get; set; } = new();
+    public HandoffConfig Handoff { get; set; } = new();
     public SandboxConfig Sandbox { get; set; } = new();
     public ExecutionConfig Execution { get; set; } = new();
     public CodingBackendsConfig CodingBackends { get; set; } = new();
@@ -315,6 +316,24 @@ public sealed class WebSocketConfig
     public int MaxConnectionsPerIp { get; set; } = 50;
     public int MessagesPerMinutePerConnection { get; set; } = 120;
     public int ReceiveTimeoutSeconds { get; set; } = 120;
+}
+
+public sealed class HandoffConfig
+{
+    public string DefaultWorkflowId { get; set; } = "";
+    public Dictionary<string, HandoffWorkflowConfig> Workflows { get; set; } = new(StringComparer.Ordinal);
+}
+
+public sealed class HandoffWorkflowConfig
+{
+    public string Kind { get; set; } = "handoff_todo";
+    public string DefaultStatus { get; set; } = "drafting";
+    public string[] NewItemStatuses { get; set; } = [];
+    public string[] Stages { get; set; } = [];
+    public string[] TargetSkills { get; set; } = [];
+    public string[] Statuses { get; set; } = [];
+    public Dictionary<string, string[]> Transitions { get; set; } = new(StringComparer.Ordinal);
+    public Dictionary<string, string> IdPrefixes { get; set; } = new(StringComparer.Ordinal);
 }
 
 public sealed class ToolingConfig

@@ -23,6 +23,7 @@ public sealed class NativeDynamicPluginHost : IAsyncDisposable
     private readonly GatewayRuntimeState _runtimeState;
     private readonly ILogger _logger;
     private readonly HashSet<string> _blockedPluginIds;
+    private readonly ISessionMetadataStore? _sessionMetadataStore;
     private readonly List<ITool> _tools = [];
     private readonly List<IChannelAdapter> _channelAdapters = [];
     private readonly List<(string PluginId, string ChannelId, IChannelAdapter Adapter)> _channelRegistrations = [];
@@ -38,11 +39,13 @@ public sealed class NativeDynamicPluginHost : IAsyncDisposable
         NativeDynamicPluginsConfig config,
         GatewayRuntimeState runtimeState,
         ILogger logger,
-        IReadOnlyCollection<string>? blockedPluginIds = null)
+        IReadOnlyCollection<string>? blockedPluginIds = null,
+        ISessionMetadataStore? sessionMetadataStore = null)
     {
         _config = config;
         _runtimeState = runtimeState;
         _logger = logger;
+        _sessionMetadataStore = sessionMetadataStore;
         _blockedPluginIds = blockedPluginIds is { Count: > 0 }
             ? new HashSet<string>(blockedPluginIds, StringComparer.Ordinal)
             : new HashSet<string>(StringComparer.Ordinal);
@@ -188,7 +191,7 @@ public sealed class NativeDynamicPluginHost : IAsyncDisposable
             var assembly = loadContext.LoadFromAssemblyPath(plugin.AssemblyPath);
             if (!TryValidatePluginKitReference(assembly, plugin.AssemblyPath, diagnostics))
                 throw new InvalidOperationException($"Dynamic native plugin '{manifest.Id}' references an incompatible OpenClaw.PluginKit version.");
-            var type = assembly.GetType(manifest.TypeName, throwOnError: false);
+            var type = ResolvePluginType(assembly, manifest.TypeName);
             if (type is null)
                 throw new InvalidOperationException($"Type '{manifest.TypeName}' was not found in assembly '{plugin.AssemblyPath}'.");
             if (!typeof(INativeDynamicPlugin).IsAssignableFrom(type))
@@ -197,7 +200,7 @@ public sealed class NativeDynamicPluginHost : IAsyncDisposable
             var instance = Activator.CreateInstance(type) as INativeDynamicPlugin
                 ?? throw new InvalidOperationException($"Failed to instantiate plugin type '{manifest.TypeName}'.");
 
-            var registrationContext = new RegistrationContext(manifest.Id, GetPluginConfig(manifest.Id), _logger);
+            var registrationContext = new RegistrationContext(manifest.Id, GetPluginConfig(manifest.Id), _logger, _sessionMetadataStore);
             instance.Register(registrationContext);
 
             foreach (var service in registrationContext.Services)
@@ -288,6 +291,30 @@ public sealed class NativeDynamicPluginHost : IAsyncDisposable
         return config.Value.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null
             ? null
             : config;
+    }
+
+    [UnconditionalSuppressMessage("Trimming", "IL2026:RequiresUnreferencedCode", Justification = "Dynamic native plugins are JIT-only and blocked in AOT mode.")]
+    [UnconditionalSuppressMessage("Trimming", "IL2057", Justification = "Dynamic native plugins are JIT-only and blocked in AOT mode.")]
+    private static Type? ResolvePluginType(Assembly assembly, string typeName)
+    {
+        var type = assembly.GetType(typeName, throwOnError: false);
+        if (type is not null)
+            return type;
+
+        return Type.GetType(
+            typeName,
+            assemblyName => string.Equals(assemblyName.Name, assembly.GetName().Name, StringComparison.Ordinal)
+                ? assembly
+                : null,
+            (resolvedAssembly, requestedTypeName, ignoreCase) =>
+            {
+                var targetAssembly = resolvedAssembly ?? assembly;
+                return ReferenceEquals(targetAssembly, assembly)
+                    ? targetAssembly.GetType(requestedTypeName, throwOnError: false, ignoreCase: ignoreCase)
+                    : null;
+            },
+            throwOnError: false,
+            ignoreCase: false);
     }
 
     private IReadOnlyList<string> ResolveSkillDirectories(DiscoveredNativeDynamicPlugin plugin, ICollection<PluginCompatibilityDiagnostic>? diagnostics = null)
@@ -705,11 +732,16 @@ public sealed class NativeDynamicPluginHost : IAsyncDisposable
         public List<PluginLoadReport> Reports { get; } = [];
     }
 
-    private sealed class RegistrationContext(string pluginId, JsonElement? config, ILogger logger) : INativeDynamicPluginContext
+    private sealed class RegistrationContext(
+        string pluginId,
+        JsonElement? config,
+        ILogger logger,
+        ISessionMetadataStore? sessionMetadataStore) : INativeDynamicPluginContext
     {
         public string PluginId { get; } = pluginId;
         public JsonElement? Config { get; } = config;
         public ILogger Logger { get; } = logger;
+        public ISessionMetadataStore? SessionMetadataStore { get; } = sessionMetadataStore;
         public List<ITool> Tools { get; } = [];
         public List<IChannelAdapter> Channels { get; } = [];
         public List<IToolHook> Hooks { get; } = [];
