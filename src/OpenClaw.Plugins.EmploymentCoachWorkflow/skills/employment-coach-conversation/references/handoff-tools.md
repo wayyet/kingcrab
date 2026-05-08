@@ -9,6 +9,7 @@ Handoff todo 是“交给谁、带什么输入、做到哪一步”的工作单�
 - [工具面](#工具面)
 - [通用结构](#通用结构)
 - [状态机](#状态机)
+- [单条 Handoff todo 的完成判断](#单条-handoff-todo-的完成判断)
 - [ID 与字段规范](#id-与字段规范)
 - [阶段 1：material](#阶段-1material)
 - [阶段 2：skill](#阶段-2skill)
@@ -115,6 +116,15 @@ Handoff todo 至少包含以下字段。字段名使用 snake_case。
 - `fingerprint`：当前 session 范围内基于 `stage` + `target_skill` + 核心意图生成的稳定指纹。同一意图无论说法如何变化都应该保持一致，供 `upsert` 合并使用；skill 不需要把 `session_id` 写进 fingerprint。
 - `revision`：工具维护的并发版本；多轮更新时递增。
 
+## 活跃项、阻塞项与合流
+
+- 活跃 Handoff todo：同一 `stage` / `target_skill` 下，`status` 不是 `confirmed` / `dismissed` 的条目。
+- 阻塞 Handoff todo：活跃项中 `status = drafting` / `dispatched` / `dirty` / `needs_review` 的条目；进入下一阶段前还要把 `ready_to_dispatch` 发出并确认，不能把它当完成态。
+- 每次 `upsert` 前必须先 `list` 当前阶段活跃项，检查 `fingerprint`、`payload.source_files`、`payload.objective`、核心意图是否已存在。
+- 新信息补齐同一意图时，优先 `patch` 原 `handoff_id` 并保留原 `fingerprint`；不要靠换标题或扩大描述创建第二条。
+- 新信息覆盖旧草稿时，先把旧草稿补齐后转为 `ready_to_dispatch`；只有用户明确撤销旧范围时，才把旧草稿转为 `dismissed`。
+- 不允许同一阶段中存在“旧草稿仍 `drafting`，新完整项已 `ready_to_dispatch`”且两者指向同一资料、同一来源文件或父子包含关系。
+
 ## 状态机
 
 | 状态 | 含义 |
@@ -136,6 +146,25 @@ Handoff todo 至少包含以下字段。字段名使用 snake_case。
 - `confirmed` → `needs_review` / `dismissed`
 - `needs_review` → `confirmed` / `ready_to_dispatch`
 
+## 单条 Handoff todo 的完成判断
+
+- `drafting`：只是草稿，说明信息还没谈够，既不能 dispatch，也不能计入阶段完成
+- `ready_to_dispatch`：说明该条交接单已经达到下游可消化明确度，但仍然只是“可发出”，不是“已完成”
+- `dispatched`：说明已经发给下游，正在等回传；等待期间依然不能把这条算作完成
+- `dirty`：说明这条在等待回传或回传后又被用户改动了，需要重新整理或重发；显然不能计入完成
+- `confirmed`：这是单条 Handoff todo 的**完成态**。必须同时满足“下游有回传结果”和“用户认可这次回传可用”
+- `needs_review`：曾经完成过，但被上游规则、边界或配置改动影响，需要复核；复核完成前不要继续把它当成稳定完成项
+- `dismissed`：只有在用户明确撤销、明确不再需要这条交接时才成立。`dismissed` 不是“自动视作完成”，它只是“停止继续推进这条”
+
+额外约束：
+
+- 不要把“已经创建 Handoff todo”误当成“已经完成工作”
+- 不要把“已经发出 dispatch”误当成“已经完成工作”
+- 只有 `confirmed` 才代表这条 Handoff todo 对应的交接闭环已经完成
+- 如果一条 required Handoff todo 被 `dismissed`，必须是用户明确改变了范围、取消了需求，或切换到了 skip 分支；否则不能靠 `dismissed` 偷渡阶段完成
+- 用户追问“完了吗 / 下一步”时，必须先 `list` 查 Handoff todo 状态；`dispatched` 只能答“已发出，等回传或确认”，不能答“完成”。
+- 已收到下游 `dispatch_callback` 时，也要先把摘要给用户确认；用户确认后 transition 到 `confirmed`，再创建下一阶段 Handoff todo。
+
 ## ID 与字段规范
 
 - Handoff tool 返回的 `session_id` + `handoff_id` 是存储主键；不要在对话里伪造不存在的 id。
@@ -154,11 +183,27 @@ Handoff todo 至少包含以下字段。字段名使用 snake_case。
 
 - `category`: 资料类型（业务对象定义 / 决策规则 / 流程 SOP / 案例库 / 边界与约束 / 风格语料 / 其他）
 - `payload.objective`: 一句话目标，例如“抽出退货场景里所有可能的退款节点和对应的判定规则”
-- `payload.source_files`: 已上传的文件名列表
+- `payload.source_files`: 已上传的文件名列表；如果资料完全来自对话正文而非上传文件，使用 `payload.source_content` 或 `payload.source_summary`，并在 `source` 里说明来源
 - `payload.scene_hint`: 场景类型（客服 / 销售 / 内勤 / ...）
 - `payload.mode`: `incremental`（默认）/ `full_replace`
 
-**明确度达标后**：状态可从 `drafting` 转为 `ready_to_dispatch`。
+**明确度达标后**：状态可从 `drafting` 转为 `ready_to_dispatch`。上传资料路径必须具备 `category`、`payload.objective`、`payload.source_files`、`payload.scene_hint`；对话资料路径必须具备 `category`、`payload.objective`、`payload.source_content` 或 `payload.source_summary`、`payload.scene_hint`。
+
+**单条 todo 何时可记为 `confirmed`**：
+
+- 下游已经基于这条 Handoff todo 产出可复述的抽取结果或切片更新结果
+- 回传摘要能对应到这条 Handoff todo 的 `objective`、`source_files` 和当前资料批次
+- 用户已经接受“这批资料先这样”的结果，不再要求立刻补改这条 material Handoff todo
+
+**阶段完成条件**：
+
+- 至少 1 份真实业务资料已经被纳入当前轮 material Handoff todo
+- 当前轮要处理的上传资料都已经被覆盖，不存在“用户明确要处理但还没进入任何 material Handoff todo”的文件
+- 每条参与当前批次推进的 material Handoff todo 都具备分类、目标和来源文件，并已进入 `confirmed`
+- 当前批次不再存在阻塞进入技能阶段的 material Handoff todo：`drafting` / `ready_to_dispatch` / `dispatched` / `dirty`
+- 用户已经明确表达“先这些”“这一批先这样”或等价意思，允许以当前批次作为后续技能阶段输入
+
+不要用一条泛化的“补资料” Handoff todo 代替整个资料阶段；资料阶段完成必须对应到真实文件覆盖和真实回传确认。
 
 ---
 
@@ -167,6 +212,8 @@ Handoff todo 至少包含以下字段。字段名使用 snake_case。
 `target_skill = skill-generation`
 
 **最低门槛**：`payload.skills` 必须是 Skill 数组，且至少 1 个元素；数组必须覆盖初始数字员工模板包里已有的 skill，以及本轮用户新增、需要生成的 skill。每个 Skill 都必须用 `generation_action` 区分“已有复用”还是“需要新生成”，并具备明确的 `skill_name` + `skill_description`，能说清触发条件和期望输出。
+
+**进入阶段时的 upsert 规则**：material 阶段所有参与当前批次的 Handoff todo 必须已是 `confirmed`。用户表达继续后，先 `upsert` 一条 skill 阶段 Handoff todo，再向用户反馈进入技能阶段；如果根据 material 回传已经能定义 `payload.skills[]`，状态设为 `ready_to_dispatch`，否则设为 `drafting` 并追问缺口。不要只在对话里说“接下来进入技能阶段”而不创建 `target_skill = skill-generation` 的 Handoff todo。
 
 **核心字段**：
 
@@ -233,6 +280,21 @@ Handoff todo 至少包含以下字段。字段名使用 snake_case。
 | `template_package_id` | `origin = template_package` 时为空，无法追溯来自哪个初始模板包 | 来自模板包时填写模板包 id，例如 `customer-service-starter`；非模板来源可为空 |
 | `template_package_version` | `origin = template_package` 时为空，无法追溯版本 | 来自模板包时填写模板包版本，例如 `1.0.0`；非模板来源可为空 |
 
+**单条 todo 何时可记为 `confirmed`**：
+
+- 下游回传的 skill 结果能对应到这条 Handoff todo 的 `payload.skills[]`
+- 需要新生成的条目已经生成出可用产物；需要复用的条目已经正确保留引用，不发生重复生成或错误覆盖
+- 用户认可这次技能定义已经可用，不要求当场继续补 trigger、边界或输出格式
+
+**阶段完成条件**：
+
+- 默认技能基线已经盘清，用户和教练都明确哪些能力复用、哪些能力新增
+- 所有真正需要推进的 skill Handoff todo 都已经进入 `confirmed`
+- 如果没有新增项，也必须得到用户对“当前技能基线已经足够”的明确确认，不能因为“没有待办”就自动视为完成
+- 当前不再存在阻塞进入 external 阶段的 skill Handoff todo：`drafting` / `ready_to_dispatch` / `dispatched` / `dirty`
+
+模板已有 skill 不是天然的“待完成工单”；只有真正需要补充、重做或新增的能力才进入 skill 阶段的完成统计。
+
 ---
 
 ## 阶段 3：external
@@ -273,6 +335,22 @@ Handoff todo 至少包含以下字段。字段名使用 snake_case。
   ]
 }
 ```
+
+**单条 todo 何时可记为 `confirmed`**：
+
+- 下游已经基于这条 Handoff todo 产出可追溯的 external 配置草案、skip 记录或其他约定产物
+- 回传结果与这条 Handoff todo 的 `external_capabilities[]` 对得上，不是泛泛而谈
+- 如果该条能力需要凭据，至少已经把凭据类型和槽位约束说明清楚；用户也理解凭据需要走安全表单而不是聊天框
+- 用户认可这条外部能力的配置结果或 skip 结果可接受
+
+**阶段完成条件**：
+
+- 每条 required external Handoff todo 都已经形成明确能力定义，并进入 `confirmed`，或者在用户明确不接外部系统时走完 skip 分支
+- 当前批次不再存在阻塞出口的 external Handoff todo：`drafting` / `ready_to_dispatch` / `dispatched` / `dirty`
+- 对 `auth_kind != none` 的能力，不要把“已经生成配置草案”误当成“已经彻底完成”；进入下一阶段前要确认凭据绑定路径已经收口
+- 一个系统若被拆成多条 external Handoff todo，也必须逐条确认，不要因为其中一条成功就把整个外部阶段视为完成
+
+外部阶段完成看的是“能力是否闭环”，不是“配置文件是否先被写出一版”。
 
 ## 写入红线
 
