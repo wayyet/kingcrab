@@ -32,6 +32,13 @@ public interface IAgentRuntime
     Task<IReadOnlyList<string>> ReloadSkillsAsync(CancellationToken ct = default);
 
     /// <summary>
+    /// Raised after <see cref="ReloadSkillsAsync"/> applies a fresh skill set, allowing
+    /// auxiliary subsystems (e.g., artifact runtime) to refresh their state without
+    /// re-running <c>SkillLoader</c>.
+    /// </summary>
+    event Action<IReadOnlyList<Core.Skills.SkillDefinition>>? SkillsReloaded;
+
+    /// <summary>
     /// Applies a diff of workspace MCP tools: registers <paramref name="toAdd"/> and
     /// unregisters <paramref name="toRemove"/> (by tool name) without restarting.
     /// </summary>

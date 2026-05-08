@@ -185,6 +185,7 @@ internal static class ControlEndpoints
                 Emoji = s.Metadata.Emoji,
                 Source = s.Source.ToString().ToLowerInvariant(),
                 IsUserInstalled = s.Source == SkillSource.Workspace,
+                ArtifactContract = s.ArtifactContract,
             }).ToList();
             return Results.Json(new SkillsDetailResponse { Skills = dtos }, CoreJsonContext.Default.SkillsDetailResponse);
         });

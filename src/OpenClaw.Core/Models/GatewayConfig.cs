@@ -36,6 +36,8 @@ public sealed class GatewayConfig
     public GmailPubSubConfig GmailPubSub { get; set; } = new();
     public MdnsConfig Mdns { get; set; } = new();
     public DiagnosticsConfig Diagnostics { get; set; } = new();
+
+    public DingTalkChannelConfig DingTalk { get; set; } = new();
     public string UsageFooter { get; set; } = "off"; // "off", "tokens", "full"
 
     public int MaxConcurrentSessions { get; set; } = 64;
@@ -354,6 +356,13 @@ public sealed class ToolingConfig
 
     public bool EnableBrowserTool { get; set; } = true;
     public bool EnableXSearch { get; set; } = true;
+
+    /// <summary>Enable the <c>publish_file</c> tool that publishes a local file as a downloadable attachment.</summary>
+    public bool EnablePublishFile { get; set; } = true;
+
+    /// <summary>Enable the <c>emit_artifact</c> tool that pushes skill artifacts (data/file) to the client over WebSocket.</summary>
+    public bool EnableEmitArtifact { get; set; } = true;
+
     public bool AllowBrowserEvaluate { get; set; } = true;
     public bool BrowserHeadless { get; set; } = true;
     public int BrowserTimeoutSeconds { get; set; } = 30;
@@ -374,6 +383,7 @@ public sealed class ChannelsConfig
     public DiscordChannelConfig Discord { get; set; } = new();
     public SignalChannelConfig Signal { get; set; } = new();
     public FeishuChannelConfig Feishu { get; set; } = new();
+    public DingTalkChannelConfig DingTalk { get; set; } = new();
 }
 
 public sealed class WhatsAppChannelConfig
@@ -660,6 +670,33 @@ public sealed class FeishuChannelConfig
     /// </summary>
     public bool ExposeInboundMediaUrls { get; set; } = true;
 }
+
+public sealed class DingTalkChannelConfig
+{
+    public bool Enabled { get; set; } = false;
+
+    public string? AppId { get; set; }
+    public string AppIdRef { get; set; } = "env:DINGTALK_APP_ID";
+
+    public string? AppKey { get; set; }
+    public string AppKeyRef { get; set; } = "env:DINGTALK_APP_KEY";
+
+    public string? AppSecret { get; set; }
+    public string AppSecretRef { get; set; } = "env:DINGTALK_APP_SECRET";
+
+    public string? RobotCode { get; set; }
+    public string RobotCodeRef { get; set; } = "env:DINGTALK_ROBOT_CODE";
+
+    public string GroupPolicy { get; set; } = "open";
+    public string[] AllowedFromUserIds { get; set; } = [];
+    public string[] AllowedGroupIds { get; set; } = [];
+    public int MaxInboundChars { get; set; } = 4096;
+    public bool RequireMentionInGroup { get; set; } = true;
+    public bool ExposeInboundMediaUrls { get; set; } = true;
+    public int StreamPollIntervalMs { get; set; } = 500;
+}
+
+
 
 public sealed class CronConfig
 {

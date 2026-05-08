@@ -415,6 +415,13 @@ internal static class GatewayWorkers
                             if (session is null)
                                 throw new InvalidOperationException("Session manager returned null session.");
 
+                            // Refresh transient routing identity each turn. The persisted Session.SenderId may
+                            // hold a stale connection id (e.g. WebSocket Connection.Id from a previous session
+                            // load), which causes mid-turn envelope routing (artifact, stage gate) to silently
+                            // drop because the dead id is no longer in the channel's connection table.
+                            session.ChannelId = msg.ChannelId;
+                            session.SenderId = conversationRecipientId;
+
                             // Apply cron job model override before route resolution (route can further override)
                             if (!string.IsNullOrWhiteSpace(msg.ModelOverride))
                                 session.ModelOverride = msg.ModelOverride;

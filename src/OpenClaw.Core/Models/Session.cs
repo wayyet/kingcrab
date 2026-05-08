@@ -20,8 +20,12 @@ public sealed class Session
     private long _totalCacheWriteTokens;
 
     public required string Id { get; init; }
-    public required string ChannelId { get; init; }
-    public required string SenderId { get; init; }
+    // ChannelId / SenderId describe the *current* routing identity of the conversation party.
+    // They must be mutable because a persisted session can be reactivated by a fresh connection
+    // (e.g. a WebSocket reconnect produces a new Connection.Id) and mid-turn envelope routing
+    // (artifact, stage gate) consults Session.SenderId to look up the live socket.
+    public required string ChannelId { get; set; }
+    public required string SenderId { get; set; }
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset LastActiveAt { get; set; } = DateTimeOffset.UtcNow;
     public List<ChatTurn> History { get; init; } = [];
@@ -155,6 +159,12 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(OutboundMessage))]
 [JsonSerializable(typeof(WsClientEnvelope))]
 [JsonSerializable(typeof(WsServerEnvelope))]
+[JsonSerializable(typeof(SkillArtifact))]
+[JsonSerializable(typeof(SkillStageGateEvent))]
+[JsonSerializable(typeof(SkillArtifactContract))]
+[JsonSerializable(typeof(SkillArtifactStageContract))]
+[JsonSerializable(typeof(SkillArtifactStageGateContract))]
+[JsonSerializable(typeof(SkillArtifactTypeContract))]
 [JsonSerializable(typeof(GatewayConfig))]
 [JsonSerializable(typeof(RuntimeConfig))]
 [JsonSerializable(typeof(GatewayRuntimeState))]
@@ -594,6 +604,7 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(DiscordChannelConfig))]
 [JsonSerializable(typeof(SignalChannelConfig))]
 [JsonSerializable(typeof(FeishuChannelConfig))]
+[JsonSerializable(typeof(DingTalkChannelConfig))]
 [JsonSerializable(typeof(RoutingConfig))]
 [JsonSerializable(typeof(AgentRouteConfig))]
 [JsonSerializable(typeof(TailscaleConfig))]

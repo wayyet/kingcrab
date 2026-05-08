@@ -98,8 +98,42 @@ public sealed class SkillDefinition
     /// <summary>Bound projection contracts that can refine this skill per request.</summary>
     public IReadOnlyList<SkillProjectionContractSet> ProjectionContracts { get; init; } = [];
 
+    /// <summary>Optional machine-readable artifact/stage contract loaded from contracts/artifacts.json.</summary>
+    public SkillArtifactContract? ArtifactContract { get; init; }
+
     /// <summary>Optional projection contract discovery diagnostics for loader summaries.</summary>
     public SkillProjectionDiscovery? ProjectionDiscovery { get; init; }
+}
+
+/// <summary>
+/// Machine-readable contract describing artifacts a skill may emit and the stage gates they drive.
+/// Loaded from <c>contracts/artifacts.json</c> inside the skill directory.
+/// </summary>
+public sealed class SkillArtifactContract
+{
+    public int SchemaVersion { get; init; } = 1;
+    public IReadOnlyList<SkillArtifactStageContract> Stages { get; init; } = [];
+}
+
+public sealed class SkillArtifactStageContract
+{
+    public required string Name { get; init; }
+    public string? Label { get; init; }
+    public SkillArtifactStageGateContract? Gate { get; init; }
+    public IReadOnlyList<SkillArtifactTypeContract> Artifacts { get; init; } = [];
+}
+
+public sealed class SkillArtifactStageGateContract
+{
+    public string? RequiresStage { get; init; }
+}
+
+public sealed class SkillArtifactTypeContract
+{
+    public required string Type { get; init; }
+    public string? Label { get; init; }
+    public string? Display { get; init; }
+    public bool? Terminal { get; init; }
 }
 
 public sealed class SkillProjectionDiscovery

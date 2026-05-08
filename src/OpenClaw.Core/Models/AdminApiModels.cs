@@ -251,6 +251,7 @@ public sealed class SkillInfoDto
     /// <summary>bundled | managed | workspace | extra | plugin</summary>
     public required string Source { get; init; }
     public bool IsUserInstalled { get; init; }
+    public OpenClaw.Core.Skills.SkillArtifactContract? ArtifactContract { get; init; }
 }
 
 public sealed class SkillsDetailResponse

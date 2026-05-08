@@ -29,6 +29,54 @@ public class SkillLoaderTests
     }
 
     [Fact]
+    public void ParseSkillContent_WithArtifactContract_LoadsContract()
+    {
+        var skillDir = Path.Combine(Path.GetTempPath(), $"openclaw-skill-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(skillDir, "contracts"));
+        File.WriteAllText(Path.Combine(skillDir, "contracts", "artifacts.json"), """
+            {
+              "schemaVersion": 1,
+              "stages": [
+                {
+                  "name": "analysis",
+                  "label": "Analysis",
+                  "artifacts": [
+                    { "type": "query_plan", "label": "Query plan", "display": "tree", "terminal": true }
+                  ]
+                }
+              ]
+            }
+            """);
+
+        try
+        {
+            var content = """
+                ---
+                name: sql-expert
+                description: SQL expert
+                ---
+                Analyze SQL queries.
+                """;
+
+            var skill = SkillLoader.ParseSkillContent(content, skillDir, SkillSource.Workspace);
+
+            Assert.NotNull(skill);
+            Assert.NotNull(skill!.ArtifactContract);
+            Assert.Equal(1, skill.ArtifactContract!.SchemaVersion);
+            var stage = Assert.Single(skill.ArtifactContract.Stages);
+            Assert.Equal("analysis", stage.Name);
+            var artifact = Assert.Single(stage.Artifacts);
+            Assert.Equal("query_plan", artifact.Type);
+            Assert.Equal("tree", artifact.Display);
+            Assert.True(artifact.Terminal);
+        }
+        finally
+        {
+            Directory.Delete(skillDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ParseSkillContent_MissingFrontmatter_ReturnsNull()
     {
         var content = "Just some markdown without frontmatter.";
