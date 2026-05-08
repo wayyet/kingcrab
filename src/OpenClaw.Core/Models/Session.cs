@@ -20,8 +20,12 @@ public sealed class Session
     private long _totalCacheWriteTokens;
 
     public required string Id { get; init; }
-    public required string ChannelId { get; init; }
-    public required string SenderId { get; init; }
+    // ChannelId / SenderId describe the *current* routing identity of the conversation party.
+    // They must be mutable because a persisted session can be reactivated by a fresh connection
+    // (e.g. a WebSocket reconnect produces a new Connection.Id) and mid-turn envelope routing
+    // (artifact, stage gate) consults Session.SenderId to look up the live socket.
+    public required string ChannelId { get; set; }
+    public required string SenderId { get; set; }
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset LastActiveAt { get; set; } = DateTimeOffset.UtcNow;
     public List<ChatTurn> History { get; init; } = [];
