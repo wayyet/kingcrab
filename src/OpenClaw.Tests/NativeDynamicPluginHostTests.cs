@@ -164,7 +164,7 @@ public sealed class NativeDynamicPluginHostTests : IDisposable
         var pluginDir = CreateNativePlugin(
             "employment-coach-workflow",
             typeof(EmploymentCoachWorkflowPlugin).Assembly.Location,
-            typeof(EmploymentCoachWorkflowPlugin).FullName!,
+            typeof(EmploymentCoachWorkflowPlugin).AssemblyQualifiedName!,
             ["skills"],
             includeSkills: false,
             skillSourceRoot: FindEmploymentCoachWorkflowSkillRoot());
@@ -199,10 +199,9 @@ public sealed class NativeDynamicPluginHostTests : IDisposable
             host.SkillRoots);
         var skillNames = skills.Select(skill => skill.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
         Assert.Contains("employment-coach-conversation", skillNames);
-        Assert.Contains("diagnosis", skillNames);
-        Assert.Contains("external_config", skillNames);
-        Assert.Contains("skill_generation", skillNames);
-        Assert.Contains("ontology_extraction", skillNames);
+        Assert.Contains("external-config", skillNames);
+        Assert.Contains("skill-generation", skillNames);
+        Assert.Contains("ontology-extraction", skillNames);
     }
 
     private string CreateNativePlugin(
