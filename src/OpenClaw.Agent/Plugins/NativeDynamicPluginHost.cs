@@ -23,6 +23,7 @@ public sealed class NativeDynamicPluginHost : IAsyncDisposable
     private readonly GatewayRuntimeState _runtimeState;
     private readonly ILogger _logger;
     private readonly HashSet<string> _blockedPluginIds;
+    private readonly ISessionMetadataStore? _sessionMetadataStore;
     private readonly List<ITool> _tools = [];
     private readonly List<IChannelAdapter> _channelAdapters = [];
     private readonly List<(string PluginId, string ChannelId, IChannelAdapter Adapter)> _channelRegistrations = [];
@@ -38,11 +39,13 @@ public sealed class NativeDynamicPluginHost : IAsyncDisposable
         NativeDynamicPluginsConfig config,
         GatewayRuntimeState runtimeState,
         ILogger logger,
-        IReadOnlyCollection<string>? blockedPluginIds = null)
+        IReadOnlyCollection<string>? blockedPluginIds = null,
+        ISessionMetadataStore? sessionMetadataStore = null)
     {
         _config = config;
         _runtimeState = runtimeState;
         _logger = logger;
+        _sessionMetadataStore = sessionMetadataStore;
         _blockedPluginIds = blockedPluginIds is { Count: > 0 }
             ? new HashSet<string>(blockedPluginIds, StringComparer.Ordinal)
             : new HashSet<string>(StringComparer.Ordinal);
@@ -197,7 +200,7 @@ public sealed class NativeDynamicPluginHost : IAsyncDisposable
             var instance = Activator.CreateInstance(type) as INativeDynamicPlugin
                 ?? throw new InvalidOperationException($"Failed to instantiate plugin type '{manifest.TypeName}'.");
 
-            var registrationContext = new RegistrationContext(manifest.Id, GetPluginConfig(manifest.Id), _logger);
+            var registrationContext = new RegistrationContext(manifest.Id, GetPluginConfig(manifest.Id), _logger, _sessionMetadataStore);
             instance.Register(registrationContext);
 
             foreach (var service in registrationContext.Services)
@@ -705,11 +708,16 @@ public sealed class NativeDynamicPluginHost : IAsyncDisposable
         public List<PluginLoadReport> Reports { get; } = [];
     }
 
-    private sealed class RegistrationContext(string pluginId, JsonElement? config, ILogger logger) : INativeDynamicPluginContext
+    private sealed class RegistrationContext(
+        string pluginId,
+        JsonElement? config,
+        ILogger logger,
+        ISessionMetadataStore? sessionMetadataStore) : INativeDynamicPluginContext
     {
         public string PluginId { get; } = pluginId;
         public JsonElement? Config { get; } = config;
         public ILogger Logger { get; } = logger;
+        public ISessionMetadataStore? SessionMetadataStore { get; } = sessionMetadataStore;
         public List<ITool> Tools { get; } = [];
         public List<IChannelAdapter> Channels { get; } = [];
         public List<IToolHook> Hooks { get; } = [];

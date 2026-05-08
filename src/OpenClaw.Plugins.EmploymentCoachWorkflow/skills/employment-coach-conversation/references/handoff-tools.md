@@ -1,6 +1,6 @@
 # Handoff tool 结构化交接合约
 
-本文件定义 `employment-coach-conversation` 维护下游交接 todo 的唯一入口。所有要交给 `ontology-extraction`、`skill-generation` 或 `external-config` 的事项，都必须通过 Handoff tool 维护为当前会话 session 下的结构化 Handoff todo。
+本文件定义 `employment-coach-conversation` 维护下游交接 todo 的唯一入口。所有要交给 `ontology-extraction`、`skill-generation` 或 `external-config` 的事项，都必须通过 Gateway 内置 Handoff tool 中由 `OpenClaw:Handoff` 配置声明的 `employment-coach` workflow 维护为当前会话 session 下的结构化 Handoff todo。
 
 Handoff todo 是“交给谁、带什么输入、做到哪一步”的工作单元。它可以投影给 UI，但 canonical 状态、`session_id` 和 payload 以 Handoff tool 返回的数据为准。
 
@@ -32,6 +32,7 @@ Handoff todo 是“交给谁、带什么输入、做到哪一步”的工作单�
   "type": "object",
   "properties": {
     "action": { "type": "string", "enum": ["list", "upsert", "patch", "transition", "remove"], "default": "list" },
+    "workflow_id": { "type": "string", "const": "employment-coach" },
     "handoff_id": { "type": "string" },
     "title": { "type": "string" },
     "kind": { "type": "string", "const": "handoff_todo" },
@@ -57,6 +58,7 @@ Handoff todo 是“交给谁、带什么输入、做到哪一步”的工作单�
 使用规则：
 
 - 新建或合并同一意图：调用 `handoff`，传 `action = upsert`，必须传 `fingerprint`，避免同一意图换个说法就生成新条目。
+- `workflow_id` 可省略；省略时 Gateway 内置工具使用配置的默认 workflow。Employment Coach 场景需要显式写出时只能写 `employment-coach`。
 - `session_id` 由宿主从当前会话上下文注入，skill 不手写、不伪造、不跨 session 查询。
 - 更新字段或 payload：调用 `handoff`，传 `action = patch`，保持同一个 `handoff_id`。
 - 发 dispatch 前：调用 `handoff`，传 `action = list` 读取目标阶段，逐条确认 `status = ready_to_dispatch`。
@@ -74,6 +76,7 @@ Handoff todo 至少包含以下字段。字段名使用 snake_case。
 ```json
 {
   "session_id": "session_20260508_001",
+  "workflow_id": "employment-coach",
   "handoff_id": "s_refund_init_001",
   "title": "技能：退货资格初判",
   "kind": "handoff_todo",
@@ -97,6 +100,7 @@ Handoff todo 至少包含以下字段。字段名使用 snake_case。
 字段说明：
 
 - `session_id`：当前会话 session id，是 Handoff todo 的存储边界；由宿主注入并随 item 返回。
+- `workflow_id`：当前交接流程作用域；本文件固定为 `employment-coach`，用于与其他通用 Handoff workflow 隔离。
 - `handoff_id`：Handoff tool 返回的稳定 id，是 canonical id。
 - `title`：给用户和 UI 看的短标题。
 - `kind`：流程交接项固定使用 `handoff_todo`。

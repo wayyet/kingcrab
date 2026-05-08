@@ -7,6 +7,10 @@
     <PackageTags>openclaw;plugins;employment-coach;workflow;ontology;dotnet</PackageTags>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="OpenClaw.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OpenClaw.Core\OpenClaw.Core.csproj" />
     <ProjectReference Include="..\OpenClaw.PluginKit\OpenClaw.PluginKit.csproj" />
   </ItemGroup>
   <ItemGroup>

@@ -421,7 +421,8 @@ internal static class RuntimeInitializationExtensions
                 config.Plugins.DynamicNative,
                 startup.RuntimeState,
                 loggerFactory.CreateLogger<NativeDynamicPluginHost>(),
-                blockedPluginIds);
+                blockedPluginIds,
+                services.SessionMetadataStore);
             nativeDynamicTools = await nativeDynamicPluginHost.LoadAsync(startup.WorkspacePath, app.Lifetime.ApplicationStopping);
 
             RegisterNativeDynamicChannels(channelAdapters, nativeDynamicPluginHost, runtimeDiagnostics);
@@ -550,6 +551,7 @@ internal static class RuntimeInitializationExtensions
             new SessionSearchTool(services.SessionSearchStore),
             new ProfileReadTool(services.UserProfileStore),
             new TodoTool(services.SessionMetadataStore),
+            new HandoffTool(services.SessionMetadataStore, config.Handoff),
             new AutomationTool(services.AutomationService, services.Pipeline),
             new VisionAnalyzeTool(services.GeminiMultimodalService),
             new TextToSpeechTool(services.TextToSpeechService),

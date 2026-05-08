@@ -15,6 +15,7 @@ public interface INativeDynamicPluginContext
     string PluginId { get; }
     JsonElement? Config { get; }
     ILogger Logger { get; }
+    ISessionMetadataStore? SessionMetadataStore { get; }
 
     void RegisterTool(ITool tool);
     void RegisterChannel(IChannelAdapter adapter);

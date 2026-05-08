@@ -104,6 +104,12 @@ public sealed class DelegateToolTests
 
         public IReadOnlyList<AITool> LoadedTools => throw new NotImplementedException();
 
+        public event Action<IReadOnlyList<OpenClaw.Core.Skills.SkillDefinition>>? SkillsReloaded
+        {
+            add { }
+            remove { }
+        }
+
         public Task<string> RunAsync(
             Session session,
             string userMessage,
