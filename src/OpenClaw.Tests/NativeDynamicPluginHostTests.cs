@@ -159,15 +159,13 @@ public sealed class NativeDynamicPluginHostTests : IDisposable
     }
 
     [Fact]
-    public async Task LoadAsync_JitMode_LoadsEmploymentCoachWorkflowPluginToolAndSkills()
+    public async Task LoadAsync_JitMode_LoadsEmploymentCoachWorkflowPluginSkills()
     {
-        var workspaceRoot = Path.Combine(_tempDir, "workspace");
-        Directory.CreateDirectory(workspaceRoot);
         var pluginDir = CreateNativePlugin(
             "employment-coach-workflow",
             typeof(EmploymentCoachWorkflowPlugin).Assembly.Location,
             typeof(EmploymentCoachWorkflowPlugin).FullName!,
-            ["tools", "skills"],
+            ["skills"],
             includeSkills: false,
             skillSourceRoot: FindEmploymentCoachWorkflowSkillRoot());
 
@@ -178,17 +176,6 @@ public sealed class NativeDynamicPluginHostTests : IDisposable
             Entries = new Dictionary<string, PluginEntryConfig>(StringComparer.Ordinal)
             {
                 ["employment-coach-workflow"] = new()
-                {
-                    Config = JsonSerializer.SerializeToElement(new
-                    {
-                        tooling = new
-                        {
-                            workspaceRoot,
-                            allowedReadRoots = new[] { workspaceRoot },
-                            allowedWriteRoots = new[] { workspaceRoot }
-                        }
-                    })
-                }
             }
         };
 
@@ -199,11 +186,10 @@ public sealed class NativeDynamicPluginHostTests : IDisposable
 
         var tools = await host.LoadAsync(null, CancellationToken.None);
 
-        var tool = Assert.Single(tools);
-        Assert.Equal("ontology_ingest", tool.Name);
+        Assert.Empty(tools);
         var report = Assert.Single(host.Reports, r => r.PluginId == "employment-coach-workflow" && r.Loaded);
-        Assert.Equal(1, report.ToolCount);
-        Assert.Contains(PluginCapabilityPolicy.Tools, report.RequestedCapabilities);
+        Assert.Equal(0, report.ToolCount);
+        Assert.DoesNotContain(PluginCapabilityPolicy.Tools, report.RequestedCapabilities);
         Assert.Contains(PluginCapabilityPolicy.Skills, report.RequestedCapabilities);
 
         var skills = SkillLoader.LoadAll(

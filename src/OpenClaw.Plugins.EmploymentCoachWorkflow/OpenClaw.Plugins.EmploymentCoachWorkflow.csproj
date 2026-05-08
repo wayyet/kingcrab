@@ -3,11 +3,10 @@
     <RootNamespace>OpenClaw.Plugins.EmploymentCoachWorkflow</RootNamespace>
     <IsPackable>true</IsPackable>
     <PackageId>OpenClaw.Plugins.EmploymentCoachWorkflow</PackageId>
-    <Description>Dynamic native OpenClaw plugin that packages the employment coach workflow skills and ontology ingest tool.</Description>
+    <Description>Dynamic native OpenClaw plugin that packages the employment coach workflow skills.</Description>
     <PackageTags>openclaw;plugins;employment-coach;workflow;ontology;dotnet</PackageTags>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\OpenClaw.Core\OpenClaw.Core.csproj" />
     <ProjectReference Include="..\OpenClaw.PluginKit\OpenClaw.PluginKit.csproj" />
   </ItemGroup>
   <ItemGroup>

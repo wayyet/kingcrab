@@ -408,47 +408,6 @@ public sealed class ContractGovernanceTests
     }
 
     [Fact]
-    public async Task ContractScopeHook_OntologyIngestMediaPathWithinScope_Allows()
-    {
-        var root = Path.Combine(Path.GetTempPath(), $"openclaw-scope-{Guid.NewGuid():N}");
-        var mediaDir = Path.Combine(root, "memory", "media-cache");
-        var ontologyDir = Path.Combine(root, "ontology");
-        Directory.CreateDirectory(mediaDir);
-        Directory.CreateDirectory(ontologyDir);
-        var mediaPath = Path.Combine(mediaDir, "media_test.md");
-        await File.WriteAllTextAsync(mediaPath, "# Topic\ncontent", CancellationToken.None);
-
-        var oldWorkspace = Environment.GetEnvironmentVariable("OPENCLAW_WORKSPACE");
-        Environment.SetEnvironmentVariable("OPENCLAW_WORKSPACE", root);
-        try
-        {
-            var policy = new ContractPolicy
-            {
-                Id = "ctr_test",
-                ScopedCapabilities = [new ScopedCapability { ToolName = "ontology_ingest", AllowedPaths = [mediaDir, ontologyDir] }]
-            };
-            var hook = new ContractScopeHook(_ => policy, _ => 0, NullLogger.Instance);
-            var context = new ToolHookContext
-            {
-                SessionId = "s1",
-                ChannelId = "ws",
-                SenderId = "u1",
-                CorrelationId = "c1",
-                ToolName = "ontology_ingest",
-                ArgumentsJson = JsonSerializer.Serialize(new { paths = new[] { "/media/media_test" } }),
-                IsStreaming = false
-            };
-
-            var result = await hook.BeforeExecuteAsync(context, CancellationToken.None);
-            Assert.True(result);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("OPENCLAW_WORKSPACE", oldWorkspace);
-        }
-    }
-
-    [Fact]
     public async Task ContractScopeHook_NoContractPolicy_AllowsAll()
     {
         var hook = new ContractScopeHook(
