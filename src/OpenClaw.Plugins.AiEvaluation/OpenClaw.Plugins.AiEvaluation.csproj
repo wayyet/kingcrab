@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>OpenClaw.Plugins.AiEvaluation</RootNamespace>
+    <IsPackable>true</IsPackable>
+    <PackageId>OpenClaw.Plugins.AiEvaluation</PackageId>
+    <Description>AI evaluation plugin that fetches structured test cases from sandbox environments via WebSocket.</Description>
+    <PackageTags>openclaw;plugins;ai-evaluation;testcases;dotnet</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OpenClaw.PluginKit\OpenClaw.PluginKit.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="openclaw.native-plugin.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

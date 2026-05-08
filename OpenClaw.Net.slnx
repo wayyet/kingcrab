@@ -13,6 +13,7 @@
     <Project Path="src/OpenClaw.Core/OpenClaw.Core.csproj" />
     <Project Path="src/OpenClaw.Gateway/OpenClaw.Gateway.csproj" />
     <Project Path="src/OpenClaw.PluginKit/OpenClaw.PluginKit.csproj" />
+    <Project Path="src/OpenClaw.Plugins.AiEvaluation/OpenClaw.Plugins.AiEvaluation.csproj" />
     <Project Path="src/OpenClaw.Plugins.EmploymentCoachWorkflow/OpenClaw.Plugins.EmploymentCoachWorkflow.csproj" />
     <Project Path="src/OpenClaw.SandboxDemo/OpenClaw.SandboxDemo.csproj">
       <Build Solution="Debug|*" Project="false" />
