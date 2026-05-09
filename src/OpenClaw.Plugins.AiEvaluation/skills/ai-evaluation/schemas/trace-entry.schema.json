@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TraceData",
+  "type": "object",
+  "required": ["session_id", "source", "total_steps", "entries"],
+  "properties": {
+    "session_id": { "type": "string" },
+    "source": { "type": "string" },
+    "total_steps": { "type": "integer", "minimum": 0 },
+    "entries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/TraceEntry" }
+    }
+  },
+  "$defs": {
+    "TraceEntry": {
+      "type": "object",
+      "required": ["step", "type"],
+      "properties": {
+        "step": { "type": "integer" },
+        "type": { "type": "string", "enum": ["thinking", "tool_call", "message", "response"] },
+        "content": { "type": "string" },
+        "tool_name": { "type": "string" },
+        "tool_arguments": { "type": "string" },
+        "timestamp": { "type": "string" }
+      }
+    }
+  }
+}

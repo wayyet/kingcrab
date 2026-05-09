@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "assemblyPath": "OpenClaw.Plugins.AiEvaluation.dll",
   "typeName": "OpenClaw.Plugins.AiEvaluation.AiEvaluationPlugin, OpenClaw.Plugins.AiEvaluation",
-  "capabilities": [ "tools" ],
+  "capabilities": ["skills"],
+  "skills": ["skills"],
   "jitOnly": true
 }

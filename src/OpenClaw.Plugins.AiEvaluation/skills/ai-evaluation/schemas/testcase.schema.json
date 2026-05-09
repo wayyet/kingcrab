@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TestCase",
+  "type": "object",
+  "required": ["title", "description", "steps", "expected_result"],
+  "properties": {
+    "id": { "type": "string", "description": "唯一标识符" },
+    "title": { "type": "string", "description": "测试用例标题" },
+    "description": { "type": "string", "description": "测试用例详细描述" },
+    "steps": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "执行步骤列表"
+    },
+    "expected_result": { "type": "string", "description": "预期结果" },
+    "priority": { "type": "string", "enum": ["high", "medium", "low"] },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "metadata": {
+      "type": "object",
+      "description": "扩展元数据"
+    }
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ScoringCriteria",
+  "type": "object",
+  "required": ["domain", "version", "dimensions"],
+  "properties": {
+    "domain": { "type": "string" },
+    "version": { "type": "string" },
+    "dimensions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ScoreDimension" }
+    }
+  },
+  "$defs": {
+    "ScoreDimension": {
+      "type": "object",
+      "required": ["name", "description", "max_score", "indicators", "levels"],
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "max_score": { "type": "number" },
+        "indicators": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "levels": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ScoreLevel" }
+        }
+      }
+    },
+    "ScoreLevel": {
+      "type": "object",
+      "required": ["label", "range_min", "range_max", "description"],
+      "properties": {
+        "label": { "type": "string" },
+        "range_min": { "type": "number" },
+        "range_max": { "type": "number" },
+        "description": { "type": "string" }
+      }
+    }
+  }
+}

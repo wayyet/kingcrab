@@ -1,0 +1,62 @@
+{
+  "report_id": "EVAL-20260509-001",
+  "evaluated_at": "2026-05-09T10:30:00Z",
+  "target_endpoint": "ws://target-sandbox:9090/chat",
+  "scores": [
+    {
+      "dimension": "功能完整性",
+      "score": 85,
+      "max_score": 100,
+      "comment": "3个登录测试用例中2个完全通过，TC-LOGIN-002的错误提示格式需微调"
+    },
+    {
+      "dimension": "交互质量",
+      "score": 78,
+      "max_score": 100,
+      "comment": "多轮对话上下文保持良好，但第一轮响应稍有延迟且信息呈现可更简洁"
+    },
+    {
+      "dimension": "响应准确性",
+      "score": 92,
+      "max_score": 100,
+      "comment": "所有响应内容准确，无事实错误，工具调用选择恰当"
+    },
+    {
+      "dimension": "效率性能",
+      "score": 70,
+      "max_score": 100,
+      "comment": "平均响应时间2.3秒，可优化；存在1次不必要的工具重复调用"
+    }
+  ],
+  "total_score": 325,
+  "max_possible_score": 400,
+  "overall_rating": "良好",
+  "strengths": [
+    "响应内容准确无误",
+    "工具调用选择恰当",
+    "多轮对话上下文保持良好"
+  ],
+  "weaknesses": [
+    "错误提示格式不完全符合规范",
+    "首次响应延迟略高",
+    "存在不必要的重复工具调用"
+  ],
+  "suggestions": [
+    {
+      "area": "错误提示",
+      "suggestion": "TC-LOGIN-002中错误提示应统一为'用户名或密码错误'格式，不区分具体字段",
+      "priority": "high"
+    },
+    {
+      "area": "响应性能",
+      "suggestion": "建议对静态资源实施缓存策略以降低首轮响应延迟",
+      "priority": "medium"
+    },
+    {
+      "area": "工具调用优化",
+      "suggestion": "在验证凭据前先检查本地会话缓存，避免不必要的远程调用",
+      "priority": "medium"
+    }
+  ],
+  "summary": "目标沙箱在登录流程测试中整体表现良好（B级/325分），核心功能完整，响应准确。主要改进方向：错误提示规范化、首轮响应性能优化。"
+}

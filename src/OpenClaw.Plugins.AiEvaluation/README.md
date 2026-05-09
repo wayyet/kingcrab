@@ -1,59 +1,36 @@
 # OpenClaw.Plugins.AiEvaluation
 
-AI 评估插件，提供面向 AI 沙箱的自动化评估能力。通过 5 个 Tool 组合完成从测试用例获取、目标执行、过程采集、标准判分到报告生成的完整评估流程。
+AI 评估插件，基于 Skills + 跨平台脚本架构，为 hirebot（雇佣端应用系统）提供面向 AI 沙箱的自动化评估基础能力。
 
-## 提供的 Tool
+## 架构模式
 
-| Tool | 用途 | 依赖端点 |
-|------|------|----------|
-| `fetch_testcases` | 从 AI 沙箱获取结构化测试用例 | Generator, Validator (可选) |
-| `sandbox_send_message` | 将测试用例/消息发送至被评估目标沙箱 | Target |
-| `trace_read` | 读取目标沙箱的完整执行过程（思考链路、工具调用、对话内容） | Trace |
-| `ontology_query` | 查询评估评分标准与维度 | Ontology |
-| `evaluation_report` | 生成结构化评估报告（评分、改进建议等） | EvalReport |
+遵循 `EmploymentCoachWorkflow` 插件的 Skills 模式：
 
-## 评估流程
-
-```
-评估专家 (LLM)
-  │
-  ├─ ① fetch_testcases    ──→ Generator 沙箱生成测试用例
-  │                          ──→ Validator 沙箱审查 (可选)
-  │
-  ├─ ② sandbox_send_message ──→ Target 沙箱 (被评估对象) 发送测试用例
-  │
-  ├─ ③ trace_read          ──→ Trace 沙箱读取执行链路
-  │
-  ├─ ④ ontology_query      ──→ Ontology 知识库获取评分标准
-  │
-  └─ ⑤ evaluation_report   ──→ EvalReport 沙箱生成评估报告
-```
+- **Skills** — `SKILL.md` 定义评估专家角色、流程、规则，LLM 读取后按指令调用脚本
+- **Scripts** — PowerShell (`.ps1`) 和 Python (`.py`) 实现实际的 WebSocket 通信与数据处理
+- **Schemas** — JSON Schema 验证文件确保数据结构一致性
+- **空 C# 注册** — `AiEvaluationPlugin.Register()` 为空方法体，所有功能通过技能目录暴露
 
 ## 目录结构
 
 ```
 OpenClaw.Plugins.AiEvaluation/
-├── AiEvaluationPlugin.cs              # 插件入口，注册 5 个 Tool
-├── AiEvaluationJsonContext.cs         # AOT 兼容的 JSON 序列化上下文
-├── openclaw.native-plugin.json       # 插件清单
-├── Configs/
-│   ├── AiEvaluationConfig.cs          # 插件主配置（6 个沙箱端点）
-│   └── SandboxEndpointConfig.cs       # 沙箱端点配置模型
-├── Models/
-│   ├── TestcaseEntry.cs               # 测试用例模型
-│   ├── TestcaseFetchResult.cs         # 获取测试用例返回模型
-│   ├── TestcaseSandboxStatus.cs       # 沙箱连接状态模型
-│   ├── TraceData.cs                   # 执行过程跟踪数据模型
-│   ├── ScoringCriteria.cs             # 评分标准模型
-│   └── EvaluationReport.cs            # 评估报告模型
-└── Tools/
-    ├── SandboxChatConnection.cs       # 通用 WebSocket 聊天连接
-    ├── TestcaseSandboxConnectionPool.cs # 多角色连接池
-    ├── FetchTestcasesTool.cs          # fetch_testcases
-    ├── SandboxSendMessageTool.cs      # sandbox_send_message
-    ├── TraceReadTool.cs               # trace_read
-    ├── OntologyQueryTool.cs           # ontology_query
-    └── EvaluationReportTool.cs        # evaluation_report
+├── AiEvaluationPlugin.cs              # 空 Register()，清单标记 skills
+├── openclaw.native-plugin.json       # capabilities: ["skills"], skills: ["skills"]
+├── README.md
+├── skills/
+│   └── ai-evaluation/
+│       ├── SKILL.md                   # 评估专家技能入口
+│       ├── references/                # 协议、标准、格式参考文档
+│       ├── schemas/                   # JSON Schema 验证文件
+│       └── examples/                  # 测试用例与报告示例
+└── scripts/
+    ├── Start-SandboxChat.ps1 / .py    # WebSocket 连接与会话管理
+    ├── Send-SandboxMessage.ps1 / .py  # 发送消息/测试用例至沙箱
+    ├── Read-SandboxTrace.ps1 / .py    # 读取沙箱执行过程跟踪
+    ├── Get-ScoringCriteria.ps1 / .py  # 查询评分标准
+    ├── New-EvaluationReport.ps1 / .py # 生成评估报告
+    └── Invoke-AiEvaluation.ps1 / .py  # 一站式编排完整评估流程
 ```
 
 ## 构建
@@ -62,11 +39,11 @@ OpenClaw.Plugins.AiEvaluation/
 dotnet build src/OpenClaw.Plugins.AiEvaluation/OpenClaw.Plugins.AiEvaluation.csproj
 ```
 
-插件清单和输出 DLL 会被复制到构建输出目录。将 `Plugins:DynamicNative:Load:Paths` 指向该目录即可加载。
+插件清单、`skills/` 和 `scripts/` 目录会自动复制到构建输出目录。
 
 ## 网关配置
 
-在 `appsettings.json` 中配置动态插件加载和沙箱端点：
+在 `appsettings.json` 中配置：
 
 ```json
 {
@@ -78,36 +55,7 @@ dotnet build src/OpenClaw.Plugins.AiEvaluation/OpenClaw.Plugins.AiEvaluation.csp
       },
       "Entries": {
         "ai-evaluation": {
-          "Enabled": true,
-          "Config": {
-            "enabled": true,
-            "generator": {
-              "wsUrl": "ws://generator-sandbox:8080/chat",
-              "authToken": "env:SANDBOX_AUTH_TOKEN",
-              "systemPrompt": "你是一个测试用例生成器。",
-              "connectTimeoutSeconds": 30,
-              "requestTimeoutSeconds": 120
-            },
-            "validator": {
-              "wsUrl": "ws://validator-sandbox:8081/chat",
-              "authToken": "env:SANDBOX_AUTH_TOKEN"
-            },
-            "target": {
-              "wsUrl": "ws://target-sandbox:9090/chat"
-            },
-            "trace": {
-              "wsUrl": "ws://trace-reader:7070/chat"
-            },
-            "ontology": {
-              "wsUrl": "ws://ontology-kb:6060/chat"
-            },
-            "evalReport": {
-              "wsUrl": "ws://report-gen:5050/chat"
-            },
-            "timeoutSeconds": 120,
-            "maxTestcasesPerFetch": 50,
-            "enableDualValidation": false
-          }
+          "Enabled": true
         }
       }
     }
@@ -115,143 +63,64 @@ dotnet build src/OpenClaw.Plugins.AiEvaluation/OpenClaw.Plugins.AiEvaluation.csp
 }
 ```
 
-### 配置项说明
-
-| 配置路径 | 类型 | 默认值 | 说明 |
-|----------|------|--------|------|
-| `enabled` | bool | `false` | 启用/禁用插件 |
-| `generator` | object | - | 测试用例生成器沙箱端点，fetch 操作必需 |
-| `validator` | object | - | 测试用例审查器沙箱端点，dual validation 必需 |
-| `target` | object | - | 被评估目标沙箱端点，sandbox_send_message 必需 |
-| `trace` | object | - | 执行过程跟踪沙箱端点，trace_read 必需 |
-| `ontology` | object | - | 评分标准知识库沙箱端点，ontology_query 必需 |
-| `evalReport` | object | - | 评估报告生成沙箱端点，evaluation_report 必需 |
-| `timeoutSeconds` | int | `120` | 全局请求超时 |
-| `maxTestcasesPerFetch` | int | `50` | 单次 fetch 最大获取数 |
-| `enableDualValidation` | bool | `false` | fetch 后是否自动发送至 validator 审查 |
-
-### 沙箱端点配置
-
-每个端点 (`SandboxEndpointConfig`)：
-
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `wsUrl` | string | null | WebSocket 地址 |
-| `authToken` | string | null | 认证令牌，支持 `env:VAR` / `raw:VALUE` 引用 |
-| `systemPrompt` | string | "" | 发送给沙箱的系统提示词 |
-| `connectTimeoutSeconds` | int | 30 | 连接超时（秒） |
-| `requestTimeoutSeconds` | int | 120 | 请求超时（秒） |
-
-## WebSocket 协议
-
-各沙箱端点需要实现简单的 JSON 请求-响应协议：
-
-### 认证握手（可选）
-
-连接后沙箱发送 `{"type": "auth_required"}` → 插件自动发送 `{"type": "auth", "access_token": "<token>"}` → 沙箱回复 `{"type": "auth_ok"}`。
-
-无需认证的沙箱可跳过握手，直接接收 chat 请求。
-
-### Chat 请求（插件 → 沙箱）
-
-```json
-{"id": 12345, "type": "chat", "prompt": "生成登录页的测试用例..."}
-```
-
-### Chat 响应（沙箱 → 插件）
+沙箱端点配置通过独立的 `evaluation-config.json` 文件管理：
 
 ```json
 {
-  "id": 12345,
-  "type": "result",
-  "success": true,
-  "result": {
-    "text": "...",
-    "testcases": [...]
+  "endpoints": {
+    "generator": { "wsUrl": "ws://generator:8080/chat" },
+    "target":    { "wsUrl": "ws://target-sandbox:9090/chat" },
+    "trace":     { "wsUrl": "ws://trace-reader:7070/chat" },
+    "ontology":  { "wsUrl": "ws://ontology-kb:6060/chat" },
+    "evalReport": { "wsUrl": "ws://report-gen:5050/chat" }
+  },
+  "evaluation": {
+    "maxTestcases": 50,
+    "enableDualValidation": false,
+    "timeoutSeconds": 120
   }
 }
 ```
 
-## Tool 调用示例
+## 评估流程
 
-### fetch_testcases
-
-```json
-// 获取测试用例
-{"action": "fetch", "prompt": "为用户注册流程生成测试用例", "max_count": 10}
-
-// 审查已有测试用例
-{"action": "validate", "testcases": [{"id": "TC001", "title": "...", "steps": ["..."], "expected_result": "..."}]}
-
-// 直接与生成器对话
-{"action": "chat", "target": "generator", "prompt": "解释覆盖率策略"}
-
-// 查看连接池状态
-{"action": "status"}
+```
+评估专家 (LLM)
+  │
+  ├─ ① 获取测试用例 → Send-SandboxMessage → Generator 沙箱
+  ├─ ② 发送至目标   → Send-SandboxMessage → Target 沙箱 (被评估对象)
+  ├─ ③ 读取执行跟踪 → Read-SandboxTrace   → Trace 端点
+  ├─ ④ 查询评分标准 → Get-ScoringCriteria → Ontology 知识库
+  └─ ⑤ 生成评估报告 → New-EvaluationReport → EvalReport 沙箱
 ```
 
-### sandbox_send_message
+## hirebot 调用方式
 
-```json
-// 发送纯文本消息
-{"message": "请执行以下测试用例并返回结果..."}
+hirebot 通过 Gateway 的 `shell` Tool 调用脚本：
 
-// 发送单个测试用例
-{"testcase": {"id": "TC001", "title": "登录测试", "steps": ["打开页面", "输入凭据"], "expected_result": "成功登录"}}
+```bash
+# 完整评估流程（推荐）
+pwsh ./scripts/Invoke-AiEvaluation.ps1 -ConfigPath "./evaluation-config.json" -OutputDir "./reports/"
 
-// 发送测试用例集
-{"testcases": [{"id": "TC001", ...}, {"id": "TC002", ...}]}
+# 或分步调用
+pwsh ./scripts/Start-SandboxChat.ps1 -WsUrl "ws://target:9090/chat"
+pwsh ./scripts/Send-SandboxMessage.ps1 -WsUrl "ws://target:9090/chat" -TestcaseFile "./testcases/login.json"
+pwsh ./scripts/Read-SandboxTrace.ps1 -WsUrl "ws://trace:7070/chat" -SessionId "abc123"
+pwsh ./scripts/Get-ScoringCriteria.ps1 -WsUrl "ws://ontology:6060/chat" -Domain "对话系统"
+pwsh ./scripts/New-EvaluationReport.ps1 -WsUrl "ws://report:5050/chat" -Scores '[...]' -OutputPath "./report.json"
 
-// 组合发送
-{"message": "执行以下回归测试", "testcases": [...]}
-```
-
-### trace_read
-
-```json
-// 获取所有执行过程
-{}
-
-// 按会话 ID 过滤
-{"session_id": "abc123"}
-
-// 仅获取工具调用
-{"trace_type": "tool_calls", "max_entries": 50}
-
-// 按步骤范围
-{"step_from": 1, "step_to": 20}
-```
-
-### ontology_query
-
-```json
-// 获取所有评分标准
-{}
-
-// 按领域和类别过滤
-{"domain": "对话系统", "category": "功能性测试"}
-
-// 指定评分维度
-{"dimensions": ["功能完整性", "交互质量", "响应准确性"]}
-```
-
-### evaluation_report
-
-```json
-// 提交评分数据生成报告
-{
-  "scores": [
-    {"dimension": "功能完整性", "score": 85, "max_score": 100, "comment": "..."},
-    {"dimension": "交互质量", "score": 78, "max_score": 100, "comment": "..."}
-  ],
-  "trace_summary": "目标沙箱完成了 15 个步骤，包含 3 次工具调用...",
-  "overall_comment": "建议改善错误处理逻辑"
-}
+# Python 备选方案
+python scripts/Invoke-AiEvaluation.py --config-path ./evaluation-config.json --output-dir ./reports/
 ```
 
 ## 依赖
 
-- `OpenClaw.PluginKit` — 动态插件接口
-- `System.Net.WebSockets.ClientWebSocket` — WebSocket 通信（.NET 内置，无外部依赖）
+- **OpenClaw.PluginKit** — 动态插件接口
+- **PowerShell Core 7+** (`pwsh`) — PowerShell 脚本执行（跨平台）
+- **Python 3.9+** + `websockets` 库 — Python 脚本备选执行
+  ```bash
+  pip install websockets
+  ```
 
-该插件为动态原生插件，需要 JIT 运行时模式。
+该插件为动态原生插件，需要 JIT 运行时模式。插件本身不包含任何运行时工具注册，
+所有功能通过技能指令 + 脚本执行实现。

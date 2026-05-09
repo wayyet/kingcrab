@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EvaluationReport",
+  "type": "object",
+  "required": ["report_id", "evaluated_at", "target_endpoint", "scores", "total_score", "max_possible_score", "overall_rating"],
+  "properties": {
+    "report_id": { "type": "string" },
+    "evaluated_at": { "type": "string" },
+    "target_endpoint": { "type": "string" },
+    "scores": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/DimensionScore" }
+    },
+    "total_score": { "type": "number" },
+    "max_possible_score": { "type": "number" },
+    "overall_rating": { "type": "string" },
+    "strengths": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "weaknesses": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "suggestions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ImprovementSuggestion" }
+    },
+    "summary": { "type": "string" }
+  },
+  "$defs": {
+    "DimensionScore": {
+      "type": "object",
+      "required": ["dimension", "score", "max_score", "comment"],
+      "properties": {
+        "dimension": { "type": "string" },
+        "score": { "type": "number" },
+        "max_score": { "type": "number" },
+        "comment": { "type": "string" }
+      }
+    },
+    "ImprovementSuggestion": {
+      "type": "object",
+      "required": ["area", "suggestion", "priority"],
+      "properties": {
+        "area": { "type": "string" },
+        "suggestion": { "type": "string" },
+        "priority": { "type": "string", "enum": ["high", "medium", "low"] }
+      }
+    }
+  }
+}

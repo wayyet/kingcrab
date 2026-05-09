@@ -4,8 +4,8 @@
     <RootNamespace>OpenClaw.Plugins.AiEvaluation</RootNamespace>
     <IsPackable>true</IsPackable>
     <PackageId>OpenClaw.Plugins.AiEvaluation</PackageId>
-    <Description>AI evaluation plugin that fetches structured test cases from sandbox environments via WebSocket.</Description>
-    <PackageTags>openclaw;plugins;ai-evaluation;testcases;dotnet</PackageTags>
+    <Description>AI evaluation plugin providing skills and cross-platform scripts for sandbox evaluation workflows.</Description>
+    <PackageTags>openclaw;plugins;ai-evaluation;skills;scripts;dotnet</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
@@ -14,6 +14,8 @@
 
   <ItemGroup>
     <None Include="openclaw.native-plugin.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="skills\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="scripts\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
