@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Collections.Concurrent;
-using System.Net.Http.Headers;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -81,7 +80,7 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
     /// 缓存最近一次入站消息的上下文，用于 WebSocket 快速回复。
     /// </summary>
     /// <param name="ReqId">消息回调用 req_id，回复时需透传</param>
-    private sealed record InboundMsgContext(string MsgId, string ReqId, string? ChatId, string? UserId, DateTimeOffset ReceivedAt);
+    private sealed record InboundMsgContext(string ReqId, DateTimeOffset ReceivedAt);
 
     public WeComChannel(
         WeComChannelConfig initialConfig,
@@ -106,7 +105,6 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
     public async Task UpdateConfigAsync(WeComChannelConfig newConfig, CancellationToken ct = default)
     {
         SetRuntimeConfig(newConfig);
-        _logger.LogInformation("企业微信配置已通过 API 热更新，正在重新连接...");
         await RestartAsync(ct);
     }
 
@@ -118,10 +116,7 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
 
         var cfg = GetEffectiveConfig();
         if (!cfg.Enabled)
-        {
-            _logger.LogInformation("企业微信通道已禁用；设置 Enabled=true 或通过管理 API 启用以激活。");
             return;
-        }
 
         ResolveCredentials(cfg);
         if (!ValidateWsCredentials())
@@ -146,7 +141,7 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
                 {
                     try { await _receiveLoop; }
                     catch (OperationCanceledException) { }
-                    catch (Exception ex) { _logger.LogDebug(ex, "企业微信接收循环在重启时退出。"); }
+                    catch (Exception) { }
                 }
                 _cts.Dispose();
                 _cts = null;
@@ -155,10 +150,7 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
 
             var cfg = GetEffectiveConfig();
             if (!cfg.Enabled)
-            {
-                _logger.LogInformation("企业微信通道在配置热重载后已禁用。");
                 return;
-            }
 
             ResolveCredentials(cfg);
             if (!ValidateWsCredentials())
@@ -172,7 +164,6 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
 
             _cts = CancellationTokenSource.CreateLinkedTokenSource(_appLifetime);
             _receiveLoop = RunWsLoopAsync(_cts.Token);
-            _logger.LogInformation("企业微信通道已使用新配置重新连接。");
         }
         finally
         {
@@ -227,7 +218,6 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
                     var ws = new ClientWebSocket();
                     ws.Options.KeepAliveInterval = TimeSpan.FromSeconds(30);
                     await ws.ConnectAsync(new Uri(WeComWsUrl), ct);
-                    _logger.LogInformation("企业微信 WebSocket 已连接。");
 
                     // 保存活跃连接引用，供 SendAsync 发送回复使用
                     _activeWs = ws;
@@ -271,10 +261,9 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
     {
         var reqId = Guid.NewGuid().ToString("N");
         var json = BuildWsMessage("aibot_subscribe", reqId,
-            $"\"bot_id\":{JsonEncodedText.Encode(_botId!)},\"secret\":{JsonEncodedText.Encode(_botSecret!)}");
+            $"\"bot_id\":{JsonString(_botId!)},\"secret\":{JsonString(_botSecret!)}");
 
         await SendWsTextDirectAsync(ws, json, ct);
-        _logger.LogInformation("企业微信 aibot_subscribe 已发送，等待消息推送。");
     }
 
     /// <summary>
@@ -328,15 +317,12 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
                 continue;
 
             if (result.MessageType != WebSocketMessageType.Text)
-            {
-                _logger.LogDebug("企业微信 WebSocket 收到非文本帧，已跳过。");
                 continue;
-            }
 
             var json = Encoding.UTF8.GetString(buffer.WrittenSpan);
             try
             {
-                await HandleWsFrameAsync(ws, json, ct);
+                await HandleWsFrameAsync(json, ct);
             }
             catch (Exception ex)
             {
@@ -347,33 +333,41 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
 
     /// <summary>
     /// 分发 WebSocket 帧：按 cmd 字段路由到对应的处理函数。
+    /// 注意：企业微信服务器的响应帧（subscribe 结果、心跳响应等）不带 cmd 字段，
+    /// 格式为 {headers:{req_id}, errcode:0, errmsg:"ok"}。
     /// </summary>
-    private async Task HandleWsFrameAsync(ClientWebSocket ws, string json, CancellationToken ct)
+    private async Task HandleWsFrameAsync(string json, CancellationToken ct)
     {
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
         var cmd = GetString(root, "cmd");
         var reqId = GetReqId(root);
 
+        // 无 cmd 字段 → 服务器响应帧（subscribe / ping / upload 等）
+        if (cmd is null)
+        {
+            var errCode = root.TryGetProperty("errcode", out var ec) ? ec.GetInt32() : -1;
+            if (errCode != 0)
+            {
+                var errMsg = GetString(root, "errmsg");
+                _logger.LogError("企业微信 响应失败 req_id={ReqId} errcode={ErrCode} errmsg={ErrMsg}", reqId, errCode, errMsg);
+            }
+            return;
+        }
+
         switch (cmd)
         {
             // ── 消息回调 ──
             case "aibot_msg_callback":
-                await HandleMsgCallbackAsync(ws, root, reqId, ct);
+                await HandleMsgCallbackAsync(root, reqId, ct);
                 return;
 
             // ── 事件回调 ──
             case "aibot_event_callback":
-                await HandleEventCallbackAsync(ws, root, reqId, ct);
-                return;
-
-            // ── 心跳响应 ──
-            case "aibot_pong":
-                _logger.LogDebug("企业微信 WebSocket pong 响应。");
+                HandleEventCallback(root);
                 return;
 
             default:
-                _logger.LogDebug("企业微信 WebSocket 未知 cmd={Cmd}，已忽略。", cmd);
                 return;
         }
     }
@@ -383,7 +377,7 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
     /// <summary>
     /// 处理 aibot_msg_callback：解析消息体 → 过滤 → 构建 InboundMessage → 触发 OnMessageReceived。
     /// </summary>
-    private async Task HandleMsgCallbackAsync(ClientWebSocket ws, JsonElement root, string? reqId, CancellationToken ct)
+    private async Task HandleMsgCallbackAsync(JsonElement root, string? reqId, CancellationToken ct)
     {
         if (!root.TryGetProperty("body", out var body))
         {
@@ -411,10 +405,7 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
 
         // ── 消息去重 ──
         if (!string.IsNullOrWhiteSpace(msgId) && !TryClaimDedup(msgId))
-        {
-            _logger.LogDebug("企业微信重复消息 {MsgId} 已丢弃。", msgId);
             return;
-        }
 
         // ── 回复消息提取 ReplyToMessageId（quote 引用） ──
         string? replyToMessageId = null;
@@ -432,10 +423,7 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
         }
 
         if (string.IsNullOrWhiteSpace(senderId))
-        {
-            _logger.LogDebug("企业微信消息缺少发送者 userid，已丢弃。");
             return;
-        }
 
         var isGroup = string.Equals(chatType, "group", StringComparison.OrdinalIgnoreCase);
 
@@ -443,24 +431,15 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
         if (isGroup)
         {
             if (string.Equals(cfg.GroupPolicy, "disabled", StringComparison.OrdinalIgnoreCase))
-            {
-                _logger.LogDebug("企业微信群消息已丢弃（GroupPolicy=disabled）。");
                 return;
-            }
             if (string.Equals(cfg.GroupPolicy, "allowlist", StringComparison.OrdinalIgnoreCase) &&
                 !IsGroupAllowed(chatId, cfg))
-            {
-                _logger.LogDebug("企业微信群 {ChatId} 不在白名单中，消息已丢弃。", chatId);
                 return;
-            }
         }
 
         // ── 发信人白名单过滤 ──
         if (!IsUserAllowed(senderId, cfg))
-        {
-            _logger.LogDebug("企业微信用户 {UserId} 不在白名单中，消息已丢弃。", senderId);
             return;
-        }
 
         // ── @提及 提取 ──
         string[]? mentionedIds = null;
@@ -490,10 +469,7 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
 
         // ── 群聊 @提及 过滤 ──
         if (isGroup && cfg.RequireMentionInGroup && !isBotMentioned)
-        {
-            _logger.LogDebug("企业微信群消息未 @机器人 且 RequireMentionInGroup=true，已丢弃。");
             return;
-        }
 
         // ── 合并文本和媒体标记 ──
         var finalText = text ?? "";
@@ -531,26 +507,23 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
     /// - enter_chat：用户首次进入单聊，发送欢迎语（5 秒内回复）
     /// - template_card_event / feedback_event / disconnected_event：仅记录日志
     /// </summary>
-    private async Task HandleEventCallbackAsync(ClientWebSocket ws, JsonElement root, string? reqId, CancellationToken ct)
+    private void HandleEventCallback(JsonElement root)
     {
         if (!root.TryGetProperty("body", out var body))
             return;
 
-        var eventType = GetString(body, "eventtype");
+        string? eventType = null;
+        if (body.TryGetProperty("event", out var eventProp) &&
+            eventProp.ValueKind == JsonValueKind.Object)
+        {
+            eventType = GetString(eventProp, "eventtype");
+        }
+        eventType ??= GetString(body, "eventtype");
 
         switch (eventType)
         {
             case "enter_chat":
-                // 用户首次进入机器人单聊，可发送欢迎语
-                _logger.LogInformation("企业微信 enter_chat 事件，用户进入了单聊会话。");
-                break;
-
             case "disconnected_event":
-                _logger.LogInformation("企业微信 disconnected_event：当前连接被新连接踢掉，将自动重连。");
-                break;
-
-            default:
-                _logger.LogDebug("企业微信事件 {EventType} 已记录。", eventType);
                 break;
         }
     }
@@ -558,10 +531,10 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
     /// <summary>缓存入站消息上下文，用于后续 WebSocket 快速回复（透传 reqId）</summary>
     private void CacheInboundContext(string? msgId, string reqId, string? chatId, string? senderId)
     {
-        if (string.IsNullOrWhiteSpace(msgId))
+        if (string.IsNullOrWhiteSpace(msgId) || string.IsNullOrWhiteSpace(reqId))
             return;
 
-        var ctx = new InboundMsgContext(msgId, reqId, chatId, senderId, DateTimeOffset.UtcNow);
+        var ctx = new InboundMsgContext(reqId, DateTimeOffset.UtcNow);
 
         // 同时以 chatid 和 userid 为 key 缓存
         if (!string.IsNullOrWhiteSpace(chatId))
@@ -696,10 +669,7 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
 
             if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogDebug("企业微信媒体下载失败 msgId={MsgId}: {Status}", msgId, response.StatusCode);
-                return BuildMediaMarker(body, msgType); // 回退到文本标记
-            }
+                return BuildMediaMarker(body, msgType);
 
             var contentType = response.Content.Headers.ContentType?.MediaType ?? "";
             var ext = contentType switch
@@ -725,8 +695,6 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
             var filePath = Path.Combine(MediaTempDir, $"{Guid.NewGuid():N}{ext}");
             await using var fs = File.Create(filePath);
             await response.Content.CopyToAsync(fs, ct);
-
-            _logger.LogInformation("企业微信媒体已下载 msgId={MsgId}: {Path}", msgId, filePath);
 
             return msgType switch
             {
@@ -771,19 +739,6 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
         };
     }
 
-    /// <summary>检查群聊消息中是否 @了机器人。企业微信的 text.content 中包含 @BotName 格式。</summary>
-    private static bool IsBotMentioned(JsonElement body)
-    {
-        if (body.TryGetProperty("text", out var textProp) &&
-            textProp.ValueKind == JsonValueKind.Object)
-        {
-            var content = GetString(textProp, "content") ?? "";
-            // 企业微信群聊 @机器人 时消息内容包含 @机器人名称
-            return content.Contains('@');
-        }
-        return false;
-    }
-
     // ════════════════════════════ 发送消息 ════════════════════════════
 
     public async ValueTask SendAsync(OutboundMessage outbound, CancellationToken ct)
@@ -801,13 +756,15 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
                 var sentViaWs = await TrySendTextViaWsAsync(outbound.RecipientId, remaining, ct);
                 if (!sentViaWs)
                 {
-                    // 回退到 REST API 主动发送
-                    if (!HasApiCredentials())
+                    // 智能机器人主动发送应走 WebSocket aibot_send_msg。
+                    var sentViaActiveWs = await TrySendTextViaActiveWsAsync(outbound.RecipientId, remaining, ct);
+                    if (!sentViaActiveWs && !HasApiCredentials())
                     {
                         _logger.LogWarning("企业微信 REST API 凭证未配置，无法主动发送消息到 {RecipientId}。", outbound.RecipientId);
                     }
-                    else
+                    else if (!sentViaActiveWs)
                     {
+                        // 最后才回退到自建应用 REST API；该消息会以自建应用身份发送，不是智能机器人身份。
                         await RefreshAccessTokenAsync(ct);
                         await SendTextViaApiAsync(outbound.RecipientId, remaining, ct);
                     }
@@ -836,6 +793,8 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
             if (string.IsNullOrWhiteSpace(remaining) && markers.Count == 0)
             {
                 var sentViaWs = await TrySendTextViaWsAsync(outbound.RecipientId, outbound.Text, ct);
+                if (!sentViaWs)
+                    sentViaWs = await TrySendTextViaActiveWsAsync(outbound.RecipientId, outbound.Text, ct);
                 if (!sentViaWs && HasApiCredentials())
                 {
                     await RefreshAccessTokenAsync(ct);
@@ -859,8 +818,20 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
         // headers.req_id 必须透传消息回调中的原始 req_id
         // msgtype 必须为 "stream"
         var body = $"\"msgtype\":\"stream\"," +
-                   $"\"stream\":{{\"id\":{JsonEncodedText.Encode(streamId)},\"finish\":true,\"content\":{JsonEncodedText.Encode(text)}}}";
+                   $"\"stream\":{{\"id\":{JsonString(streamId)},\"finish\":true,\"content\":{JsonString(text)}}}";
         var json = BuildWsMessage("aibot_respond_msg", ctx.ReqId, body);
+
+        return await SendWsTextAsync(json, ct);
+    }
+
+    /// <summary>通过智能机器人 WebSocket 主动发送 Markdown 消息。</summary>
+    private async Task<bool> TrySendTextViaActiveWsAsync(string recipientId, string text, CancellationToken ct)
+    {
+        var reqId = "aibot_send_msg_" + Guid.NewGuid().ToString("N");
+        var body = $"\"chatid\":{JsonString(recipientId)}," +
+                   $"\"msgtype\":\"markdown\"," +
+                   $"\"markdown\":{{\"content\":{JsonString(TruncateToMaxUtf8Bytes(text, 20480))}}}";
+        var json = BuildWsMessage("aibot_send_msg", reqId, body);
 
         return await SendWsTextAsync(json, ct);
     }
@@ -931,7 +902,6 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
 
             case MediaMarkerKind.AudioUrl:
             case MediaMarkerKind.VideoUrl:
-                _logger.LogDebug("企业微信暂不支持通过 REST API 直接发送音频/视频。");
                 break;
         }
     }
@@ -949,10 +919,6 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
             var errBody = await response.Content.ReadAsStringAsync(ct);
             _logger.LogWarning("企业微信 API 调用失败：{Status} {Body}", response.StatusCode, errBody);
         }
-        else
-        {
-            _logger.LogInformation("企业微信 API 调用成功：{Path}", path);
-        }
     }
 
     // ════════════════════════════ 心跳 ════════════════════════════
@@ -961,7 +927,7 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
     private async Task SendPingAsync(ClientWebSocket ws, CancellationToken ct)
     {
         var reqId = Guid.NewGuid().ToString("N");
-        var json = BuildWsMessage("aibot_ping", reqId, null);
+        var json = BuildWsMessage("ping", reqId, null);
         await SendWsTextDirectAsync(ws, json, ct);
     }
 
@@ -1042,8 +1008,6 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
 
         var expireSec = root.TryGetProperty("expires_in", out var exp) ? exp.GetInt32() : 7200;
         _tokenExpiry = DateTimeOffset.UtcNow.AddSeconds(expireSec);
-
-        _logger.LogInformation("企业微信 Access Token 已刷新（{Sec} 秒后过期）。", expireSec);
     }
 
     // ════════════════════════════ WebSocket 发送 ════════════════════════════
@@ -1056,9 +1020,13 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
     private static string BuildWsMessage(string cmd, string reqId, string? bodyJson)
     {
         if (bodyJson is null)
-            return $"{{\"cmd\":\"{cmd}\",\"headers\":{{\"req_id\":\"{reqId}\"}}}}";
-        return $"{{\"cmd\":\"{cmd}\",\"headers\":{{\"req_id\":\"{reqId}\"}},\"body\":{{{bodyJson}}}}}";
+            return $"{{\"cmd\":{JsonString(cmd)},\"headers\":{{\"req_id\":{JsonString(reqId)}}}}}";
+        return $"{{\"cmd\":{JsonString(cmd)},\"headers\":{{\"req_id\":{JsonString(reqId)}}},\"body\":{{{bodyJson}}}}}";
     }
+
+    /// <summary>序列化 JSON 字符串值，包含外层引号。</summary>
+    private static string JsonString(string value)
+        => $"\"{JsonEncodedText.Encode(value)}\"";
 
     /// <summary>通过 WebSocket 发送文本帧（线程安全，使用当前活跃连接）。返回 true 表示发送成功。</summary>
     private async Task<bool> SendWsTextAsync(string text, CancellationToken ct)
@@ -1078,9 +1046,8 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
             }
             return false;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            _logger.LogDebug(ex, "WebSocket 发送失败（连接可能已断开）。");
             return false;
         }
         finally
@@ -1169,98 +1136,6 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
 
 // ════════════════════════════ JSON 序列化（AOT 安全） ════════════════════════════
 
-/// <summary>企业微信 WebSocket 通用请求帧</summary>
-public sealed class WeComWsRequest
-{
-    [JsonPropertyName("cmd")]
-    public string Cmd { get; set; } = "";
-
-    [JsonPropertyName("headers")]
-    public WeComWsRequestHeaders Headers { get; set; } = new();
-
-    [JsonPropertyName("body")]
-    public object? Body { get; set; }
-}
-
-public sealed class WeComWsRequestHeaders
-{
-    [JsonPropertyName("req_id")]
-    public string ReqId { get; set; } = "";
-}
-
-/// <summary>aibot_subscribe 鉴权请求的 body</summary>
-public sealed class WeComSubscribeBody
-{
-    [JsonPropertyName("bot_id")]
-    public string BotId { get; set; } = "";
-
-    [JsonPropertyName("secret")]
-    public string Secret { get; set; } = "";
-}
-
-/// <summary>aibot_respond_msg 回复消息的 body</summary>
-public sealed class WeComRespondBody
-{
-    [JsonPropertyName("msgid")]
-    public string MsgId { get; set; } = "";
-
-    [JsonPropertyName("msgtype")]
-    public string MsgType { get; set; } = "message";
-
-    [JsonPropertyName("stream")]
-    public WeComStreamInfo Stream { get; set; } = new();
-}
-
-/// <summary>流式回复信息（finish=true 表示结束）</summary>
-public sealed class WeComStreamInfo
-{
-    [JsonPropertyName("id")]
-    public string Id { get; set; } = "";
-
-    [JsonPropertyName("finish")]
-    public bool Finish { get; set; } = true;
-
-    [JsonPropertyName("content")]
-    public string Content { get; set; } = "";
-}
-
-/// <summary>企业微信 REST API 通用响应（获取 token 等）</summary>
-public sealed class WeComTokenResponse
-{
-    [JsonPropertyName("errcode")]
-    public int ErrCode { get; set; }
-
-    [JsonPropertyName("errmsg")]
-    public string? ErrMsg { get; set; }
-
-    [JsonPropertyName("access_token")]
-    public string? AccessToken { get; set; }
-
-    [JsonPropertyName("expires_in")]
-    public int ExpiresIn { get; set; }
-}
-
-/// <summary>企业微信媒体上传响应</summary>
-public sealed class WeComMediaUploadResponse
-{
-    [JsonPropertyName("errcode")]
-    public int ErrCode { get; set; }
-
-    [JsonPropertyName("errmsg")]
-    public string? ErrMsg { get; set; }
-
-    [JsonPropertyName("type")]
-    public string? Type { get; set; }
-
-    [JsonPropertyName("media_id")]
-    public string? MediaId { get; set; }
-
-    [JsonPropertyName("created_at")]
-    public string? CreatedAt { get; set; }
-}
-
-[JsonSerializable(typeof(WeComTokenResponse))]
-[JsonSerializable(typeof(WeComMediaUploadResponse))]
 [JsonSerializable(typeof(Dictionary<string, object>))]
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 public partial class WeComJsonContext : JsonSerializerContext;

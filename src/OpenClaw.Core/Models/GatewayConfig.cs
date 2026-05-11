@@ -723,7 +723,7 @@ public sealed class DingTalkChannelConfig
 /// </summary>
 public sealed class WeComChannelConfig
 {
-    public bool Enabled { get; set; } = false;
+    public bool Enabled { get; set; } = true;
 
     // ── WebSocket 长连接凭证（智能机器人） ──
     /// <summary>智能机器人 BotId，格式：aib-xxxxx</summary>
