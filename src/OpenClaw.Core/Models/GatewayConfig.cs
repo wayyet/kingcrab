@@ -403,6 +403,7 @@ public sealed class ChannelsConfig
     public SignalChannelConfig Signal { get; set; } = new();
     public FeishuChannelConfig Feishu { get; set; } = new();
     public DingTalkChannelConfig DingTalk { get; set; } = new();
+    public WeComChannelConfig WeCom { get; set; } = new();
 }
 
 public sealed class WhatsAppChannelConfig
@@ -703,6 +704,7 @@ public sealed class DingTalkChannelConfig
     public string? AppSecret { get; set; }
     public string AppSecretRef { get; set; } = "env:DINGTALK_APP_SECRET";
 
+    /// <summary>机器人 RobotCode，默认与 AppKey 相同，发消息时必填</summary>
     public string? RobotCode { get; set; }
     public string RobotCodeRef { get; set; } = "env:DINGTALK_ROBOT_CODE";
 
@@ -713,6 +715,53 @@ public sealed class DingTalkChannelConfig
     public bool RequireMentionInGroup { get; set; } = true;
     public bool ExposeInboundMediaUrls { get; set; } = true;
     public int StreamPollIntervalMs { get; set; } = 500;
+}
+
+/// <summary>
+/// 企业微信（WeCom）智能机器人通道配置。
+/// 使用 WebSocket 长连接模式接收消息，REST API 发送消息。
+/// </summary>
+public sealed class WeComChannelConfig
+{
+    public bool Enabled { get; set; } = false;
+
+    // ── WebSocket 长连接凭证（智能机器人） ──
+    /// <summary>智能机器人 BotId，格式：aib-xxxxx</summary>
+    public string? BotId { get; set; }
+    public string BotIdRef { get; set; } = "env:WECOM_BOT_ID";
+
+    /// <summary>智能机器人长连接专用 Secret</summary>
+    public string? BotSecret { get; set; }
+    public string BotSecretRef { get; set; } = "env:WECOM_BOT_SECRET";
+
+    // ── REST API 凭证（自建应用，用于主动发送消息和媒体上传） ──
+    /// <summary>企业 CorpID</summary>
+    public string? CorpId { get; set; }
+    public string CorpIdRef { get; set; } = "env:WECOM_CORP_ID";
+
+    /// <summary>自建应用 AgentId</summary>
+    public int AgentId { get; set; }
+    public string AgentIdRef { get; set; } = "env:WECOM_AGENT_ID";
+
+    /// <summary>自建应用 Secret，用于换取 access_token</summary>
+    public string? CorpSecret { get; set; }
+    public string CorpSecretRef { get; set; } = "env:WECOM_CORP_SECRET";
+
+    // ── 通用配置 ──
+    /// <summary>群聊策略：open（全部允许）、allowlist（白名单）、disabled（丢弃群消息）</summary>
+    public string GroupPolicy { get; set; } = "open";
+
+    /// <summary>允许的发信人 userid 列表，空数组表示允许全部</summary>
+    public string[] AllowedFromUserIds { get; set; } = [];
+
+    /// <summary>允许的群聊 chatid 列表，仅在 GroupPolicy=allowlist 时生效</summary>
+    public string[] AllowedGroupIds { get; set; } = [];
+
+    /// <summary>入站消息最大字符数</summary>
+    public int MaxInboundChars { get; set; } = 4096;
+
+    /// <summary>群聊中是否需要 @机器人 才响应</summary>
+    public bool RequireMentionInGroup { get; set; } = true;
 }
 
 

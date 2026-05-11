@@ -131,6 +131,10 @@
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h10v4H7z"/><path d="M5 7h14l-1 12H6z"/><path d="M9 11h6"/><path d="M10 15h4"/></svg>
                         钉钉 (DingTalk)
                     </button>
+                    <button class="ch-tab" data-channel="wecom">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="4"/><path d="M7 8h10"/><path d="M7 12h10"/><path d="M7 16h6"/></svg>
+                        企业微信 (WeCom)
+                    </button>
                 </div>
 
                 <!-- Feishu form -->
@@ -149,57 +153,20 @@
                     <label class="mcp-label">App ID</label>
                     <input id="dingtalk-appid" class="mcp-input" type="text" placeholder="dingxxxxxxxxxxxx" autocomplete="off">
 
-                    <label class="mcp-label">App ID Ref <span class="mcp-hint">(env:VAR_NAME 或 raw:value)</span></label>
-                    <input id="dingtalk-appid-ref" class="mcp-input" type="text" placeholder="env:DINGTALK_APP_ID" autocomplete="off">
-
-                    <label class="mcp-label">App Key</label>
+                    <label class="mcp-label">App Key（Client ID）</label>
                     <input id="dingtalk-appkey" class="mcp-input" type="text" placeholder="dingxxxxxxxxxxxx" autocomplete="off">
 
-                    <label class="mcp-label">App Key Ref <span class="mcp-hint">(env:VAR_NAME 或 raw:value)</span></label>
-                    <input id="dingtalk-appkey-ref" class="mcp-input" type="text" placeholder="env:DINGTALK_APP_KEY" autocomplete="off">
+                    <label class="mcp-label">App Secret（Client Secret）</label>
+                    <input id="dingtalk-appsecret" class="mcp-input" type="password" placeholder="xxxxxxxxxxxxxxxx" autocomplete="new-password">
+                </div>
 
-                    <label class="mcp-label">App Secret <span class="mcp-hint">(直接值，优先于 Ref)</span></label>
-                    <input id="dingtalk-appsecret" class="mcp-input" type="password" placeholder="留空则使用 AppSecretRef" autocomplete="new-password">
+                <!-- 企业微信 (WeCom) 配置表单 -->
+                <div id="ch-wecom-form" class="mcp-form-grid" style="display:none">
+                    <label class="mcp-label">Bot ID</label>
+                    <input id="wecom-botid" class="mcp-input" type="text" placeholder="aib-xxxxxxxxxxxx" autocomplete="off">
 
-                    <label class="mcp-label">App Secret Ref <span class="mcp-hint">(env:VAR_NAME 或 raw:value)</span></label>
-                    <input id="dingtalk-appsecret-ref" class="mcp-input" type="text" placeholder="env:DINGTALK_APP_SECRET" autocomplete="off">
-
-                    <label class="mcp-label">Robot Code</label>
-                    <input id="dingtalk-robotcode" class="mcp-input" type="text" placeholder="dingxxxxxxxxxxxx" autocomplete="off">
-
-                    <label class="mcp-label">Robot Code Ref <span class="mcp-hint">(env:VAR_NAME 或 raw:value)</span></label>
-                    <input id="dingtalk-robotcode-ref" class="mcp-input" type="text" placeholder="env:DINGTALK_ROBOT_CODE" autocomplete="off">
-
-                    <label class="mcp-label">Group Policy</label>
-                    <select id="dingtalk-group-policy" class="mcp-input">
-                        <option value="open">open</option>
-                        <option value="allowlist">allowlist</option>
-                        <option value="disabled">disabled</option>
-                    </select>
-
-                    <label class="mcp-label">Allowed From User IDs <span class="mcp-hint">(逗号分隔)</span></label>
-                    <input id="dingtalk-allowed-from-user-ids" class="mcp-input" type="text" placeholder="user_a,user_b" autocomplete="off">
-
-                    <label class="mcp-label">Allowed Group IDs <span class="mcp-hint">(逗号分隔)</span></label>
-                    <input id="dingtalk-allowed-group-ids" class="mcp-input" type="text" placeholder="chat_xxx,chat_yyy" autocomplete="off">
-
-                    <label class="mcp-label">Max Inbound Chars</label>
-                    <input id="dingtalk-max-inbound-chars" class="mcp-input" type="number" min="1" placeholder="4096" autocomplete="off">
-
-                    <label class="mcp-label">Require Mention In Group</label>
-                    <label class="mcp-toggle">
-                        <input id="dingtalk-require-mention" type="checkbox" checked>
-                        <span class="mcp-toggle-track"></span>
-                    </label>
-
-                    <label class="mcp-label">Expose Inbound Media Urls</label>
-                    <label class="mcp-toggle">
-                        <input id="dingtalk-expose-media" type="checkbox" checked>
-                        <span class="mcp-toggle-track"></span>
-                    </label>
-
-                    <label class="mcp-label">Stream Poll Interval (ms)</label>
-                    <input id="dingtalk-stream-poll-interval-ms" class="mcp-input" type="number" min="1" placeholder="500" autocomplete="off">
+                    <label class="mcp-label">Bot Secret</label>
+                    <input id="wecom-botsecret" class="mcp-input" type="password" placeholder="xxxxxxxxxxxxxxxx" autocomplete="new-password">
                 </div>
 
                 <div id="ch-form-error" class="mcp-form-error" style="display:none"></div>

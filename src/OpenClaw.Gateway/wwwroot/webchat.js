@@ -2105,40 +2105,21 @@
             const dForm          = document.getElementById('ch-dingtalk-form');
 
             // DingTalk field refs
-            const dAppId           = document.getElementById('dingtalk-appid');
-            const dAppIdRef        = document.getElementById('dingtalk-appid-ref');
-            const dAppKey           = document.getElementById('dingtalk-appkey');
-            const dAppKeyRef        = document.getElementById('dingtalk-appkey-ref');
-            const dAppSecret        = document.getElementById('dingtalk-appsecret');
-            const dAppSecretRef     = document.getElementById('dingtalk-appsecret-ref');
-            const dRobotCode        = document.getElementById('dingtalk-robotcode');
-            const dRobotCodeRef     = document.getElementById('dingtalk-robotcode-ref');
-            const dGroupPolicy      = document.getElementById('dingtalk-group-policy');
-            const dAllowedFromUsers = document.getElementById('dingtalk-allowed-from-user-ids');
-            const dAllowedGroupIds  = document.getElementById('dingtalk-allowed-group-ids');
-            const dMaxInboundChars  = document.getElementById('dingtalk-max-inbound-chars');
-            const dRequireMention   = document.getElementById('dingtalk-require-mention');
-            const dExposeMedia      = document.getElementById('dingtalk-expose-media');
-            const dStreamPollMs     = document.getElementById('dingtalk-stream-poll-interval-ms');
+            const dAppId    = document.getElementById('dingtalk-appid');
+            const dAppKey   = document.getElementById('dingtalk-appkey');
+            const dAppSecret = document.getElementById('dingtalk-appsecret');
+            const wForm     = document.getElementById('ch-wecom-form');
+
+            // WeCom field refs
+            const wBotId     = document.getElementById('wecom-botid');
+            const wBotSecret = document.getElementById('wecom-botsecret');
 
             let activeChannel = 'feishu';
-
-            function csvToList(value) {
-                return String(value ?? '')
-                    .split(',')
-                    .map(x => x.trim())
-                    .filter(Boolean);
-            }
-
-            function listToCsv(value) {
-                if (Array.isArray(value)) return value.join(', ');
-                if (typeof value === 'string') return value;
-                return '';
-            }
 
             function setChannelFormVisibility() {
                 fForm.style.display = activeChannel === 'feishu' ? '' : 'none';
                 dForm.style.display = activeChannel === 'dingtalk' ? '' : 'none';
+                wForm.style.display = activeChannel === 'wecom' ? '' : 'none';
             }
 
             function showStatus(msg, isErr) {
@@ -2185,64 +2166,34 @@
                 if (el) el.value = value ?? '';
             }
 
-            function setChecked(el, value) {
-                if (el) el.checked = Boolean(value);
-            }
-
-            function readPositiveInt(el, fallback) {
-                const raw = readInputValue(el);
-                if (!raw) return fallback;
-                const value = Number.parseInt(raw, 10);
-                return Number.isFinite(value) && value > 0 ? value : fallback;
-            }
-
             function populateDingTalkForm(cfg) {
                 setInputValue(dAppId, cfg.AppId ?? cfg.appId ?? '');
-                setInputValue(dAppIdRef, cfg.AppIdRef ?? cfg.appIdRef ?? '');
                 setInputValue(dAppKey, cfg.AppKey ?? cfg.appKey ?? '');
-                setInputValue(dAppKeyRef, cfg.AppKeyRef ?? cfg.appKeyRef ?? '');
                 setInputValue(dAppSecret, cfg.AppSecret ?? cfg.appSecret ?? '');
-                setInputValue(dAppSecretRef, cfg.AppSecretRef ?? cfg.appSecretRef ?? '');
-                setInputValue(dRobotCode, cfg.RobotCode ?? cfg.robotCode ?? '');
-                setInputValue(dRobotCodeRef, cfg.RobotCodeRef ?? cfg.robotCodeRef ?? '');
-                dGroupPolicy.value = cfg.GroupPolicy ?? cfg.groupPolicy ?? 'open';
-                dAllowedFromUsers.value = listToCsv(cfg.AllowedFromUserIds ?? cfg.allowedFromUserIds ?? []);
-                dAllowedGroupIds.value = listToCsv(cfg.AllowedGroupIds ?? cfg.allowedGroupIds ?? []);
-                dMaxInboundChars.value = cfg.MaxInboundChars ?? cfg.maxInboundChars ?? 4096;
-                setChecked(dRequireMention, cfg.RequireMentionInGroup ?? cfg.requireMentionInGroup ?? true);
-                setChecked(dExposeMedia, cfg.ExposeInboundMediaUrls ?? cfg.exposeInboundMediaUrls ?? true);
-                dStreamPollMs.value = cfg.StreamPollIntervalMs ?? cfg.streamPollIntervalMs ?? 500;
             }
 
             function buildDingTalkConfig() {
-                const cfg = {
-                    enabled: true,
-                    groupPolicy: dGroupPolicy.value || 'open',
-                    allowedFromUserIds: csvToList(dAllowedFromUsers.value),
-                    allowedGroupIds: csvToList(dAllowedGroupIds.value),
-                    maxInboundChars: readPositiveInt(dMaxInboundChars, 4096),
-                    requireMentionInGroup: dRequireMention.checked,
-                    exposeInboundMediaUrls: dExposeMedia.checked,
-                    streamPollIntervalMs: readPositiveInt(dStreamPollMs, 500)
-                };
-
+                const cfg = { enabled: true };
                 const appId = readInputValue(dAppId);
                 if (appId) cfg.appId = appId;
-                const appIdRef = readInputValue(dAppIdRef);
-                if (appIdRef) cfg.appIdRef = appIdRef;
                 const appKey = readInputValue(dAppKey);
                 if (appKey) cfg.appKey = appKey;
-                const appKeyRef = readInputValue(dAppKeyRef);
-                if (appKeyRef) cfg.appKeyRef = appKeyRef;
                 const appSecret = readInputValue(dAppSecret);
                 if (appSecret) cfg.appSecret = appSecret;
-                const appSecretRef = readInputValue(dAppSecretRef);
-                if (appSecretRef) cfg.appSecretRef = appSecretRef;
-                const robotCode = readInputValue(dRobotCode);
-                if (robotCode) cfg.robotCode = robotCode;
-                const robotCodeRef = readInputValue(dRobotCodeRef);
-                if (robotCodeRef) cfg.robotCodeRef = robotCodeRef;
+                return cfg;
+            }
 
+            function populateWeComForm(cfg) {
+                setInputValue(wBotId, cfg.BotId ?? cfg.botId ?? '');
+                setInputValue(wBotSecret, cfg.BotSecret ?? cfg.botSecret ?? '');
+            }
+
+            function buildWeComConfig() {
+                const cfg = { enabled: true };
+                const botId = readInputValue(wBotId);
+                if (botId) cfg.botId = botId;
+                const botSecret = readInputValue(wBotSecret);
+                if (botSecret) cfg.botSecret = botSecret;
                 return cfg;
             }
 
@@ -2259,6 +2210,7 @@
                     const cfg = await resp.json();
                     if (activeChannel === 'feishu') populateFeishuForm(cfg);
                     if (activeChannel === 'dingtalk') populateDingTalkForm(cfg);
+                    if (activeChannel === 'wecom') populateWeComForm(cfg);
                     showStatus('加载成功 — 当前为生效中的配置', false);
                 } catch (e) {
                     showStatus('加载失败: ' + e.message, true);
@@ -2272,6 +2224,8 @@
                     body = buildFeishuConfig();
                 } else if (activeChannel === 'dingtalk') {
                     body = buildDingTalkConfig();
+                } else if (activeChannel === 'wecom') {
+                    body = buildWeComConfig();
                 } else {
                     showFormError('未知渠道: ' + activeChannel);
                     return;

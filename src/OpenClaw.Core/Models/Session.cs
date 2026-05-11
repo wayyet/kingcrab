@@ -614,6 +614,7 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(SignalChannelConfig))]
 [JsonSerializable(typeof(FeishuChannelConfig))]
 [JsonSerializable(typeof(DingTalkChannelConfig))]
+[JsonSerializable(typeof(WeComChannelConfig))]
 [JsonSerializable(typeof(RoutingConfig))]
 [JsonSerializable(typeof(AgentRouteConfig))]
 [JsonSerializable(typeof(TailscaleConfig))]

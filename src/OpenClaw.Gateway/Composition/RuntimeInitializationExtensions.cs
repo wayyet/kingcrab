@@ -301,9 +301,7 @@ internal static class RuntimeInitializationExtensions
         // Feishu is always added to adapters (enables hot-enable via config without restart)
         channelAdapters["feishu"] = app.Services.GetRequiredService<FeishuChannel>();
         channelAdapters["dingtalk"] = app.Services.GetRequiredService<DingTalkChannel>();
-
-        // DingTalk is also always added so Stream mode can start and be hot-reloaded via admin API.
-        channelAdapters["dingtalk"] = app.Services.GetRequiredService<DingTalkChannel>();
+        channelAdapters["wecom"] = app.Services.GetRequiredService<WeComChannel>();
 
         // Restore persisted channel configs from volume storage (survives container restarts).
         // This must happen before StartAsync is called in PipelineExtensions.StartChannels.
@@ -320,6 +318,13 @@ internal static class RuntimeInitializationExtensions
         {
             app.Services.GetRequiredService<DingTalkChannel>().SetRuntimeConfig(persistedDingTalk);
             app.Logger.LogInformation("Restored persisted DingTalk config from volume storage.");
+        }
+
+        var persistedWeCom = channelStore.TryLoad("wecom", CoreJsonContext.Default.WeComChannelConfig);
+        if (persistedWeCom is not null)
+        {
+            app.Services.GetRequiredService<WeComChannel>().SetRuntimeConfig(persistedWeCom);
+            app.Logger.LogInformation("Restored persisted WeCom config from volume storage.");
         }
 
         var whatsAppWorkerHost = await CreateWhatsAppChannelAsync(app, startup, services, loggerFactory, channelAdapters);

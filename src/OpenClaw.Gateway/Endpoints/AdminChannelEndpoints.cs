@@ -25,11 +25,13 @@ internal static class AdminChannelEndpoints
         var browserSessions = app.Services.GetRequiredService<BrowserSessionAuthService>();
         var operations = runtime.Operations;
 
-        // Resolve channel adapters once at startup (only channels that support runtime updates).
+        // 在启动时解析通道适配器（仅支持运行时更新的通道）。
         var feishu = app.Services.GetRequiredService<FeishuChannel>();
         var dingtalk = app.Services.GetRequiredService<DingTalkChannel>();
+        var wecom = app.Services.GetRequiredService<WeComChannel>();
         var channelStore = app.Services.GetRequiredService<ChannelConfigStore>();
         var defaultDingTalkConfig = CloneDingTalkConfig(startup.Config.Channels.DingTalk);
+        var defaultWeComConfig = CloneWeComConfig(startup.Config.Channels.WeCom);
 
         // ── GET /admin/channels/{channel} ─────────────────────────────────────
         // Returns the currently effective config for the named channel.
@@ -43,6 +45,7 @@ internal static class AdminChannelEndpoints
             {
                 "feishu" => Results.Json(feishu.GetEffectiveConfigForAdmin(), CoreJsonContext.Default.FeishuChannelConfig),
                 "dingtalk" => Results.Json(GetEffectiveDingTalkConfig(channelStore, defaultDingTalkConfig), CoreJsonContext.Default.DingTalkChannelConfig),
+                "wecom" => Results.Json(GetEffectiveWeComConfig(channelStore, defaultWeComConfig), CoreJsonContext.Default.WeComChannelConfig),
 
                 // Add new channels here:
                 // "slack"   => Results.Json(slack.GetEffectiveConfig(), CoreJsonContext.Default.SlackChannelConfig),
@@ -73,6 +76,7 @@ internal static class AdminChannelEndpoints
             {
                 "feishu" => await HandleFeishuUpdateAsync(ctx, feishu, channelStore),
                 "dingtalk" => await HandleDingTalkUpdateAsync(ctx, startup.Config.Channels, channelStore),
+                "wecom" => await HandleWeComUpdateAsync(ctx, wecom, channelStore),
 
                 // Add new channels here:
                 // "slack"   => await HandleSlackUpdateAsync(ctx, slack, channelStore),
@@ -103,13 +107,18 @@ internal static class AdminChannelEndpoints
             {
                 case "feishu":
                     channelStore.Delete("feishu");
-                    // Clear override so IOptionsMonitor / appsettings takes over again.
+                    // 清除覆盖，恢复为 appsettings 配置
                     feishu.SetRuntimeConfig(null);
                     await feishu.RestartAsync(ctx.RequestAborted);
                     break;
                 case "dingtalk":
                     channelStore.Delete("dingtalk");
                     startup.Config.Channels.DingTalk = CloneDingTalkConfig(defaultDingTalkConfig);
+                    break;
+                case "wecom":
+                    channelStore.Delete("wecom");
+                    wecom.SetRuntimeConfig(null);
+                    await wecom.RestartAsync(ctx.RequestAborted);
                     break;
 
                 // Add new channels here
@@ -223,6 +232,80 @@ internal static class AdminChannelEndpoints
     }
 
     private static DingTalkChannelConfig NormalizeDingTalkConfig(DingTalkChannelConfig source)
+    {
+        return source;
+    }
+
+    // ── WeCom 管理 API 辅助方法 ──
+
+    /// <summary>处理 WeCom 配置更新请求（POST /admin/channels/wecom/update）</summary>
+    private static async Task<IResult> HandleWeComUpdateAsync(HttpContext ctx, WeComChannel wecom, ChannelConfigStore channelStore)
+    {
+        WeComChannelConfig? patch;
+        try
+        {
+            patch = await ctx.Request.ReadFromJsonAsync(CoreJsonContext.Default.WeComChannelConfig, ctx.RequestAborted);
+        }
+        catch (Exception ex)
+        {
+            return Results.Json(
+                new OperationStatusResponse { Success = false, Error = $"无效的 JSON：{ex.Message}" },
+                CoreJsonContext.Default.OperationStatusResponse,
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        if (patch is null)
+            return Results.Json(
+                new OperationStatusResponse { Success = false, Error = "请求体不能为空。" },
+                CoreJsonContext.Default.OperationStatusResponse,
+                statusCode: StatusCodes.Status400BadRequest);
+
+        patch = NormalizeWeComConfig(patch);
+
+        // 持久化到卷存储，确保容器重启后配置不丢失
+        channelStore.Save("wecom", patch, CoreJsonContext.Default.WeComChannelConfig);
+
+        // 热更新并重新连接
+        await wecom.UpdateConfigAsync(patch, ctx.RequestAborted);
+
+        return Results.Json(
+            new OperationStatusResponse { Success = true, Message = "企业微信配置已持久化并重新连接。" },
+            CoreJsonContext.Default.OperationStatusResponse);
+    }
+
+    /// <summary>获取当前生效的 WeCom 配置（优先返回持久化的覆盖配置）</summary>
+    private static WeComChannelConfig GetEffectiveWeComConfig(ChannelConfigStore channelStore, WeComChannelConfig defaultConfig)
+    {
+        var loaded = channelStore.TryLoad("wecom", CoreJsonContext.Default.WeComChannelConfig);
+        return NormalizeWeComConfig(loaded ?? defaultConfig);
+    }
+
+    /// <summary>深拷贝 WeCom 配置（用于保存默认值快照）</summary>
+    private static WeComChannelConfig CloneWeComConfig(WeComChannelConfig source)
+    {
+        return NormalizeWeComConfig(new WeComChannelConfig
+        {
+            Enabled = source.Enabled,
+            BotId = source.BotId,
+            BotIdRef = source.BotIdRef,
+            BotSecret = source.BotSecret,
+            BotSecretRef = source.BotSecretRef,
+            CorpId = source.CorpId,
+            CorpIdRef = source.CorpIdRef,
+            AgentId = source.AgentId,
+            AgentIdRef = source.AgentIdRef,
+            CorpSecret = source.CorpSecret,
+            CorpSecretRef = source.CorpSecretRef,
+            GroupPolicy = source.GroupPolicy,
+            AllowedFromUserIds = source.AllowedFromUserIds.ToArray(),
+            AllowedGroupIds = source.AllowedGroupIds.ToArray(),
+            MaxInboundChars = source.MaxInboundChars,
+            RequireMentionInGroup = source.RequireMentionInGroup,
+        });
+    }
+
+    /// <summary>规范化 WeCom 配置（透传，预留处理逻辑）</summary>
+    private static WeComChannelConfig NormalizeWeComConfig(WeComChannelConfig source)
     {
         return source;
     }
