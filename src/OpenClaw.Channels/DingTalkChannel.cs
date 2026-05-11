@@ -47,6 +47,15 @@ public sealed class DingTalkChannel : IChannelAdapter, IRestartableChannelAdapte
 
     private string? _botUserId;
 
+    // ── 消息去重：key=msgId, value=过期时间(Unix ms) ──
+    private readonly ConcurrentDictionary<string, long> _dedup = new(StringComparer.Ordinal);
+    private const long DedupTtlMs = 5L * 60 * 1_000; // 5 分钟 TTL
+    private const int DedupMaxSize = 2_000; // 最多 2000 条
+
+    // ── 媒体下载临时目录 ──
+    private static readonly string MediaTempDir = Path.Combine(
+        Path.GetTempPath(), "openclaw_dingtalk");
+
     public DingTalkChannel(
         DingTalkChannelConfig initialConfig,
         ILogger<DingTalkChannel> logger)
@@ -329,6 +338,7 @@ public sealed class DingTalkChannel : IChannelAdapter, IRestartableChannelAdapte
         var senderId = GetString(data, "senderId") ?? GetString(data, "senderStaffId");
         var senderNick = GetString(data, "senderNick");
         var conversationType = GetString(data, "conversationType");
+        var msgId = GetString(data, "msgId");
         var text = ReadDingTalkText(data);
         var msgType = GetString(data, "msgtype") ?? GetString(data, "msgType") ?? "text";
 
@@ -336,7 +346,31 @@ public sealed class DingTalkChannel : IChannelAdapter, IRestartableChannelAdapte
         if (!string.IsNullOrWhiteSpace(chatbotUserId))
             _botUserId = chatbotUserId;
 
-        if (string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(senderId))
+        // ── 消息去重 ──
+        if (!string.IsNullOrWhiteSpace(msgId) && !TryClaimDedup(msgId))
+        {
+            _logger.LogDebug("DingTalk duplicate message {MsgId} suppressed.", msgId);
+            await SendStreamResponseAsync(ws, messageId, 200, "OK", "{\"response\": null}", ct);
+            return;
+        }
+
+        // ── 回复消息提取 ReplyToMessageId ──
+        string? replyToMessageId = null;
+        if (GetBool(data, "isReplyMsg") && data.TryGetProperty("repliedMsg", out var repliedMsg))
+        {
+            replyToMessageId = GetString(repliedMsg, "msgId");
+        }
+
+        // ── 媒体文件下载 ──
+        var mediaText = await DownloadDingTalkMediaAsync(data, msgType, msgId, ct);
+
+        if (string.IsNullOrWhiteSpace(text) && string.IsNullOrWhiteSpace(mediaText))
+        {
+            await SendStreamResponseAsync(ws, messageId, 200, "OK", "{\"response\": null}", ct);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(senderId))
         {
             await SendStreamResponseAsync(ws, messageId, 200, "OK", "{\"response\": null}", ct);
             return;
@@ -375,8 +409,13 @@ public sealed class DingTalkChannel : IChannelAdapter, IRestartableChannelAdapte
             return;
         }
 
-        if (text.Length > cfg.MaxInboundChars)
-            text = text[..cfg.MaxInboundChars];
+        // ── 合并文本和媒体标记 ──
+        var finalText = text ?? "";
+        if (!string.IsNullOrWhiteSpace(mediaText))
+            finalText = string.IsNullOrWhiteSpace(finalText) ? mediaText : finalText + "\n" + mediaText;
+
+        if (finalText.Length > cfg.MaxInboundChars)
+            finalText = finalText[..cfg.MaxInboundChars];
 
         var sessionWebhook = GetString(data, "sessionWebhook");
         var sessionWebhookExpiredTime = GetNullableLong(data, "sessionWebhookExpiredTime");
@@ -401,8 +440,9 @@ public sealed class DingTalkChannel : IChannelAdapter, IRestartableChannelAdapte
             ChannelId = ChannelId,
             SenderId = senderId,
             SenderName = senderNick,
-            Text = text,
-            MessageId = GetString(data, "msgId"),
+            Text = finalText,
+            MessageId = msgId,
+            ReplyToMessageId = replyToMessageId,
             IsGroup = isGroup,
             GroupId = isGroup ? conversationId : null,
             MentionedIds = mentions,
@@ -805,6 +845,90 @@ public sealed class DingTalkChannel : IChannelAdapter, IRestartableChannelAdapte
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to fetch DingTalk bot userId; group @mention filtering will be unavailable.");
+            return null;
+        }
+    }
+
+    // ──────────────────────────── Dedup ──────────────────────────────────────
+
+    /// <summary>消息去重：检查 msgId 是否已处理过，未处理则标记并返回 true。</summary>
+    private bool TryClaimDedup(string msgId)
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        if (_dedup.TryGetValue(msgId, out var expMs) && expMs > now)
+            return false;
+
+        _dedup[msgId] = now + DedupTtlMs;
+
+        // 定期清理过期条目
+        if (_dedup.Count > DedupMaxSize)
+            EvictExpiredDedup(now);
+
+        return true;
+    }
+
+    private void EvictExpiredDedup(long now)
+    {
+        foreach (var key in _dedup.Keys.ToList())
+        {
+            if (_dedup.TryGetValue(key, out var expMs) && expMs <= now)
+                _dedup.TryRemove(key, out _);
+        }
+    }
+
+    // ──────────────────────────── Media download ──────────────────────────────
+
+    /// <summary>
+    /// 下载钉钉消息中的媒体文件（图片/文件），保存到临时目录，
+    /// 返回 [IMAGE_PATH:...] 或 [FILE_PATH:...] 标记。
+    /// </summary>
+    private async Task<string?> DownloadDingTalkMediaAsync(JsonElement data, string msgType, string? msgId, CancellationToken ct)
+    {
+        try
+        {
+            var downloadCode = GetString(data, "downloadCode");
+            if (string.IsNullOrWhiteSpace(downloadCode) && data.TryGetProperty("content", out var content))
+                downloadCode = GetString(content, "downloadCode");
+
+            if (string.IsNullOrWhiteSpace(downloadCode))
+                return null;
+
+            // 通过钉钉文件下载接口获取媒体文件
+            var url = $"{DingTalkBase}/v1.0/media/download?downloadCode={Uri.EscapeDataString(downloadCode)}";
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _accessToken);
+
+            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("DingTalk media download failed for msgId={MsgId}: {Status}", msgId, response.StatusCode);
+                return null;
+            }
+
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? "";
+            var ext = contentType switch
+            {
+                "image/jpeg" or "image/jpg" => ".jpg",
+                "image/png" => ".png",
+                "image/gif" => ".gif",
+                "image/webp" => ".webp",
+                "application/pdf" => ".pdf",
+                _ => msgType == "picture" || msgType == "image" ? ".jpg" : ".bin"
+            };
+
+            Directory.CreateDirectory(MediaTempDir);
+            var filePath = Path.Combine(MediaTempDir, $"{Guid.NewGuid():N}{ext}");
+            await using var fs = File.Create(filePath);
+            await response.Content.CopyToAsync(fs, ct);
+
+            _logger.LogInformation("DingTalk media downloaded for msgId={MsgId}: {Path}", msgId, filePath);
+            return msgType == "picture" || msgType == "image"
+                ? $"[IMAGE_PATH:{filePath}]"
+                : $"[FILE_PATH:{filePath}]";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to download DingTalk media for msgId={MsgId}.", msgId);
             return null;
         }
     }

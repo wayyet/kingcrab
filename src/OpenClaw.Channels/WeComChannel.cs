@@ -64,6 +64,15 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
     // ── WebSocket 写出锁，防止并发写 ──
     private readonly SemaphoreSlim _wsSendLock = new(1, 1);
 
+    // ── 消息去重：key=msgid, value=过期时间(Unix ms) ──
+    private readonly ConcurrentDictionary<string, long> _dedup = new(StringComparer.Ordinal);
+    private const long DedupTtlMs = 5L * 60 * 1_000; // 5 分钟 TTL
+    private const int DedupMaxSize = 2_000; // 最多 2000 条
+
+    // ── 媒体下载临时目录 ──
+    private static readonly string MediaTempDir = Path.Combine(
+        Path.GetTempPath(), "openclaw_wecom");
+
     // ── 入站消息上下文缓存（用于快速 WebSocket 回复） ──
     // key: chatid 或 userid, value: 最近一次消息的上下文信息
     private readonly ConcurrentDictionary<string, InboundMsgContext> _inboundContexts = new(StringComparer.Ordinal);
@@ -71,7 +80,8 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
     /// <summary>
     /// 缓存最近一次入站消息的上下文，用于 WebSocket 快速回复。
     /// </summary>
-    private sealed record InboundMsgContext(string MsgId, string? ChatId, string? UserId, DateTimeOffset ReceivedAt);
+    /// <param name="ReqId">消息回调用 req_id，回复时需透传</param>
+    private sealed record InboundMsgContext(string MsgId, string ReqId, string? ChatId, string? UserId, DateTimeOffset ReceivedAt);
 
     public WeComChannel(
         WeComChannelConfig initialConfig,
@@ -158,6 +168,7 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
             _accessToken = null;
             _tokenExpiry = DateTimeOffset.MinValue;
             _inboundContexts.Clear();
+            _dedup.Clear();
 
             _cts = CancellationTokenSource.CreateLinkedTokenSource(_appLifetime);
             _receiveLoop = RunWsLoopAsync(_cts.Token);
@@ -255,22 +266,13 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
 
     /// <summary>
     /// 发送 aibot_subscribe 帧完成鉴权。
-    /// 格式：{"cmd":"aibot_subscribe","headers":{"req_id":"..."},"body":{"bot_id":"...","secret":"..."}}
     /// </summary>
     private async Task SendSubscribeAsync(ClientWebSocket ws, CancellationToken ct)
     {
-        var subscribeMsg = new WeComWsRequest
-        {
-            Cmd = "aibot_subscribe",
-            Headers = new WeComWsRequestHeaders { ReqId = Guid.NewGuid().ToString("N") },
-            Body = new WeComSubscribeBody
-            {
-                BotId = _botId!,
-                Secret = _botSecret!
-            }
-        };
+        var reqId = Guid.NewGuid().ToString("N");
+        var json = BuildWsMessage("aibot_subscribe", reqId,
+            $"\"bot_id\":{JsonEncodedText.Encode(_botId!)},\"secret\":{JsonEncodedText.Encode(_botSecret!)}");
 
-        var json = JsonSerializer.Serialize(subscribeMsg, WeComJsonContext.Default.WeComWsRequest);
         await SendWsTextDirectAsync(ws, json, ct);
         _logger.LogInformation("企业微信 aibot_subscribe 已发送，等待消息推送。");
     }
@@ -397,15 +399,35 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
 
         // 解析发送者信息
         string? senderId = null;
+        string? senderName = null;
         if (body.TryGetProperty("from", out var fromProp))
+        {
             senderId = GetString(fromProp, "userid");
+            senderName = GetString(fromProp, "name") ?? GetString(fromProp, "username");
+        }
 
         // 提取消息文本
         var text = ReadWeComText(body);
 
-        if (string.IsNullOrWhiteSpace(text) && msgType != "image" && msgType != "file" && msgType != "voice" && msgType != "video")
+        // ── 消息去重 ──
+        if (!string.IsNullOrWhiteSpace(msgId) && !TryClaimDedup(msgId))
         {
-            // 无文本且非媒体消息，已读不回
+            _logger.LogDebug("企业微信重复消息 {MsgId} 已丢弃。", msgId);
+            return;
+        }
+
+        // ── 回复消息提取 ReplyToMessageId（quote 引用） ──
+        string? replyToMessageId = null;
+        if (body.TryGetProperty("quote", out var quote))
+        {
+            replyToMessageId = msgId; // 企业微信 quote 不返回原始 msgid，用当前 msgId 作为关联
+        }
+
+        // ── 媒体文件下载 ──
+        var mediaText = await DownloadWeComMediaAsync(body, msgType, msgId, ct);
+
+        if (string.IsNullOrWhiteSpace(text) && string.IsNullOrWhiteSpace(mediaText))
+        {
             return;
         }
 
@@ -440,37 +462,63 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
             return;
         }
 
+        // ── @提及 提取 ──
+        string[]? mentionedIds = null;
+        var isBotMentioned = false;
+        if (body.TryGetProperty("text", out var textProp) && textProp.ValueKind == JsonValueKind.Object)
+        {
+            var content = GetString(textProp, "content") ?? "";
+            // 企业微信群聊 @机器人 内容格式为 "@BotName 消息内容"，提取 @ 提及的 userId
+            if (content.Contains('@'))
+            {
+                isBotMentioned = true;
+                // 尝试从 mentions 数组获取（如果企业微信提供了）
+                if (textProp.TryGetProperty("mentions", out var mentionsArr) && mentionsArr.ValueKind == JsonValueKind.Array)
+                {
+                    var list = new List<string>();
+                    foreach (var m in mentionsArr.EnumerateArray())
+                    {
+                        var uid = GetString(m, "userid");
+                        if (!string.IsNullOrWhiteSpace(uid))
+                            list.Add(uid);
+                    }
+                    if (list.Count > 0)
+                        mentionedIds = [.. list];
+                }
+            }
+        }
+
         // ── 群聊 @提及 过滤 ──
-        if (isGroup && cfg.RequireMentionInGroup && !IsBotMentioned(body))
+        if (isGroup && cfg.RequireMentionInGroup && !isBotMentioned)
         {
             _logger.LogDebug("企业微信群消息未 @机器人 且 RequireMentionInGroup=true，已丢弃。");
             return;
         }
 
+        // ── 合并文本和媒体标记 ──
+        var finalText = text ?? "";
+        if (!string.IsNullOrWhiteSpace(mediaText))
+            finalText = string.IsNullOrWhiteSpace(finalText) ? mediaText : finalText + "\n" + mediaText;
+
         // ── 文本截断 ──
-        if (text is not null && text.Length > cfg.MaxInboundChars)
-            text = text[..cfg.MaxInboundChars];
+        if (finalText.Length > cfg.MaxInboundChars)
+            finalText = finalText[..cfg.MaxInboundChars];
 
         // ── 缓存入站上下文（用于后续 WebSocket 快速回复） ──
-        CacheInboundContext(msgId, chatId, senderId);
-
-        // ── 处理图片/文件/语音/视频媒体 ──
-        var mediaMarker = BuildMediaMarker(body, msgType);
-        var finalText = text;
-        if (!string.IsNullOrWhiteSpace(mediaMarker) && !string.IsNullOrWhiteSpace(finalText))
-            finalText = finalText + "\n" + mediaMarker;
-        else if (!string.IsNullOrWhiteSpace(mediaMarker))
-            finalText = mediaMarker;
+        CacheInboundContext(msgId, reqId ?? "", chatId, senderId);
 
         // ── 构建 InboundMessage ──
         var inbound = new InboundMessage
         {
             ChannelId = ChannelId,
             SenderId = senderId,
-            Text = finalText ?? "",
+            SenderName = senderName,
+            Text = finalText,
             MessageId = msgId,
+            ReplyToMessageId = replyToMessageId,
             IsGroup = isGroup,
             GroupId = isGroup ? chatId : null,
+            MentionedIds = mentionedIds,
             MediaType = msgType,
         };
 
@@ -507,13 +555,13 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
         }
     }
 
-    /// <summary>缓存入站消息上下文，用于后续 WebSocket 快速回复</summary>
-    private void CacheInboundContext(string? msgId, string? chatId, string? senderId)
+    /// <summary>缓存入站消息上下文，用于后续 WebSocket 快速回复（透传 reqId）</summary>
+    private void CacheInboundContext(string? msgId, string reqId, string? chatId, string? senderId)
     {
         if (string.IsNullOrWhiteSpace(msgId))
             return;
 
-        var ctx = new InboundMsgContext(msgId, chatId, senderId, DateTimeOffset.UtcNow);
+        var ctx = new InboundMsgContext(msgId, reqId, chatId, senderId, DateTimeOffset.UtcNow);
 
         // 同时以 chatid 和 userid 为 key 缓存
         if (!string.IsNullOrWhiteSpace(chatId))
@@ -581,9 +629,123 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
         return null;
     }
 
+    // ════════════════════════════ 消息去重 ════════════════════════════
+
+    /// <summary>消息去重：检查 msgid 是否已处理过，未处理则标记并返回 true。</summary>
+    private bool TryClaimDedup(string msgId)
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        if (_dedup.TryGetValue(msgId, out var expMs) && expMs > now)
+            return false;
+
+        _dedup[msgId] = now + DedupTtlMs;
+
+        if (_dedup.Count > DedupMaxSize)
+            EvictExpiredDedup(now);
+
+        return true;
+    }
+
+    private void EvictExpiredDedup(long now)
+    {
+        foreach (var key in _dedup.Keys.ToList())
+        {
+            if (_dedup.TryGetValue(key, out var expMs) && expMs <= now)
+                _dedup.TryRemove(key, out _);
+        }
+    }
+
+    // ════════════════════════════ 媒体下载 ════════════════════════════
+
     /// <summary>
-    /// 构建媒体标记。企业微信图片/文件/语音/视频消息会携带 media_id，
-    /// 我们将其转换为 [IMAGE:...] / [FILE:...] 等标记供下游处理。
+    /// 下载企业微信消息中的媒体文件（图片/文件/语音），保存到临时目录，
+    /// 返回 [IMAGE_PATH:...] 或 [FILE_PATH:...] 标记。
+    /// </summary>
+    private async Task<string?> DownloadWeComMediaAsync(JsonElement body, string msgType, string? msgId, CancellationToken ct)
+    {
+        try
+        {
+            string? mediaId = null;
+            var propName = msgType switch
+            {
+                "image" => "image",
+                "file" => "file",
+                "voice" => "voice",
+                "video" => "video",
+                _ => null
+            };
+
+            if (propName is not null &&
+                body.TryGetProperty(propName, out var prop) &&
+                prop.ValueKind == JsonValueKind.Object)
+            {
+                mediaId = GetString(prop, "media_id");
+            }
+
+            if (string.IsNullOrWhiteSpace(mediaId))
+                return null;
+
+            // 需要 REST API 凭证才能下载
+            if (!HasApiCredentials())
+                return BuildMediaMarker(body, msgType); // 回退到纯文本标记
+
+            await RefreshAccessTokenAsync(ct);
+
+            var url = $"{WeComApiBase}/cgi-bin/media/get?access_token={_accessToken}&media_id={Uri.EscapeDataString(mediaId)}";
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("企业微信媒体下载失败 msgId={MsgId}: {Status}", msgId, response.StatusCode);
+                return BuildMediaMarker(body, msgType); // 回退到文本标记
+            }
+
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? "";
+            var ext = contentType switch
+            {
+                "image/jpeg" or "image/jpg" => ".jpg",
+                "image/png" => ".png",
+                "image/gif" => ".gif",
+                "image/webp" => ".webp",
+                "application/pdf" => ".pdf",
+                "audio/amr" => ".amr",
+                "audio/mp3" => ".mp3",
+                "video/mp4" => ".mp4",
+                _ => msgType switch
+                {
+                    "image" => ".jpg",
+                    "voice" => ".amr",
+                    "video" => ".mp4",
+                    _ => ".bin"
+                }
+            };
+
+            Directory.CreateDirectory(MediaTempDir);
+            var filePath = Path.Combine(MediaTempDir, $"{Guid.NewGuid():N}{ext}");
+            await using var fs = File.Create(filePath);
+            await response.Content.CopyToAsync(fs, ct);
+
+            _logger.LogInformation("企业微信媒体已下载 msgId={MsgId}: {Path}", msgId, filePath);
+
+            return msgType switch
+            {
+                "image" => $"[IMAGE_PATH:{filePath}]",
+                "voice" => $"[VOICE_PATH:{filePath}]",
+                "video" => $"[VIDEO_PATH:{filePath}]",
+                _ => $"[FILE_PATH:{filePath}]"
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "下载企业微信媒体失败 msgId={MsgId}。", msgId);
+            return BuildMediaMarker(body, msgType); // 回退到文本标记
+        }
+    }
+
+    /// <summary>
+    /// 构建媒体标记（纯文本回退）。企业微信图片/文件/语音/视频消息会携带 media_id，
+    /// 当无法下载时，将其转换为 [IMAGE:wecom:...] 等标记供 LLM 参考。
     /// </summary>
     private static string? BuildMediaMarker(JsonElement body, string msgType)
     {
@@ -693,27 +855,14 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
         if (!TryGetInboundContext(recipientId, out var ctx))
             return false;
 
-        // 构建回复帧
-        var replyMsg = new WeComWsRequest
-        {
-            Cmd = "aibot_respond_msg",
-            Headers = new WeComWsRequestHeaders { ReqId = Guid.NewGuid().ToString("N") },
-            Body = new WeComRespondBody
-            {
-                MsgId = ctx.MsgId,
-                MsgType = "message",
-                Stream = new WeComStreamInfo
-                {
-                    Id = Guid.NewGuid().ToString("N"),
-                    Finish = true,
-                    Content = text
-                }
-            }
-        };
+        var streamId = Guid.NewGuid().ToString("N");
+        // headers.req_id 必须透传消息回调中的原始 req_id
+        // msgtype 必须为 "stream"
+        var body = $"\"msgtype\":\"stream\"," +
+                   $"\"stream\":{{\"id\":{JsonEncodedText.Encode(streamId)},\"finish\":true,\"content\":{JsonEncodedText.Encode(text)}}}";
+        var json = BuildWsMessage("aibot_respond_msg", ctx.ReqId, body);
 
-        var json = JsonSerializer.Serialize(replyMsg, WeComJsonContext.Default.WeComWsRequest);
-        await SendWsTextAsync(json, ct);
-        return true;
+        return await SendWsTextAsync(json, ct);
     }
 
     /// <summary>通过 REST API 发送文本消息</summary>
@@ -811,13 +960,8 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
     /// <summary>发送 ping 心跳帧</summary>
     private async Task SendPingAsync(ClientWebSocket ws, CancellationToken ct)
     {
-        var pingMsg = new WeComWsRequest
-        {
-            Cmd = "aibot_ping",
-            Headers = new WeComWsRequestHeaders { ReqId = Guid.NewGuid().ToString("N") }
-        };
-
-        var json = JsonSerializer.Serialize(pingMsg, WeComJsonContext.Default.WeComWsRequest);
+        var reqId = Guid.NewGuid().ToString("N");
+        var json = BuildWsMessage("aibot_ping", reqId, null);
         await SendWsTextDirectAsync(ws, json, ct);
     }
 
@@ -904,12 +1048,24 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
 
     // ════════════════════════════ WebSocket 发送 ════════════════════════════
 
-    /// <summary>通过 WebSocket 发送文本帧（线程安全，使用当前活跃连接）</summary>
-    private async Task SendWsTextAsync(string text, CancellationToken ct)
+    /// <summary>
+    /// 构建企业微信 WebSocket 消息帧。
+    /// 格式：{"cmd":"...","headers":{"req_id":"..."},"body":{...}}
+    /// bodyJson 为 body 对象的 JSON 片段（不含外层大括号），为 null 时省略 body 字段。
+    /// </summary>
+    private static string BuildWsMessage(string cmd, string reqId, string? bodyJson)
+    {
+        if (bodyJson is null)
+            return $"{{\"cmd\":\"{cmd}\",\"headers\":{{\"req_id\":\"{reqId}\"}}}}";
+        return $"{{\"cmd\":\"{cmd}\",\"headers\":{{\"req_id\":\"{reqId}\"}},\"body\":{{{bodyJson}}}}}";
+    }
+
+    /// <summary>通过 WebSocket 发送文本帧（线程安全，使用当前活跃连接）。返回 true 表示发送成功。</summary>
+    private async Task<bool> SendWsTextAsync(string text, CancellationToken ct)
     {
         var ws = _activeWs;
         if (ws is null || ws.State != WebSocketState.Open)
-            return;
+            return false;
 
         await _wsSendLock.WaitAsync(ct);
         try
@@ -918,11 +1074,14 @@ public sealed class WeComChannel : IChannelAdapter, IRestartableChannelAdapter
             {
                 var bytes = Encoding.UTF8.GetBytes(text);
                 await ws.SendAsync(bytes, WebSocketMessageType.Text, true, ct);
+                return true;
             }
+            return false;
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "WebSocket 发送失败（连接可能已断开）。");
+            return false;
         }
         finally
         {
@@ -1100,7 +1259,6 @@ public sealed class WeComMediaUploadResponse
     public string? CreatedAt { get; set; }
 }
 
-[JsonSerializable(typeof(WeComWsRequest))]
 [JsonSerializable(typeof(WeComTokenResponse))]
 [JsonSerializable(typeof(WeComMediaUploadResponse))]
 [JsonSerializable(typeof(Dictionary<string, object>))]
