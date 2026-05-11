@@ -557,6 +557,8 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(SessionHandoffListResponse))]
 [JsonSerializable(typeof(SessionHandoffMutationResponse))]
 [JsonSerializable(typeof(SessionHandoffRemoveResponse))]
+[JsonSerializable(typeof(SessionDispatchItem))]
+[JsonSerializable(typeof(List<SessionDispatchItem>))]
 [JsonSerializable(typeof(SessionMetadataUpdateRequest))]
 [JsonSerializable(typeof(SessionDiffResponse))]
 [JsonSerializable(typeof(SessionTimelineResponse))]

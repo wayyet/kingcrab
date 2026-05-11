@@ -295,6 +295,7 @@ public sealed class SessionMetadataSnapshot
     public string? ActivePresetId { get; init; }
     public IReadOnlyList<SessionTodoItem> TodoItems { get; init; } = [];
     public IReadOnlyList<SessionHandoffItem> HandoffItems { get; init; } = [];
+    public IReadOnlyList<SessionDispatchItem> DispatchItems { get; init; } = [];
 }
 
 public sealed class SessionMetadataUpdateRequest
@@ -304,6 +305,7 @@ public sealed class SessionMetadataUpdateRequest
     public string? ActivePresetId { get; init; }
     public IReadOnlyList<SessionTodoItem>? TodoItems { get; init; }
     public IReadOnlyList<SessionHandoffItem>? HandoffItems { get; init; }
+    public IReadOnlyList<SessionDispatchItem>? DispatchItems { get; init; }
 }
 
 public sealed class SessionTodoItem
@@ -419,6 +421,51 @@ public sealed class SessionHandoffRemoveResponse
 
     [JsonPropertyName("items")]
     public IReadOnlyList<SessionHandoffItem> Items { get; init; } = [];
+}
+
+public sealed class SessionDispatchItem
+{
+    [JsonPropertyName("dispatch_id")]
+    public required string DispatchId { get; init; }
+
+    [JsonPropertyName("session_id")]
+    public required string SessionId { get; init; }
+
+    [JsonPropertyName("source_skill")]
+    public string SourceSkill { get; init; } = "employment-coach-conversation";
+
+    [JsonPropertyName("target")]
+    public required string Target { get; init; }
+
+    [JsonPropertyName("handoff_ids")]
+    public string[] HandoffIds { get; init; } = [];
+
+    [JsonPropertyName("mode")]
+    public string? Mode { get; init; }
+
+    [JsonPropertyName("note")]
+    public string? Note { get; init; }
+
+    [JsonPropertyName("to")]
+    public string? To { get; init; }
+
+    [JsonPropertyName("status")]
+    public string Status { get; init; } = "accepted";
+
+    [JsonPropertyName("created_at")]
+    public DateTimeOffset CreatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("updated_at")]
+    public DateTimeOffset UpdatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("completed_at")]
+    public DateTimeOffset? CompletedAtUtc { get; init; }
+
+    [JsonPropertyName("callback_summary")]
+    public string? CallbackSummary { get; init; }
+
+    [JsonPropertyName("errors")]
+    public string[] Errors { get; init; } = [];
 }
 
 public sealed class SessionDiffResponse

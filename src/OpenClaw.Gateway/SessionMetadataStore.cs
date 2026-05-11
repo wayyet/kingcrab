@@ -36,7 +36,8 @@ internal sealed class SessionMetadataStore : ISessionMetadataStore
                     Starred = false,
                     Tags = [],
                     TodoItems = [],
-                    HandoffItems = []
+                    HandoffItems = [],
+                    DispatchItems = []
                 };
         }
     }
@@ -61,7 +62,8 @@ internal sealed class SessionMetadataStore : ISessionMetadataStore
                     Starred = false,
                     Tags = [],
                     TodoItems = [],
-                    HandoffItems = []
+                    HandoffItems = [],
+                    DispatchItems = []
                 };
 
             var updated = new SessionMetadataSnapshot
@@ -78,7 +80,8 @@ internal sealed class SessionMetadataStore : ISessionMetadataStore
                     ? current.ActivePresetId
                     : request.ActivePresetId.Trim(),
                 TodoItems = NormalizeTodoItems(request.TodoItems ?? current.TodoItems),
-                HandoffItems = NormalizeHandoffItems(sessionId, request.HandoffItems ?? current.HandoffItems)
+                HandoffItems = NormalizeHandoffItems(sessionId, request.HandoffItems ?? current.HandoffItems),
+                DispatchItems = NormalizeDispatchItems(sessionId, request.DispatchItems ?? current.DispatchItems)
             };
 
             items.RemoveAll(item => string.Equals(item.SessionId, sessionId, StringComparison.Ordinal));
@@ -167,6 +170,34 @@ internal sealed class SessionMetadataStore : ISessionMetadataStore
                 UpdatedAtUtc = item.UpdatedAtUtc == default ? DateTimeOffset.UtcNow : item.UpdatedAtUtc,
                 DispatchId = string.IsNullOrWhiteSpace(item.DispatchId) ? null : item.DispatchId.Trim(),
                 CallbackSummary = string.IsNullOrWhiteSpace(item.CallbackSummary) ? null : item.CallbackSummary.Trim()
+            })
+            .OrderBy(static item => item.CreatedAtUtc)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<SessionDispatchItem> NormalizeDispatchItems(string sessionId, IReadOnlyList<SessionDispatchItem>? items)
+    {
+        if (items is null || items.Count == 0)
+            return [];
+
+        return items
+            .Where(static item => !string.IsNullOrWhiteSpace(item.DispatchId) && !string.IsNullOrWhiteSpace(item.Target))
+            .Select(item => new SessionDispatchItem
+            {
+                DispatchId = item.DispatchId.Trim(),
+                SessionId = sessionId,
+                SourceSkill = string.IsNullOrWhiteSpace(item.SourceSkill) ? "employment-coach-conversation" : item.SourceSkill.Trim(),
+                Target = item.Target.Trim(),
+                HandoffIds = NormalizeStringArray(item.HandoffIds),
+                Mode = string.IsNullOrWhiteSpace(item.Mode) ? null : item.Mode.Trim(),
+                Note = string.IsNullOrWhiteSpace(item.Note) ? null : item.Note.Trim(),
+                To = string.IsNullOrWhiteSpace(item.To) ? null : item.To.Trim(),
+                Status = string.IsNullOrWhiteSpace(item.Status) ? "accepted" : item.Status.Trim(),
+                CreatedAtUtc = item.CreatedAtUtc == default ? DateTimeOffset.UtcNow : item.CreatedAtUtc,
+                UpdatedAtUtc = item.UpdatedAtUtc == default ? DateTimeOffset.UtcNow : item.UpdatedAtUtc,
+                CompletedAtUtc = item.CompletedAtUtc,
+                CallbackSummary = string.IsNullOrWhiteSpace(item.CallbackSummary) ? null : item.CallbackSummary.Trim(),
+                Errors = NormalizeStringArray(item.Errors)
             })
             .OrderBy(static item => item.CreatedAtUtc)
             .ToArray();

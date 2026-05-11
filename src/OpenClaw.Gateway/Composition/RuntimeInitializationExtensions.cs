@@ -20,6 +20,7 @@ using OpenClaw.Core.Sessions;
 using OpenClaw.Core.Skills;
 using OpenClaw.Gateway;
 using OpenClaw.Gateway.Bootstrap;
+using OpenClaw.Gateway.Dispatch;
 using OpenClaw.Gateway.Extensions;
 using OpenClaw.Gateway.Models;
 using OpenClaw.Gateway.Profiles;
@@ -134,6 +135,18 @@ internal static class RuntimeInitializationExtensions
             effectiveRequireToolApproval,
             effectiveApprovalRequiredTools,
             services.ToolSandbox);
+
+        var dispatchRunner = new WorkflowDispatchRunner(
+            agentRuntime,
+            services.SessionManager,
+            services.Pipeline,
+            loggerFactory.CreateLogger<WorkflowDispatchRunner>(),
+            app.Lifetime.ApplicationStopping);
+        var dispatchCoordinator = new WorkflowDispatchCoordinator(
+            services.SessionMetadataStore,
+            loggerFactory.CreateLogger<WorkflowDispatchCoordinator>(),
+            dispatchRunner);
+        agentRuntime = new DispatchInterceptingAgentRuntime(agentRuntime, dispatchCoordinator);
 
         // Wire compact callback so /compact command can trigger LLM-powered compaction
         //if (agentRuntime is MafAgentRuntime concreteRuntime)
