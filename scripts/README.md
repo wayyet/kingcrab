@@ -61,7 +61,7 @@
 .\build-opensandbox-app-image.ps1
 
 # 锁定指定基础镜像版本
-.\build-opensandbox-app-image.ps1 -BaseTag opensandbox-base-202604170633
+.\build-opensandbox-app-image.ps1 -BaseTag opensandbox-base-202604281300
 
 # 构建并直接推送（多平台）
 .\build-opensandbox-app-image.ps1 -Platforms linux/amd64,linux/arm64 -Push
