@@ -376,6 +376,12 @@ public sealed class ToolingConfig
     public bool EnableBrowserTool { get; set; } = true;
     public bool EnableXSearch { get; set; } = true;
 
+    /// <summary>Enable the <c>todo</c> tool for session-scoped task tracking. Default: false.</summary>
+    public bool EnableTodoTool { get; set; } = false;
+
+    /// <summary>Enable the <c>handoff</c> tool for transferring sessions to another agent. Default: false.</summary>
+    public bool EnableHandoffTool { get; set; } = false;
+
     /// <summary>Enable the <c>publish_file</c> tool that publishes a local file as a downloadable attachment.</summary>
     public bool EnablePublishFile { get; set; } = true;
 
