@@ -110,6 +110,12 @@ internal sealed class McpWorkspaceWatcherService : IDisposable
         if (_configStore is not null)
         {
             servers = await _configStore.TryLoadServersAsync(ct).ConfigureAwait(false);
+            if (servers is null)
+                _logger.LogWarning("McpWorkspaceWatcher: memory-store config missing or unparseable — will fall back to workspace file.");
+            else if (servers.Count == 0)
+                _logger.LogInformation("McpWorkspaceWatcher: memory-store config has Enabled=false or no servers.");
+            else
+                _logger.LogInformation("McpWorkspaceWatcher: memory-store config loaded, {Count} server(s) defined.", servers.Count);
         }
 
         // Priority 2: fallback to workspace file (manual edits / legacy path).
@@ -117,6 +123,8 @@ internal sealed class McpWorkspaceWatcherService : IDisposable
         {
             var filePath = Path.Combine(_workspacePath, McpJsonRelativePath);
             servers = await TryReadConfigAsync(filePath, ct).ConfigureAwait(false);
+            if (servers is not null)
+                _logger.LogInformation("McpWorkspaceWatcher: fell back to workspace file, {Count} server(s) defined.", servers.Count);
         }
 
         // null means file was missing/invalid → pass empty dict to remove all workspace tools
@@ -126,7 +134,8 @@ internal sealed class McpWorkspaceWatcherService : IDisposable
 
         if (result.AddedTools.Count == 0 && result.RemovedToolNames.Count == 0)
         {
-            _logger.LogInformation("McpWorkspaceWatcher: reload produced no tool changes.");
+            _logger.LogInformation("McpWorkspaceWatcher: reload produced no tool changes (servers in registry: {Count}).",
+                servers?.Count ?? 0);
             return;
         }
 

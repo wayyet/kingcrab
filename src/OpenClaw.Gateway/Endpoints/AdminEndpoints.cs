@@ -1765,9 +1765,15 @@ internal static class AdminEndpoints
                 }
             }
 
+            // Always return a JsonElement so the casing in the JSON response is
+            // determined by the file content (PascalCase), never by ASP.NET Core's
+            // default camelCase naming policy for anonymous objects. This prevents
+            // the frontend from receiving mixed-case keys that later cause duplicate-key
+            // corruption on round-trip save.
+            const string emptyMcpTemplate = """{"Enabled":true,"Servers":{}}""";  
             if (raw is null)
             {
-                userPayload = new { Enabled = true, Servers = new Dictionary<string, object>() };
+                userPayload = JsonDocument.Parse(emptyMcpTemplate).RootElement.Clone();
             }
             else
             {
@@ -1778,7 +1784,7 @@ internal static class AdminEndpoints
                 }
                 catch (JsonException)
                 {
-                    userPayload = new { Enabled = true, Servers = new Dictionary<string, object>() };
+                    userPayload = JsonDocument.Parse(emptyMcpTemplate).RootElement.Clone();
                 }
             }
 
@@ -1808,10 +1814,14 @@ internal static class AdminEndpoints
                 return Results.StatusCode(StatusCodes.Status500InternalServerError);
             }
 
-            // Validate it's well-formed JSON that matches our config shape
+            // Validate it's well-formed JSON that matches our config shape.
+            // Also normalize: re-serialize from the deserialized object so the saved file
+            // always has clean PascalCase keys — eliminates any duplicate / camelCase keys
+            // that the frontend might produce on a round-trip (e.g. both "Servers" and "servers").
+            McpPluginsConfig? parsed;
             try
             {
-                var parsed = JsonSerializer.Deserialize<McpPluginsConfig>(body,
+                parsed = JsonSerializer.Deserialize<McpPluginsConfig>(body,
                     new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                 if (parsed is null)
                     return Results.Json(new { success = false, error = "Invalid MCP config." },
@@ -1823,12 +1833,15 @@ internal static class AdminEndpoints
                     statusCode: StatusCodes.Status400BadRequest);
             }
 
+            // Normalized JSON uses PascalCase property names as declared on McpPluginsConfig.
+            var normalizedJson = JsonSerializer.Serialize(parsed);
+
             // Save to memory store and trigger immediate reload (no FSW dependency)
             var mcpConfigStore = app.Services.GetRequiredService<OpenClaw.Gateway.Mcp.McpConfigStore>();
             var mcpWatcherHolder = app.Services.GetRequiredService<OpenClaw.Gateway.Mcp.McpWatcherHolder>();
             try
             {
-                await mcpConfigStore.SaveAsync(body, ctx.RequestAborted);
+                await mcpConfigStore.SaveAsync(normalizedJson, ctx.RequestAborted);
                 mcpWatcherHolder.Watcher?.TriggerReload();
                 return Results.Json(new { success = true });
             }

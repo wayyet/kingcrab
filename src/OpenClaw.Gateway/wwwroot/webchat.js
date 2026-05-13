@@ -2071,9 +2071,14 @@
                         for (const [id, srv] of Object.entries(rawBuiltin.servers || rawBuiltin.Servers || {})) {
                             builtinConfig.Servers[id] = normalizePascal(srv);
                         }
-                        // user config is raw file JSON — already PascalCase
-                        mcpConfig = Object.assign({ Enabled: true, Servers: {} }, data.user || {});
-                        if (!mcpConfig.Servers) mcpConfig.Servers = {};
+                        // Explicitly extract only the fields we need with PascalCase keys.
+                        // Avoid Object.assign(defaults, data.user) which would preserve any
+                        // camelCase keys returned by the server and produce duplicate-key JSON.
+                        const u = data.user || {};
+                        mcpConfig = {
+                            Enabled: !!(u.Enabled ?? u.enabled ?? true),
+                            Servers: Object.assign({}, u.Servers || u.servers || {})
+                        };
                     } else {
                         showStatus('Load failed (' + resp.status + ').', true);
                     }
