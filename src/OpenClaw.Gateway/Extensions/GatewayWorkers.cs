@@ -421,6 +421,11 @@ internal static class GatewayWorkers
                             // drop because the dead id is no longer in the channel's connection table.
                             session.ChannelId = msg.ChannelId;
                             session.SenderId = conversationRecipientId;
+                            // Propagate the OIDC-verified user identity when the channel provides it.
+                            // Only overwrite if non-null so reconnects from unauthenticated paths
+                            // don't erase a previously verified identity.
+                            if (msg.AuthenticatedUserId is not null)
+                                session.AuthenticatedUserId = msg.AuthenticatedUserId;
 
                             // Apply cron job model override before route resolution (route can further override)
                             if (!string.IsNullOrWhiteSpace(msg.ModelOverride))

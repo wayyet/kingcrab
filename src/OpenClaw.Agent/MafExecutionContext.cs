@@ -25,6 +25,12 @@ internal static class MafExecutionContextScope
             ?? throw new InvalidOperationException(
                 "Microsoft Agent Framework execution was invoked outside an OpenClaw runtime context.");
 
+    /// <summary>
+    /// 返回当前执行上下文，若不在 OpenClaw 运行时内则返回 null（不抛出异常）。
+    /// 适用于工具执行等无法保证上下文存在的场景。
+    /// </summary>
+    public static MafExecutionContext? TryGetCurrent() => CurrentValue.Value;
+
     public static IDisposable Push(MafExecutionContext context)
     {
         var prior = CurrentValue.Value;

@@ -38,6 +38,12 @@ public sealed record InboundMessage
     public string? MediaFileName { get; init; }
 
     /// <summary>
+    /// Verified identity from the channel's authentication layer (e.g. Keycloak JWT <c>sub</c>).
+    /// Only set when the channel has validated an OIDC token; <c>null</c> for anonymous channels.
+    /// </summary>
+    public string? AuthenticatedUserId { get; init; }
+
+    /// <summary>
     /// Multiple media attachments (e.g. several images in one message).
     /// When present, each attachment generates its own marker line in the pipeline text.
     /// </summary>

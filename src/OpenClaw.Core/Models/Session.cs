@@ -31,6 +31,13 @@ public sealed class Session
     public List<ChatTurn> History { get; init; } = [];
     public SessionState State { get; set; } = SessionState.Active;
     
+    /// <summary>
+    /// Authenticated user identity from the identity provider (e.g. Keycloak JWT <c>sub</c> claim).
+    /// Set once per connection when the channel verifies an OIDC token; <c>null</c> for anonymous channels.
+    /// Must NOT be used for routing — use <see cref="SenderId"/> for that.
+    /// </summary>
+    public string? AuthenticatedUserId { get; set; }
+
     /// <summary>Optional model override for this specific session (set via /model command).</summary>
     public string? ModelOverride { get; set; }
 
