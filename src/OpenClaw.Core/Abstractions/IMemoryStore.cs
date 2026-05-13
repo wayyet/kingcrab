@@ -15,6 +15,8 @@ public interface IMemoryStore
     ValueTask DeleteNoteAsync(string key, CancellationToken ct);
     ValueTask<IReadOnlyList<string>> ListNotesWithPrefixAsync(string prefix, CancellationToken ct);
 
+    ValueTask DeleteSessionAsync(string sessionId, CancellationToken ct);
+
     // ── Conversation Branching ─────────────────────────────────────────
     ValueTask SaveBranchAsync(SessionBranch branch, CancellationToken ct);
     ValueTask<SessionBranch?> LoadBranchAsync(string branchId, CancellationToken ct);

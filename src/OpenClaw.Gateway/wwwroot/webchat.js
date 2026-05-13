@@ -1609,6 +1609,41 @@
         newChatBtn.addEventListener('click', startNewChatSession);
         sidebarToggleBtn.addEventListener('click', toggleSidebar);
 
+        const clearSessionsBtn = document.getElementById('clear-sessions-btn');
+        clearSessionsBtn.addEventListener('click', async () => {
+            if (!confirm('确定要清除所有会话吗？此操作不可撤销。')) return;
+            clearSessionsBtn.disabled = true;
+            try {
+                // Fetch all sessions (up to 200 at a time, repeat until done)
+                let deleted = 0;
+                let errors = 0;
+                let page = 1;
+                while (true) {
+                    const headers = await getAuthHeaders(10);
+                    const resp = await fetch(getBasePath() + '/admin/sessions?page=' + page + '&pageSize=60', { headers });
+                    if (!resp.ok) break;
+                    const data = await resp.json().catch(() => null);
+                    const ids = (data?.active ?? []).map(s => s.id).concat((data?.persisted?.items ?? []).map(s => s.id));
+                    const unique = [...new Set(ids)];
+                    if (unique.length === 0) break;
+                    for (const id of unique) {
+                        const delHeaders = await getAuthHeaders(10);
+                        const delResp = await fetch(getBasePath() + '/admin/sessions/' + encodeURIComponent(id), { method: 'DELETE', headers: delHeaders });
+                        if (delResp.ok) deleted++;
+                        else errors++;
+                    }
+                    if (!data?.persisted?.hasMore) break;
+                    page++;
+                }
+                startNewChatSession();
+                await loadSessions();
+            } catch (e) {
+                alert('清除会话失败: ' + e.message);
+            } finally {
+                clearSessionsBtn.disabled = false;
+            }
+        });
+
         backToLiveBtn.addEventListener('click', () => {
             // Reset to default (no explicit session routing) and start fresh
             currentSessionId = null;
