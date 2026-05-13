@@ -1739,35 +1739,46 @@ internal static class AdminEndpoints
 
             var builtinPayload = new { builtinCfg.Enabled, Servers = builtinServers };
 
-            // User workspace servers from .kingcrab/mcp.json
+            // User workspace servers — read from memory store first, fall back to workspace file
             object userPayload;
-            var workspacePath = startup.WorkspacePath;
-            if (string.IsNullOrEmpty(workspacePath))
+            var mcpConfigStoreGet = app.Services.GetRequiredService<OpenClaw.Gateway.Mcp.McpConfigStore>();
+            string? raw = null;
+            try
+            {
+                raw = await mcpConfigStoreGet.TryLoadRawAsync(ctx.RequestAborted);
+            }
+            catch (IOException ex)
+            {
+                app.Services.GetRequiredService<ILoggerFactory>()
+                    .CreateLogger("WorkspaceMcp")
+                    .LogWarning(ex, "Failed to read workspace MCP config from memory store");
+            }
+
+            // Fallback: workspace file (legacy / manual edits)
+            if (raw is null && !string.IsNullOrEmpty(startup.WorkspacePath))
+            {
+                var filePath = Path.Combine(startup.WorkspacePath, ".kingcrab", "mcp.json");
+                if (File.Exists(filePath))
+                {
+                    try { raw = await File.ReadAllTextAsync(filePath, ctx.RequestAborted); }
+                    catch (IOException) { /* ignore, fall through to empty template */ }
+                }
+            }
+
+            if (raw is null)
             {
                 userPayload = new { Enabled = true, Servers = new Dictionary<string, object>() };
             }
             else
             {
-                var filePath = Path.Combine(workspacePath, ".kingcrab", "mcp.json");
-                if (!File.Exists(filePath))
+                try
+                {
+                    using var doc = JsonDocument.Parse(raw);
+                    userPayload = doc.RootElement.Clone();
+                }
+                catch (JsonException)
                 {
                     userPayload = new { Enabled = true, Servers = new Dictionary<string, object>() };
-                }
-                else
-                {
-                    try
-                    {
-                        var raw = await File.ReadAllTextAsync(filePath, ctx.RequestAborted);
-                        using var doc = JsonDocument.Parse(raw);
-                        userPayload = doc.RootElement.Clone();
-                    }
-                    catch (IOException ex)
-                    {
-                        app.Services.GetRequiredService<ILoggerFactory>()
-                            .CreateLogger("WorkspaceMcp")
-                            .LogWarning(ex, "Failed to read workspace MCP config from {Path}", filePath);
-                        return Results.StatusCode(StatusCodes.Status500InternalServerError);
-                    }
                 }
             }
 
@@ -1779,11 +1790,6 @@ internal static class AdminEndpoints
             var auth = EndpointHelpers.AuthorizeOperatorRequest(ctx, startup, browserSessions, requireCsrf: false);
             if (!auth.IsAuthorized)
                 return Results.Unauthorized();
-
-            var workspacePath = startup.WorkspacePath;
-            if (string.IsNullOrEmpty(workspacePath))
-                return Results.Json(new { success = false, error = "No workspace path configured." },
-                    statusCode: StatusCodes.Status409Conflict);
 
             if (ctx.Request.ContentLength is > MaxAdminJsonBodyBytes)
                 return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
@@ -1817,22 +1823,20 @@ internal static class AdminEndpoints
                     statusCode: StatusCodes.Status400BadRequest);
             }
 
-            var dir = Path.Combine(workspacePath, ".kingcrab");
-            var filePath = Path.Combine(dir, "mcp.json");
+            // Save to memory store and trigger immediate reload (no FSW dependency)
+            var mcpConfigStore = app.Services.GetRequiredService<OpenClaw.Gateway.Mcp.McpConfigStore>();
+            var mcpWatcherHolder = app.Services.GetRequiredService<OpenClaw.Gateway.Mcp.McpWatcherHolder>();
             try
             {
-                Directory.CreateDirectory(dir);
-                // Atomic write via temp file + rename
-                var tmp = filePath + ".tmp";
-                await File.WriteAllTextAsync(tmp, body, ctx.RequestAborted);
-                File.Move(tmp, filePath, overwrite: true);
+                await mcpConfigStore.SaveAsync(body, ctx.RequestAborted);
+                mcpWatcherHolder.Watcher?.TriggerReload();
                 return Results.Json(new { success = true });
             }
             catch (IOException ex)
             {
                 app.Services.GetRequiredService<ILoggerFactory>()
                     .CreateLogger("WorkspaceMcp")
-                    .LogWarning(ex, "Failed to write workspace MCP config to {Path}", filePath);
+                    .LogWarning(ex, "Failed to save workspace MCP config");
                 return Results.StatusCode(StatusCodes.Status500InternalServerError);
             }
         });

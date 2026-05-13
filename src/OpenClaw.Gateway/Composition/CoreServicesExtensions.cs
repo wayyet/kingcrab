@@ -12,6 +12,7 @@ using OpenClaw.Core.Security;
 using OpenClaw.Core.Sessions;
 using OpenClaw.Gateway.Bootstrap;
 using OpenClaw.Gateway.Extensions;
+using OpenClaw.Gateway.Mcp;
 using OpenClaw.Gateway.Models;
 using OpenClaw.Gateway.PromptCaching;
 
@@ -28,6 +29,14 @@ internal static class CoreServicesExtensions
         services.AddSingleton(typeof(AllowlistSemantics), AllowlistPolicy.ParseSemantics(config.Channels.AllowlistSemantics));
         services.AddSingleton(sp =>
             new RecentSendersStore(config.Memory.StoragePath, sp.GetRequiredService<ILogger<RecentSendersStore>>()));
+
+        // MCP config store: persists workspace MCP config to {StoragePath}/mcp/mcp.json
+        services.AddSingleton(sp =>
+            new McpConfigStore(
+                config.Memory.StoragePath,
+                sp.GetRequiredService<ILogger<McpConfigStore>>()));
+        // Holder so admin endpoints can trigger immediate reloads after saving.
+        services.AddSingleton<McpWatcherHolder>();
         services.AddSingleton(sp =>
             new AllowlistManager(config.Memory.StoragePath, sp.GetRequiredService<ILogger<AllowlistManager>>()));
 

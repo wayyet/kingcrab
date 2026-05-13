@@ -164,7 +164,9 @@ internal static class RuntimeInitializationExtensions
             services.McpRegistry,
             agentRuntime,
             startup.WorkspacePath,
-            app.Services.GetRequiredService<ILogger<McpWorkspaceWatcherService>>());
+            app.Services.GetRequiredService<ILogger<McpWorkspaceWatcherService>>(),
+            app.Services.GetRequiredService<OpenClaw.Gateway.Mcp.McpConfigStore>());
+        app.Services.GetRequiredService<OpenClaw.Gateway.Mcp.McpWatcherHolder>().Watcher = mcpWatcher;
         mcpWatcher.Start(app.Lifetime.ApplicationStopping);
 
         await services.AutomationService.RefreshCacheAsync(app.Lifetime.ApplicationStopping);
