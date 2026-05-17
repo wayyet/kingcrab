@@ -47,6 +47,7 @@ public sealed class MafAgentRuntime : IAgentRuntime
     private readonly object _skillGate = new();
     private readonly object _mafToolsLock = new();
     private IList<AITool> _mafTools;
+    private readonly IReadOnlyDictionary<string, AITool> _mafToolsByName;
     private string _baseSystemPrompt = string.Empty;
     private SkillDefinition[] _loadedSkills = [];
     private string[] _loadedSkillNames = [];
@@ -108,6 +109,7 @@ public sealed class MafAgentRuntime : IAgentRuntime
         _mafTools = context.Tools
             .Select(tool => (AITool)new MafToolAdapter(tool, _toolExecutor))
             .ToArray();
+        _mafToolsByName = _mafTools.ToDictionary(tool => tool.Name, StringComparer.Ordinal);
 
         ApplySkills(context.Skills);
     }
@@ -400,7 +402,10 @@ public sealed class MafAgentRuntime : IAgentRuntime
 
     private ChatClientAgent CreateAgent(Session session, string userMessage)
     {
-        return _agentFactory.Create(_chatClient, GetSystemPrompt(session, userMessage), _mafTools);
+        var tools = _toolExecutor.GetToolDeclarations(session)
+           .Select(tool => _mafToolsByName[tool.Name])
+           .ToArray();
+        return _agentFactory.Create(_chatClient, GetSystemPrompt(session,userMessage), tools);
     }
 
     /// <summary>
