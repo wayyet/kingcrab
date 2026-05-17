@@ -72,7 +72,9 @@ public sealed class MafAgentRuntime : IAgentRuntime
             context.RuntimeMetrics,
             logger,
             config: context.Config,
-            toolSandbox: context.ToolSandbox);
+            toolSandbox: context.ToolSandbox,
+            toolPresetResolver: context.Services.GetService(typeof(IToolPresetResolver)) as IToolPresetResolver
+        );
         _options = options;
         _agentFactory = agentFactory;
         _sessionStateStore = sessionStateStore;
