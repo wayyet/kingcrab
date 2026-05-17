@@ -99,6 +99,12 @@
                 定时任务
             </button>
 
+            <!-- Workspace File Manager button -->
+            <button id="wf-panel-btn" class="nav-btn" title="工作区文件管理">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                工作区文件
+            </button>
+
             <!-- Digital Employee button -->
             <button id="de-panel-btn" class="nav-btn" title="数字员工管理">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
@@ -377,6 +383,102 @@
             </div>
 
             <div id="cron-panel-status" class="mcp-panel-status" style="display:none"></div>
+        </div>
+    </div>
+
+    <!-- Workspace File Manager Modal -->
+    <div id="wf-overlay" class="mcp-overlay" role="dialog" aria-modal="true" aria-label="工作区文件管理">
+        <div class="mcp-panel">
+            <div class="mcp-panel-header">
+                <div class="mcp-panel-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                    工作区文件管理
+                </div>
+                <button id="wf-close-btn" class="mcp-close-btn" title="关闭" aria-label="关闭工作区文件管理">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+
+            <div class="mcp-panel-body">
+                <!-- Tabs -->
+                <div class="ch-tabs">
+                    <button class="ch-tab active" id="wf-tab-upload" data-tab="upload">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        上传文件
+                    </button>
+                    <button class="ch-tab" id="wf-tab-download" data-tab="download">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        下载文件
+                    </button>
+                    <button class="ch-tab" id="wf-tab-browse" data-tab="browse">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                        浏览目录
+                    </button>
+                </div>
+
+                <!-- Tab: Upload -->
+                <div id="wf-panel-upload" class="de-tab-panel">
+                    <div class="mcp-hint" style="margin-bottom:12px">
+                        上传文件到工作区指定目录。上传 <code>.zip</code> 文件时自动解压到目标目录；其他格式直接写入目标目录。支持多选。单次最大 100 MB。
+                    </div>
+                    <div class="mcp-form-grid" style="margin-bottom:12px">
+                        <label class="mcp-label">目标目录 <span class="mcp-hint">（相对工作区根，留空 = 根目录）</span></label>
+                        <input id="wf-upload-dir" class="mcp-input" type="text" placeholder="例如：inputs/materials" autocomplete="off">
+                    </div>
+                    <div class="de-upload-zone" id="wf-upload-dropzone">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        <div class="de-upload-label">将文件拖拽到此处，或</div>
+                        <label class="nav-btn primary de-file-label" for="wf-upload-file-input">选择文件</label>
+                        <input type="file" id="wf-upload-file-input" multiple style="display:none">
+                        <div id="wf-upload-filenames" class="de-selected-file" style="display:none"></div>
+                    </div>
+                    <div class="mcp-form-actions" style="margin-top:12px">
+                        <button id="wf-upload-btn" class="nav-btn primary" disabled>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                            上传
+                        </button>
+                    </div>
+                    <div id="wf-upload-result" class="de-result-box" style="display:none"></div>
+                </div>
+
+                <!-- Tab: Download -->
+                <div id="wf-panel-download" class="de-tab-panel" style="display:none">
+                    <div class="mcp-hint" style="margin-bottom:12px">
+                        从工作区下载单个文件或整个目录。目录将自动打包为 <code>.zip</code>。路径相对工作区根，留空下载整个工作区根。
+                    </div>
+                    <div class="mcp-form-grid" style="margin-bottom:12px">
+                        <label class="mcp-label">路径 <span class="mcp-hint">（文件或目录，相对工作区根）</span></label>
+                        <input id="wf-download-path" class="mcp-input" type="text" placeholder="例如：outputs/result.json 或 outputs/" autocomplete="off">
+                    </div>
+                    <div class="mcp-form-actions">
+                        <button id="wf-download-btn" class="nav-btn primary">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            下载
+                        </button>
+                    </div>
+                    <div id="wf-download-result" class="de-result-box" style="display:none"></div>
+                </div>
+
+                <!-- Tab: Browse -->
+                <div id="wf-panel-browse" class="de-tab-panel" style="display:none">
+                    <div class="mcp-hint" style="margin-bottom:12px">
+                        浏览工作区目录结构。留空查看根目录。最大深度默认 6 层（0 = 不限，慎用）。
+                    </div>
+                    <div class="mcp-form-grid" style="margin-bottom:8px;grid-template-columns:1fr auto">
+                        <input id="wf-browse-path" class="mcp-input" type="text" placeholder="目录路径（留空=根目录）" autocomplete="off" style="grid-column:1">
+                        <input id="wf-browse-depth" class="mcp-input" type="number" min="0" max="20" value="6" title="最大深度（0=不限）" style="width:60px;grid-column:2;margin-left:6px">
+                    </div>
+                    <div class="mcp-form-actions" style="margin-bottom:10px">
+                        <button id="wf-browse-btn" class="nav-btn primary">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                            查询
+                        </button>
+                    </div>
+                    <div id="wf-browse-result" style="display:none;overflow:auto;max-height:360px;background:var(--bg2,#1e1e1e);border:1px solid var(--border,#333);border-radius:6px;padding:10px;font-size:12px;font-family:monospace;line-height:1.6"></div>
+                </div>
+            </div>
+
+            <div id="wf-panel-status" class="mcp-panel-status" style="display:none"></div>
         </div>
     </div>
 

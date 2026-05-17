@@ -280,3 +280,32 @@ public sealed class DigitalEmployeeUploadResponse
     /// <summary>Number of skills loaded after the optional hot-reload step.</summary>
     public int TotalSkillsLoaded { get; init; }
 }
+
+public sealed class WorkspaceUploadResponse
+{
+    public bool Success { get; init; }
+    public string? Error { get; init; }
+    /// <summary>Workspace-relative paths of all files written or extracted.</summary>
+    public List<string>? Files { get; init; }
+    public int FileCount { get; init; }
+}
+
+public sealed class WorkspaceTreeEntry
+{
+    public string Name { get; init; } = "";
+    /// <summary>Workspace-relative path (forward slashes).</summary>
+    public string Path { get; init; } = "";
+    public bool IsDir { get; init; }
+    /// <summary>File size in bytes; null for directories.</summary>
+    public long? Size { get; init; }
+    public List<WorkspaceTreeEntry>? Children { get; init; }
+}
+
+public sealed class WorkspaceTreeResponse
+{
+    public bool Success { get; init; }
+    public string? Error { get; init; }
+    /// <summary>The queried workspace-relative root path.</summary>
+    public string Root { get; init; } = "";
+    public List<WorkspaceTreeEntry>? Entries { get; init; }
+}

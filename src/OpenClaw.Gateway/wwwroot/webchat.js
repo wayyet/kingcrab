@@ -3259,3 +3259,279 @@
             tabPkg.addEventListener('click', () => switchTab('pkg'));
         })();
         // ---
+
+        // ─── Workspace File Manager ───────────────────────────────────────────
+        (function () {
+            const overlay      = document.getElementById('wf-overlay');
+            const openBtn      = document.getElementById('wf-panel-btn');
+            const closeBtn     = document.getElementById('wf-close-btn');
+            const statusBar    = document.getElementById('wf-panel-status');
+
+            // Tabs
+            const tabUpload    = document.getElementById('wf-tab-upload');
+            const tabDownload  = document.getElementById('wf-tab-download');
+            const tabBrowse    = document.getElementById('wf-tab-browse');
+            const panelUpload  = document.getElementById('wf-panel-upload');
+            const panelDownload = document.getElementById('wf-panel-download');
+            const panelBrowse  = document.getElementById('wf-panel-browse');
+
+            // Upload tab
+            const uploadDirInput   = document.getElementById('wf-upload-dir');
+            const uploadDropzone   = document.getElementById('wf-upload-dropzone');
+            const uploadFileInput  = document.getElementById('wf-upload-file-input');
+            const uploadFilenames  = document.getElementById('wf-upload-filenames');
+            const uploadBtn        = document.getElementById('wf-upload-btn');
+            const uploadResult     = document.getElementById('wf-upload-result');
+            let   uploadFiles      = [];
+
+            // Download tab
+            const downloadPathInput = document.getElementById('wf-download-path');
+            const downloadBtn       = document.getElementById('wf-download-btn');
+            const downloadResult    = document.getElementById('wf-download-result');
+
+            // Browse tab
+            const browsePathInput  = document.getElementById('wf-browse-path');
+            const browseDepthInput = document.getElementById('wf-browse-depth');
+            const browseBtn        = document.getElementById('wf-browse-btn');
+            const browseResult     = document.getElementById('wf-browse-result');
+
+            // ── Utilities ─────────────────────────────────────────────────
+            function escHtml(s) {
+                return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            }
+
+            function showStatus(msg, isErr) {
+                statusBar.textContent = msg;
+                statusBar.className = 'mcp-panel-status ' + (isErr ? 'err' : 'ok');
+                statusBar.style.display = 'block';
+            }
+
+            function hideStatus() { statusBar.style.display = 'none'; }
+
+            function switchTab(tab) {
+                tabUpload.classList.toggle('active', tab === 'upload');
+                tabDownload.classList.toggle('active', tab === 'download');
+                tabBrowse.classList.toggle('active', tab === 'browse');
+                panelUpload.style.display   = tab === 'upload'   ? '' : 'none';
+                panelDownload.style.display = tab === 'download' ? '' : 'none';
+                panelBrowse.style.display   = tab === 'browse'   ? '' : 'none';
+                hideStatus();
+            }
+
+            // ── Upload ────────────────────────────────────────────────────
+            function setUploadFiles(files) {
+                uploadFiles = Array.from(files);
+                if (uploadFiles.length === 0) {
+                    uploadFilenames.style.display = 'none';
+                    uploadFilenames.textContent = '';
+                    uploadBtn.disabled = true;
+                } else {
+                    const names = uploadFiles.map(f => f.name).join('、');
+                    uploadFilenames.textContent = uploadFiles.length === 1
+                        ? uploadFiles[0].name
+                        : uploadFiles.length + ' 个文件：' + names;
+                    uploadFilenames.style.display = 'block';
+                    uploadBtn.disabled = false;
+                }
+                uploadResult.style.display = 'none';
+            }
+
+            uploadFileInput.addEventListener('change', () => setUploadFiles(uploadFileInput.files));
+
+            uploadDropzone.addEventListener('dragover', e => {
+                e.preventDefault();
+                uploadDropzone.classList.add('drag-over');
+            });
+            uploadDropzone.addEventListener('dragleave', () => uploadDropzone.classList.remove('drag-over'));
+            uploadDropzone.addEventListener('drop', e => {
+                e.preventDefault();
+                uploadDropzone.classList.remove('drag-over');
+                if (e.dataTransfer.files.length) setUploadFiles(e.dataTransfer.files);
+            });
+
+            uploadBtn.addEventListener('click', async () => {
+                if (!uploadFiles.length) return;
+                uploadBtn.disabled = true;
+                hideStatus();
+                uploadResult.style.display = 'none';
+
+                const dir = uploadDirInput.value.trim();
+                const url = getBasePath() + '/admin/workspace/upload' + (dir ? '?dir=' + encodeURIComponent(dir) : '');
+
+                try {
+                    const headers = await getAuthHeaders();
+                    const fd = new FormData();
+                    uploadFiles.forEach(f => fd.append('files', f, f.name));
+
+                    const resp = await fetch(url, { method: 'POST', headers, body: fd });
+                    const data = await resp.json().catch(() => null);
+
+                    if (resp.ok && data && data.success) {
+                        const paths = (data.files || []).map(p => escHtml(p));
+                        uploadResult.innerHTML = '<strong>✅ 上传成功</strong>'
+                            + (paths.length
+                                ? '<ul style="margin:6px 0 0 0;padding-left:18px">' + paths.map(p => `<li>${p}</li>`).join('') + '</ul>'
+                                : '');
+                        uploadResult.style.display = 'block';
+                        showStatus('✅ 上传成功，共写入 ' + (data.files || []).length + ' 个文件', false);
+                        setUploadFiles([]);
+                        uploadFileInput.value = '';
+                    } else {
+                        const msg = (data && data.error) || 'HTTP ' + resp.status;
+                        uploadResult.innerHTML = '<strong>❌ 上传失败</strong><br>' + escHtml(msg);
+                        uploadResult.style.display = 'block';
+                        showStatus('❌ 上传失败：' + msg, true);
+                        uploadBtn.disabled = false;
+                    }
+                } catch (e) {
+                    uploadResult.innerHTML = '<strong>❌ 网络错误</strong><br>' + escHtml(e.message);
+                    uploadResult.style.display = 'block';
+                    showStatus('❌ 网络错误：' + e.message, true);
+                    uploadBtn.disabled = false;
+                }
+            });
+
+            // ── Download ──────────────────────────────────────────────────
+            downloadBtn.addEventListener('click', async () => {
+                const path = downloadPathInput.value.trim();
+                downloadBtn.disabled = true;
+                hideStatus();
+                downloadResult.style.display = 'none';
+
+                const url = getBasePath() + '/admin/workspace/download'
+                    + (path ? '?path=' + encodeURIComponent(path) : '');
+
+                try {
+                    const headers = await getAuthHeaders();
+                    const resp = await fetch(url, { headers });
+
+                    if (!resp.ok) {
+                        const data = await resp.json().catch(() => null);
+                        const msg = (data && data.error) || 'HTTP ' + resp.status;
+                        downloadResult.innerHTML = '<strong>❌ 下载失败</strong><br>' + escHtml(msg);
+                        downloadResult.style.display = 'block';
+                        showStatus('❌ 下载失败：' + msg, true);
+                        downloadBtn.disabled = false;
+                        return;
+                    }
+
+                    // Derive filename from Content-Disposition or URL
+                    const cd = resp.headers.get('Content-Disposition') || '';
+                    let filename = path ? path.replace(/.*[\\/]/, '') || 'download' : 'workspace.zip';
+                    const cdMatch = cd.match(/filename[^;=\n]*=["']?([^"';\n]*)["']?/);
+                    if (cdMatch && cdMatch[1].trim()) filename = cdMatch[1].trim();
+
+                    const blob = await resp.blob();
+                    const objUrl = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = objUrl;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    setTimeout(() => URL.revokeObjectURL(objUrl), 10000);
+
+                    downloadResult.innerHTML = '✅ 已触发下载：<code>' + escHtml(filename) + '</code>（' + (blob.size / 1024).toFixed(1) + ' KB）';
+                    downloadResult.style.display = 'block';
+                    showStatus('✅ 下载完成：' + filename, false);
+                } catch (e) {
+                    downloadResult.innerHTML = '<strong>❌ 网络错误</strong><br>' + escHtml(e.message);
+                    downloadResult.style.display = 'block';
+                    showStatus('❌ 网络错误：' + e.message, true);
+                } finally {
+                    downloadBtn.disabled = false;
+                }
+            });
+
+            // ── Browse ────────────────────────────────────────────────────
+            function renderTree(entries, indent) {
+                if (!entries || !entries.length) return '';
+                return entries.map(entry => {
+                    const pad  = '&nbsp;'.repeat(indent * 4);
+                    const icon = entry.isDir
+                        ? '<span style="color:#e6c07b">📁</span>'
+                        : '<span style="color:#abb2bf">📄</span>';
+                    const size = (!entry.isDir && entry.size != null)
+                        ? ' <span style="color:#5c6370;font-size:11px">(' + formatSize(entry.size) + ')</span>'
+                        : '';
+                    const line = `<div style="white-space:nowrap">${pad}${icon} ${escHtml(entry.name)}${size}</div>`;
+                    const children = entry.isDir && entry.children
+                        ? renderTree(entry.children, indent + 1)
+                        : '';
+                    return line + children;
+                }).join('');
+            }
+
+            function formatSize(bytes) {
+                if (bytes < 1024) return bytes + ' B';
+                if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+                return (bytes / 1048576).toFixed(1) + ' MB';
+            }
+
+            browseBtn.addEventListener('click', async () => {
+                const path  = browsePathInput.value.trim();
+                const depth = parseInt(browseDepthInput.value, 10);
+                browseBtn.disabled = true;
+                hideStatus();
+                browseResult.style.display = 'none';
+
+                let url = getBasePath() + '/admin/workspace/tree';
+                const params = new URLSearchParams();
+                if (path)  params.set('path', path);
+                if (!isNaN(depth)) params.set('depth', String(depth));
+                if ([...params].length) url += '?' + params.toString();
+
+                try {
+                    const headers = await getAuthHeaders();
+                    const resp = await fetch(url, { headers });
+                    const data = await resp.json().catch(() => null);
+
+                    if (resp.ok && data && data.success) {
+                        const rootLabel = data.root ? data.root : '（工作区根目录）';
+                        const treeHtml  = renderTree(data.entries || [], 0);
+                        browseResult.innerHTML = '<div style="color:#98c379;margin-bottom:6px">📂 ' + escHtml(rootLabel) + '</div>'
+                            + (treeHtml || '<div style="color:#5c6370">（空目录）</div>');
+                        browseResult.style.display = 'block';
+                        const count = countEntries(data.entries || []);
+                        showStatus('✅ 共 ' + count.dirs + ' 个目录，' + count.files + ' 个文件', false);
+                    } else {
+                        const msg = (data && data.error) || 'HTTP ' + resp.status;
+                        browseResult.innerHTML = '<span style="color:#e06c75">❌ ' + escHtml(msg) + '</span>';
+                        browseResult.style.display = 'block';
+                        showStatus('❌ 查询失败：' + msg, true);
+                    }
+                } catch (e) {
+                    browseResult.innerHTML = '<span style="color:#e06c75">❌ 网络错误：' + escHtml(e.message) + '</span>';
+                    browseResult.style.display = 'block';
+                    showStatus('❌ 网络错误：' + e.message, true);
+                } finally {
+                    browseBtn.disabled = false;
+                }
+            });
+
+            browsePathInput.addEventListener('keydown', e => { if (e.key === 'Enter') browseBtn.click(); });
+
+            function countEntries(entries) {
+                let dirs = 0, files = 0;
+                for (const e of entries) {
+                    if (e.isDir) { dirs++; if (e.children) { const c = countEntries(e.children); dirs += c.dirs; files += c.files; } }
+                    else files++;
+                }
+                return { dirs, files };
+            }
+
+            // ── Panel open/close ──────────────────────────────────────────
+            openBtn.addEventListener('click', () => {
+                overlay.classList.add('open');
+                hideStatus();
+                switchTab('upload');
+            });
+
+            closeBtn.addEventListener('click', () => overlay.classList.remove('open'));
+            overlay.addEventListener('click', e => { if (e.target === overlay) overlay.classList.remove('open'); });
+
+            tabUpload.addEventListener('click', () => switchTab('upload'));
+            tabDownload.addEventListener('click', () => switchTab('download'));
+            tabBrowse.addEventListener('click', () => switchTab('browse'));
+        })();
+        // ---

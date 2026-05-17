@@ -21,6 +21,7 @@ internal static class EndpointMappingsExtensions
         app.MapOpenClawAdminBackendEndpoints(startup, runtime);
         app.MapOpenClawControlEndpoints(startup, runtime);
         app.MapOpenClawDigitalEmployeeEndpoints(startup, runtime);
+        app.MapOpenClawWorkspaceFileEndpoints(startup, runtime);
         app.MapOpenClawAdminChannelEndpoints(startup, runtime);
         app.MapOpenClawWebSocketEndpoints(startup, runtime);
         app.MapOpenClawWebhookEndpoints(startup, runtime);
