@@ -242,6 +242,32 @@ public sealed class OpenClawToolExecutorTests
         await sandbox.DidNotReceiveWithAnyArgs().ExecuteAsync(default!, CancellationToken.None);
     }
 
+    [Fact]
+    public void OpenClawToolExecutor_ReplaceMcpTools_UpdatesToolDeclarations()
+    {
+        var initialTool = CreateTool("initial_tool");
+        var addedTool = CreateTool("added_tool");
+        var executor = CreateExecutor([initialTool]);
+        var session = CreateSession();
+
+        executor.ReplaceMcpTools([addedTool], ["initial_tool"]);
+
+        var toolNames = executor.GetToolDeclarations(session)
+            .Select(static tool => tool.Name)
+            .OrderBy(static name => name, StringComparer.Ordinal)
+            .ToArray();
+        Assert.Equal(["added_tool"], toolNames);
+    }
+
+    private static ITool CreateTool(string name)
+    {
+        var tool = Substitute.For<ITool>();
+        tool.Name.Returns(name);
+        tool.Description.Returns($"{name} test tool");
+        tool.ParameterSchema.Returns("""{"type":"object"}""");
+        return tool;
+    }
+
     private static OpenClawToolExecutor CreateExecutor(
         IReadOnlyList<ITool> tools,
         IToolSandbox? toolSandbox = null,

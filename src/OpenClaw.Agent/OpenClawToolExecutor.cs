@@ -22,8 +22,8 @@ public sealed class ToolExecutionResult
 
 public sealed class OpenClawToolExecutor
 {
-    private Dictionary<string, ITool> _toolsByName;
-    private readonly AITool[] _toolDeclarations;
+    private readonly Dictionary<string, ITool> _toolsByName;
+    private AITool[] _toolDeclarations;
     private readonly object _toolsMutationLock = new();
     private readonly int _toolTimeoutSeconds;
     private readonly bool _requireToolApproval;
@@ -77,12 +77,29 @@ public sealed class OpenClawToolExecutor
         _toolPresetResolver = toolPresetResolver;
     }
 
-    public IList<AITool> ToolDeclarations => _toolDeclarations;
+    public IList<AITool> ToolDeclarations
+    {
+        get
+        {
+            lock (_toolsMutationLock)
+            {
+                return _toolDeclarations.ToArray();
+            }
+        }
+    }
 
     public IList<AITool> GetToolDeclarations(Session session)
     {
-        var preset = _toolPresetResolver?.Resolve(session, _toolsByName.Keys);
-        return _toolDeclarations
+        AITool[] declarations;
+        string[] toolNames;
+        lock (_toolsMutationLock)
+        {
+            declarations = _toolDeclarations.ToArray();
+            toolNames = _toolsByName.Keys.ToArray();
+        }
+
+        var preset = _toolPresetResolver?.Resolve(session, toolNames);
+        return declarations
             .Where(item => IsToolAllowedForSession(session, item.Name, preset))
             .ToArray();
     }
@@ -99,11 +116,20 @@ public sealed class OpenClawToolExecutor
                 _toolsByName.Remove(name);
             foreach (var tool in toAdd)
                 _toolsByName[tool.Name] = tool;
+            _toolDeclarations = _toolsByName.Values
+                .Select(CreateDeclaration)
+                .Cast<AITool>()
+                .ToArray();
         }
     }
 
     public bool SupportsStreaming(string toolName)
-        => _toolsByName.TryGetValue(toolName, out var tool) && tool is IStreamingTool;
+    {
+        lock (_toolsMutationLock)
+        {
+            return _toolsByName.TryGetValue(toolName, out var tool) && tool is IStreamingTool;
+        }
+    }
 
     public async Task<ToolExecutionResult> ExecuteAsync(
         FunctionCallContent call,
@@ -135,24 +161,31 @@ public sealed class OpenClawToolExecutor
         using var activity = Telemetry.ActivitySource.StartActivity("Agent.ExecuteTool");
         activity?.SetTag("tool.name", toolName);
 
-        if (!_toolsByName.TryGetValue(toolName, out var tool))
+        ITool tool;
+        string[] toolNames;
+        lock (_toolsMutationLock)
         {
-            var unknown = new ToolInvocation
+            if (!_toolsByName.TryGetValue(toolName, out tool!))
             {
-                ToolName = toolName,
-                Arguments = argsJson,
-                Result = "Error: Unknown tool",
-                Duration = TimeSpan.Zero
-            };
+                var unknown = new ToolInvocation
+                {
+                    ToolName = toolName,
+                    Arguments = argsJson,
+                    Result = "Error: Unknown tool",
+                    Duration = TimeSpan.Zero
+                };
 
-            return new ToolExecutionResult
-            {
-                Invocation = unknown,
-                ResultText = unknown.Result!
-            };
+                return new ToolExecutionResult
+                {
+                    Invocation = unknown,
+                    ResultText = unknown.Result!
+                };
+            }
+
+            toolNames = _toolsByName.Keys.ToArray();
         }
 
-        var preset = _toolPresetResolver?.Resolve(session, _toolsByName.Keys);
+        var preset = _toolPresetResolver?.Resolve(session, toolNames);
         if (!IsToolAllowedForSession(session, tool.Name, preset))
         {
             var deniedByPreset = preset is not null

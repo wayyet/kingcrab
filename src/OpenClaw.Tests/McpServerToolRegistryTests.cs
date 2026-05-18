@@ -222,7 +222,7 @@ public sealed class McpServerToolRegistryTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task LoadAsync_WhenFirstAttemptFails_AllowsRetryAndLoadsTools()
+    public async Task LoadAsync_WhenOneServerFails_SkipsFailedServerAndLoadsTools()
     {
         var (serverUrl, _) = await StartMcpServerAsync<DemoMcpTools>();
         var config = new McpPluginsConfig
@@ -244,16 +244,11 @@ public sealed class McpServerToolRegistryTests : IAsyncDisposable
         using var registry = new McpServerToolRegistry(config, NullLogger<McpServerToolRegistry>.Instance);
         using var nativeRegistry = new NativePluginRegistry(new NativePluginsConfig(), NullLogger.Instance, new ToolingConfig());
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => registry.RegisterToolsAsync(nativeRegistry, CancellationToken.None));
-        var clientsField = typeof(McpServerToolRegistry).GetField("_clients", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-        var clientsAfterFailure = Assert.IsType<List<ModelContextProtocol.Client.McpClient>>(clientsField?.GetValue(registry));
-        Assert.Empty(clientsAfterFailure);
-
-        config.Servers["broken"].Enabled = false;
-
         await registry.RegisterToolsAsync(nativeRegistry, CancellationToken.None);
-        var clientsAfterSuccess = Assert.IsType<List<ModelContextProtocol.Client.McpClient>>(clientsField?.GetValue(registry));
-        Assert.Single(clientsAfterSuccess);
+
+        var clientsField = typeof(McpServerToolRegistry).GetField("_clients", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        var clientsAfterLoad = Assert.IsType<List<ModelContextProtocol.Client.McpClient>>(clientsField?.GetValue(registry));
+        Assert.Single(clientsAfterLoad);
 
         var tool = Assert.Single(nativeRegistry.Tools);
         Assert.Equal("demo.echo", tool.Name);

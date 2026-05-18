@@ -47,7 +47,7 @@ public sealed class MafAgentRuntime : IAgentRuntime
     private readonly object _skillGate = new();
     private readonly object _mafToolsLock = new();
     private IList<AITool> _mafTools;
-    private readonly IReadOnlyDictionary<string, AITool> _mafToolsByName;
+    private IReadOnlyDictionary<string, AITool> _mafToolsByName;
     private string _baseSystemPrompt = string.Empty;
     private SkillDefinition[] _loadedSkills = [];
     private string[] _loadedSkillNames = [];
@@ -129,7 +129,16 @@ public sealed class MafAgentRuntime : IAgentRuntime
         }
     }
 
-    public IReadOnlyList<AITool> LoadedTools => _mafTools is IReadOnlyList<AITool> r ? r : [.. _mafTools];
+    public IReadOnlyList<AITool> LoadedTools
+    {
+        get
+        {
+            lock (_mafToolsLock)
+            {
+                return _mafTools is IReadOnlyList<AITool> r ? r : [.. _mafTools];
+            }
+        }
+    }
 
     public event Action<IReadOnlyList<SkillDefinition>>? SkillsReloaded;
 
@@ -140,12 +149,10 @@ public sealed class MafAgentRuntime : IAgentRuntime
     {
         ct.ThrowIfCancellationRequested();
 
-        // Update the executor dispatch table first (fast, non-blocking)
-        _toolExecutor.ReplaceMcpTools(toAdd, toRemove);
-
-        // Atomically swap the LLM-visible tool list
         lock (_mafToolsLock)
         {
+            _toolExecutor.ReplaceMcpTools(toAdd, toRemove);
+
             var removedSet = new HashSet<string>(toRemove, StringComparer.Ordinal);
             var updated = _mafTools
                 .Where(t => !removedSet.Contains(t.Name))
@@ -153,6 +160,7 @@ public sealed class MafAgentRuntime : IAgentRuntime
             foreach (var tool in toAdd)
                 updated.Add(new MafToolAdapter(tool, _toolExecutor));
             _mafTools = updated;
+            _mafToolsByName = updated.ToDictionary(tool => tool.Name, StringComparer.Ordinal);
         }
 
         return Task.CompletedTask;
@@ -404,10 +412,14 @@ public sealed class MafAgentRuntime : IAgentRuntime
 
     private ChatClientAgent CreateAgent(Session session, string userMessage)
     {
-        var tools = _toolExecutor.GetToolDeclarations(session)
-           .Select(tool => _mafToolsByName[tool.Name])
-           .ToArray();
-        return _agentFactory.Create(_chatClient, GetSystemPrompt(session,userMessage), tools);
+        AITool[] tools;
+        lock (_mafToolsLock)
+        {
+            tools = _toolExecutor.GetToolDeclarations(session)
+                .Select(tool => _mafToolsByName[tool.Name])
+                .ToArray();
+        }
+        return _agentFactory.Create(_chatClient, GetSystemPrompt(session, userMessage), tools);
     }
 
     /// <summary>

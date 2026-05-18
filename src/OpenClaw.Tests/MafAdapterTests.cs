@@ -316,6 +316,63 @@ public sealed class MafAdapterTests
     }
 
     [Fact]
+    public async Task MafAgentRuntime_ApplyMcpToolChangesAsync_AddedToolVisibleToSession()
+    {
+        var services = new ServiceCollection().BuildServiceProvider();
+        var executionService = new CapturingLlmExecutionService();
+        var storagePath = Path.Combine(Path.GetTempPath(), "openclaw-maf-mcp-reload-add-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(storagePath);
+
+        try
+        {
+            var runtime = CreateRuntimeForToolTests(
+                services,
+                executionService,
+                storagePath,
+                [new TestTool("initial_tool")]);
+            var session = CreateSession("maf-mcp-add");
+            session.RouteAllowedTools = ["added_tool"];
+
+            await runtime.ApplyMcpToolChangesAsync([new TestTool("added_tool")], [], CancellationToken.None);
+            await runtime.RunAsync(session, "use tools", CancellationToken.None);
+
+            Assert.Equal(["added_tool"], executionService.LastToolNames);
+        }
+        finally
+        {
+            Directory.Delete(storagePath, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task MafAgentRuntime_ApplyMcpToolChangesAsync_RemovedToolNotVisibleToSession()
+    {
+        var services = new ServiceCollection().BuildServiceProvider();
+        var executionService = new CapturingLlmExecutionService();
+        var storagePath = Path.Combine(Path.GetTempPath(), "openclaw-maf-mcp-reload-remove-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(storagePath);
+
+        try
+        {
+            var runtime = CreateRuntimeForToolTests(
+                services,
+                executionService,
+                storagePath,
+                [new TestTool("removed_tool"), new TestTool("kept_tool")]);
+            var session = CreateSession("maf-mcp-remove");
+
+            await runtime.ApplyMcpToolChangesAsync([], ["removed_tool"], CancellationToken.None);
+            await runtime.RunAsync(session, "use tools", CancellationToken.None);
+
+            Assert.Equal(["kept_tool"], executionService.LastToolNames);
+        }
+        finally
+        {
+            Directory.Delete(storagePath, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task MafSessionStateStore_HistoryHashMismatch_RebuildsFreshSession()
     {
         var storagePath = Path.Combine(Path.GetTempPath(), "openclaw-maf-sidecar-tests", Guid.NewGuid().ToString("N"));
@@ -458,6 +515,71 @@ public sealed class MafAdapterTests
         {
             Directory.Delete(storagePath, recursive: true);
         }
+    }
+
+    private static MafAgentRuntime CreateRuntimeForToolTests(
+        IServiceProvider services,
+        CapturingLlmExecutionService executionService,
+        string storagePath,
+        IReadOnlyList<ITool> tools)
+    {
+        var config = new GatewayConfig
+        {
+            Memory = new MemoryConfig
+            {
+                StoragePath = storagePath
+            },
+            Llm = new LlmProviderConfig
+            {
+                Provider = "test-maf",
+                Model = "maf-test-model"
+            }
+        };
+
+        return new MafAgentRuntime(
+            new AgentRuntimeFactoryContext
+            {
+                Services = services,
+                Config = config,
+                RuntimeState = new GatewayRuntimeState
+                {
+                    RequestedMode = "jit",
+                    EffectiveMode = GatewayRuntimeMode.Jit,
+                    DynamicCodeSupported = true
+                },
+                ChatClient = new MafTestChatClient(),
+                Tools = tools,
+                MemoryStore = new FileMemoryStore(storagePath, 4),
+                RuntimeMetrics = new RuntimeMetrics(),
+                ProviderUsage = new ProviderUsageTracker(),
+                LlmExecutionService = executionService,
+                Skills = [],
+                SkillsConfig = new SkillsConfig(),
+                WorkspacePath = null,
+                PluginSkillDirs = [],
+                Logger = NullLogger.Instance,
+                Hooks = [],
+                RequireToolApproval = false,
+                ApprovalRequiredTools = [],
+                IsContractTokenBudgetExceeded = null,
+                IsContractRuntimeBudgetExceeded = null,
+                RecordContractTurnUsage = null,
+                AppendContractSnapshot = null
+            },
+            new MafOptions(),
+            new MafAgentFactory(Options.Create(new MafOptions()), NullLoggerFactory.Instance, services),
+            new MafSessionStateStore(
+                new GatewayConfig
+                {
+                    Memory = new MemoryConfig
+                    {
+                        StoragePath = storagePath
+                    }
+                },
+                Options.Create(new MafOptions()),
+                NullLogger<MafSessionStateStore>.Instance),
+            new MafTelemetryAdapter(),
+            NullLogger<MafAgentRuntime>.Instance);
     }
 
     private static MafSessionStateStore CreateStore(string storagePath)

@@ -187,6 +187,7 @@ public sealed class SessionManagerTests
         }
 
         public ValueTask SaveSessionAsync(Session session, CancellationToken ct) => ValueTask.CompletedTask;
+        public ValueTask DeleteSessionAsync(string sessionId, CancellationToken ct) => ValueTask.CompletedTask;
         public ValueTask<string?> LoadNoteAsync(string key, CancellationToken ct) => ValueTask.FromResult<string?>(null);
         public ValueTask SaveNoteAsync(string key, string content, CancellationToken ct) => ValueTask.CompletedTask;
         public ValueTask DeleteNoteAsync(string key, CancellationToken ct) => ValueTask.CompletedTask;
@@ -203,6 +204,7 @@ public sealed class SessionManagerTests
             => ValueTask.FromResult<Session?>(string.Equals(sessionId, persisted.Id, StringComparison.Ordinal) ? persisted : null);
 
         public ValueTask SaveSessionAsync(Session session, CancellationToken ct) => ValueTask.CompletedTask;
+        public ValueTask DeleteSessionAsync(string sessionId, CancellationToken ct) => ValueTask.CompletedTask;
         public ValueTask<string?> LoadNoteAsync(string key, CancellationToken ct) => ValueTask.FromResult<string?>(null);
         public ValueTask SaveNoteAsync(string key, string content, CancellationToken ct) => ValueTask.CompletedTask;
         public ValueTask DeleteNoteAsync(string key, CancellationToken ct) => ValueTask.CompletedTask;
@@ -217,6 +219,7 @@ public sealed class SessionManagerTests
     {
         public ValueTask<Session?> GetSessionAsync(string sessionId, CancellationToken ct) => ValueTask.FromResult<Session?>(null);
         public ValueTask SaveSessionAsync(Session session, CancellationToken ct) => ValueTask.CompletedTask;
+        public ValueTask DeleteSessionAsync(string sessionId, CancellationToken ct) => ValueTask.CompletedTask;
         public ValueTask<string?> LoadNoteAsync(string key, CancellationToken ct) => ValueTask.FromResult<string?>(null);
         public ValueTask SaveNoteAsync(string key, string content, CancellationToken ct) => ValueTask.CompletedTask;
         public ValueTask DeleteNoteAsync(string key, CancellationToken ct) => ValueTask.CompletedTask;

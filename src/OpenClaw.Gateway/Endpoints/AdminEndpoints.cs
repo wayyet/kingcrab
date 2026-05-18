@@ -1068,7 +1068,29 @@ internal static class AdminEndpoints
             var ids = runtime.AbortRegistry.ActiveSessionIds.ToList();
             return Results.Json(ids, CoreJsonContext.Default.ListString);
         });
-        
+
+        app.MapDelete("/admin/sessions/{id}", async (HttpContext ctx, string id) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: false, endpointScope: "admin.session.delete");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+            var auth = authResult.Authorization!;
+
+            try
+            {
+                runtime.AbortRegistry.TryAbort(id);
+                runtime.SessionManager.RemoveActive(id);
+                await memoryStore.DeleteSessionAsync(id, ctx.RequestAborted);
+                RecordOperatorAudit(ctx, operations, auth, "session_delete", id, $"Deleted session '{id}'.", success: true, before: null, after: null);
+                return Results.Json(new OperationStatusResponse { Success = true, Message = "Session deleted." }, CoreJsonContext.Default.OperationStatusResponse);
+            }
+            catch (Exception ex)
+            {
+                RecordOperatorAudit(ctx, operations, auth, "session_delete", id, $"Failed to delete session '{id}': {ex.Message}", success: false, before: null, after: null);
+                return Results.Json(new OperationStatusResponse { Success = false, Error = ex.Message }, CoreJsonContext.Default.OperationStatusResponse, statusCode: StatusCodes.Status500InternalServerError);
+            }
+        });
+
         app.MapPost("/admin/sessions/{id}/metadata", async (HttpContext ctx, string id) =>
         {
             var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: true, endpointScope: "admin.session.metadata");

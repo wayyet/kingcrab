@@ -171,7 +171,7 @@ public sealed class SqliteSessionSearchTests
                 SenderId = "alice"
             }, CancellationToken.None);
 
-            await using var conn = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = dbPath }.ToString());
+            await using var conn = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = dbPath, Pooling = false }.ToString());
             await conn.OpenAsync(CancellationToken.None);
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = "UPDATE sessions SET json = '{not valid json' WHERE id = $id;";
