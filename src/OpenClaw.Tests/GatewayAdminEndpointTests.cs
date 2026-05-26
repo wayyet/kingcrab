@@ -27,6 +27,7 @@ using OpenClaw.Gateway.Endpoints;
 using OpenClaw.Gateway.Extensions;
 using OpenClaw.Gateway.Mcp;
 using OpenClaw.Gateway.Models;
+using OpenClaw.Gateway.Tools;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
@@ -1890,6 +1891,7 @@ public sealed class GatewayAdminEndpointTests
         var middleware = new MiddlewarePipeline([]);
         var wsChannel = new WebSocketChannel(config.WebSocket);
         var nativeRegistry = new NativePluginRegistry(config.Plugins.Native, NullLogger.Instance, config.Tooling);
+        var skillArtifactRuntime = new SkillArtifactRuntime();
         var skillWatcher = new SkillWatcherService(config.Skills, null, [], agentRuntime, NullLogger<SkillWatcherService>.Instance);
 
         return new GatewayAppRuntime

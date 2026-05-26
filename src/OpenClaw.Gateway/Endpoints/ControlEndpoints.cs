@@ -185,6 +185,7 @@ internal static class ControlEndpoints
                 Emoji = s.Metadata.Emoji,
                 Source = s.Source.ToString().ToLowerInvariant(),
                 IsUserInstalled = s.Source == SkillSource.Workspace,
+                ArtifactContract = s.ArtifactContract,
             }).ToList();
             return Results.Json(new SkillsDetailResponse { Skills = dtos }, CoreJsonContext.Default.SkillsDetailResponse);
         });
@@ -335,7 +336,7 @@ internal static class ControlEndpoints
             if (string.IsNullOrWhiteSpace(skillName))
                 return Results.Json(new SkillMutationResponse { Success = false, Error = "SKILL.md is missing a valid 'name:' frontmatter field." }, CoreJsonContext.Default.SkillMutationResponse, statusCode: StatusCodes.Status400BadRequest);
 
-            if (!Regex.IsMatch(skillName, @"^[a-zA-Z0-9][a-zA-Z0-9_\-]{0,63}$"))
+            if (!Regex.IsMatch(skillName, @"^[a-zA-Z0-9][a-zA-Z0-9_\-.]{0,63}$"))
                 return Results.Json(new SkillMutationResponse { Success = false, Error = $"Skill name '{skillName}' contains invalid characters." }, CoreJsonContext.Default.SkillMutationResponse, statusCode: StatusCodes.Status400BadRequest);
 
             // ── Phase 2: ZIP slip validation ─────────────────────────────────────

@@ -2,7 +2,6 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Models;
-using OpenClaw.Agent.Tools;
 
 namespace OpenClaw.Agent;
 

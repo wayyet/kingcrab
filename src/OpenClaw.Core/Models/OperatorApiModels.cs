@@ -1,6 +1,7 @@
 using OpenClaw.Core.Observability;
 using OpenClaw.Core.Plugins;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace OpenClaw.Core.Models;
 
@@ -293,6 +294,7 @@ public sealed class SessionMetadataSnapshot
     public string[] Tags { get; init; } = [];
     public string? ActivePresetId { get; init; }
     public IReadOnlyList<SessionTodoItem> TodoItems { get; init; } = [];
+    public IReadOnlyList<SessionHandoffItem> HandoffItems { get; init; } = [];
 }
 
 public sealed class SessionMetadataUpdateRequest
@@ -301,6 +303,7 @@ public sealed class SessionMetadataUpdateRequest
     public string[]? Tags { get; init; }
     public string? ActivePresetId { get; init; }
     public IReadOnlyList<SessionTodoItem>? TodoItems { get; init; }
+    public IReadOnlyList<SessionHandoffItem>? HandoffItems { get; init; }
 }
 
 public sealed class SessionTodoItem
@@ -311,6 +314,111 @@ public sealed class SessionTodoItem
     public string? Notes { get; init; }
     public DateTimeOffset CreatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class SessionHandoffItem
+{
+    [JsonPropertyName("session_id")]
+    public required string SessionId { get; init; }
+
+    [JsonPropertyName("workflow_id")]
+    public string WorkflowId { get; init; } = "employment-coach";
+
+    [JsonPropertyName("handoff_id")]
+    public required string HandoffId { get; init; }
+
+    [JsonPropertyName("title")]
+    public string Title { get; init; } = "";
+
+    [JsonPropertyName("kind")]
+    public string Kind { get; init; } = "handoff_todo";
+
+    [JsonPropertyName("stage")]
+    public string Stage { get; init; } = "";
+
+    [JsonPropertyName("target_skill")]
+    public string TargetSkill { get; init; } = "";
+
+    [JsonPropertyName("intent")]
+    public string? Intent { get; init; }
+
+    [JsonPropertyName("category")]
+    public string? Category { get; init; }
+
+    [JsonPropertyName("payload")]
+    public JsonElement Payload { get; init; }
+
+    [JsonPropertyName("source")]
+    public string? Source { get; init; }
+
+    [JsonPropertyName("acceptance")]
+    public string? Acceptance { get; init; }
+
+    [JsonPropertyName("status")]
+    public string Status { get; init; } = "drafting";
+
+    [JsonPropertyName("fingerprint")]
+    public string Fingerprint { get; init; } = "";
+
+    [JsonPropertyName("related_todos")]
+    public string[] RelatedTodos { get; init; } = [];
+
+    [JsonPropertyName("related_files")]
+    public string[] RelatedFiles { get; init; } = [];
+
+    [JsonPropertyName("revision")]
+    public int Revision { get; init; } = 1;
+
+    [JsonPropertyName("created_at")]
+    public DateTimeOffset CreatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("updated_at")]
+    public DateTimeOffset UpdatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("dispatch_id")]
+    public string? DispatchId { get; init; }
+
+    [JsonPropertyName("callback_summary")]
+    public string? CallbackSummary { get; init; }
+}
+
+public sealed class SessionHandoffListResponse
+{
+    [JsonPropertyName("session_id")]
+    public required string SessionId { get; init; }
+
+    [JsonPropertyName("items")]
+    public IReadOnlyList<SessionHandoffItem> Items { get; init; } = [];
+}
+
+public sealed class SessionHandoffMutationResponse
+{
+    [JsonPropertyName("session_id")]
+    public required string SessionId { get; init; }
+
+    [JsonPropertyName("item")]
+    public required SessionHandoffItem Item { get; init; }
+
+    [JsonPropertyName("items")]
+    public IReadOnlyList<SessionHandoffItem> Items { get; init; } = [];
+}
+
+public sealed class SessionHandoffRemoveResponse
+{
+    [JsonPropertyName("session_id")]
+    public required string SessionId { get; init; }
+
+    [JsonPropertyName("handoff_id")]
+    public required string HandoffId { get; init; }
+
+    [JsonPropertyName("removed")]
+    public bool Removed { get; init; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; init; }
+
+    [JsonPropertyName("items")]
+    public IReadOnlyList<SessionHandoffItem> Items { get; init; } = [];
 }
 
 public sealed class SessionDiffResponse

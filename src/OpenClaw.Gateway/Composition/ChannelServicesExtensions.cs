@@ -17,6 +17,14 @@ internal static class ChannelServicesExtensions
         services.AddSingleton(config.Channels.Feishu);
         services.AddSingleton<FeishuChannel>();
 
+        // DingTalk: always registered so Stream mode can be started and hot-reloaded via admin API.
+        services.AddSingleton(config.Channels.DingTalk);
+        services.AddSingleton<DingTalkChannel>();
+
+        // WeCom: always registered so WebSocket long connection can be started and hot-reloaded via admin API.
+        services.AddSingleton(config.Channels.WeCom);
+        services.AddSingleton<WeComChannel>();
+
         // ChannelConfigStore: persists channel configs to {StoragePath}/channels/channel-{id}.json.
         // This directory is on the mounted data volume and survives container restarts.
         services.AddSingleton(sp =>

@@ -103,6 +103,15 @@ internal static class MafTestRuntimeFactory
             ?? throw new InvalidOperationException("CompactHistoryAsync invocation returned null."));
     }
 
+    public static string GetSystemPrompt(MafAgentRuntime runtime, Session session, string userMessage)
+    {
+        var method = typeof(MafAgentRuntime).GetMethod("GetSystemPrompt", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(MafAgentRuntime).FullName, "GetSystemPrompt");
+
+        return (string)(method.Invoke(runtime, [session, userMessage])
+            ?? throw new InvalidOperationException("GetSystemPrompt invocation returned null."));
+    }
+
     public static DelegateTool CreateDelegateTool(
         IChatClient chatClient,
         IMemoryStore memoryStore,

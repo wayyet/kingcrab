@@ -1,8 +1,8 @@
 using OpenClaw.Core.Models;
 
-namespace OpenClaw.Agent.Tools;
+namespace OpenClaw.Core.Security;
 
-internal static class ToolPathPolicy
+public static class ToolPathPolicy
 {
     public static bool IsReadAllowed(ToolingConfig config, string path) =>
         IsPathAllowed(config.AllowedReadRoots, path);
@@ -37,24 +37,16 @@ internal static class ToolPathPolicy
     /// For paths that don't exist yet (e.g. write targets), resolves the deepest
     /// existing ancestor and appends the remaining segments.
     /// </summary>
-    internal static string ResolveRealPath(string path)
+    public static string ResolveRealPath(string path)
     {
         var full = Path.GetFullPath(path);
 
-        // If the path exists, resolve symlinks based on actual entry type
         if (File.Exists(full))
-        {
             return ResolveFileLinkOrSelf(full);
-        }
 
         if (Directory.Exists(full))
-        {
             return ResolveDirectoryLinkOrSelf(full);
-        }
 
-        // Path doesn't exist yet — resolve the deepest existing ancestor
-        // and append the remaining tail. This prevents writing through a
-        // symlinked parent directory.
         var dir = Path.GetDirectoryName(full);
         var tail = Path.GetFileName(full);
 

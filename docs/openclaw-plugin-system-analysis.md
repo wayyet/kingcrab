@@ -15,7 +15,7 @@ OpenClaw 的插件子系统位于三个核心项目的交汇处：
 ### 四种插件来源概览
 
 | 来源 | 入口点 | 运行时模式 | 传输方式 | 注册面 |
-|------|--------|------------|----------|--------|
+| ------ | -------- | ------------ | ---------- | -------- |
 | Bridge 插件 (TS/JS) | `PluginHost` | 任意 (AOT + JIT) | 基于 stdio/socket 的 JSON-RPC | 工具、频道、命令、提供者、钩子、技能 |
 | 原生插件副本 (C#) | `NativePluginRegistry` | 任意 (AOT + JIT) | 进程内 | 工具 |
 | 动态原生插件 (.NET) | `NativeDynamicPluginHost` | 仅 JIT | 进程内，`AssemblyLoadContext` | 工具、频道、命令、提供者、钩子、服务、技能 |
@@ -36,6 +36,99 @@ Bridge 插件是由静态 `PluginDiscovery` 类从文件系统中发现的 TypeS
 **入口点解析：**
 
 对于基于清单的插件，解析器会按顺序检查固定的候选列表：`index.ts`、`index.js`、`index.mjs`、`src/index.ts`、`src/index.js`、`src/index.mjs`。如果没有匹配项，则会回退到 `package.json` 的 `openclaw.extensions` 数组条目。作为最后手段，会接受插件根目录中单个 `.ts`、`.js` 或 `.mjs` 文件。所有路径都会使用 `TryResolveContainedPath` 针对符号链接逃逸进行验证，该方法会解析符号链接以防止目录遍历攻击。
+
+#### 2.1.1 TS/JS Bridge 插件的网关配置
+
+TypeScript 或 JavaScript 插件应配置在 `OpenClaw:Plugins` 的 Bridge 插件层，而不是 `OpenClaw:Plugins:DynamicNative`。`DynamicNative` 只用于通过 `openclaw.native-plugin.json` 加载的进程内 .NET 插件；TS/JS 插件由 Node.js bridge 子进程承载，配置入口是 `Plugins:Load:Paths` 和 `Plugins:Entries:{plugin-id}`。
+
+最小配置形态如下：
+
+```json
+{
+  "OpenClaw": {
+    "Plugins": {
+      "Enabled": true,
+      "Prefer": "native",
+      "Load": {
+        "Paths": [
+          "E:/plugins/my-typescript-plugin"
+        ]
+      },
+      "Entries": {
+        "my-typescript-plugin": {
+          "Enabled": true,
+          "Config": {
+            "apiKey": "env:MY_PLUGIN_API_KEY",
+            "endpoint": "https://example.com/api"
+          }
+        }
+      },
+      "Transport": {
+        "Mode": "stdio",
+        "SocketPath": null
+      }
+    }
+  }
+}
+```
+
+`Plugins:Load:Paths` 支持三类路径：
+
+- 插件目录：目录下存在 `openclaw.plugin.json`，并按固定候选顺序寻找 `index.ts`、`index.js`、`index.mjs`、`src/index.ts`、`src/index.js`、`src/index.mjs`
+- 单文件入口：直接指向 `.ts`、`.js` 或 `.mjs` 文件；没有清单时文件名会成为插件 ID
+- npm 风格包目录：`package.json` 中声明 `openclaw.extensions` 时，可从包中发现一个或多个插件入口
+
+推荐的 TypeScript 插件目录结构如下：
+
+```text
+my-typescript-plugin/
+  openclaw.plugin.json
+  package.json
+  index.ts
+  node_modules/
+  skills/
+    my-skill/
+      SKILL.md
+```
+
+`openclaw.plugin.json` 可以声明插件身份、配置 schema，以及插件随包携带的 skill 根目录：
+
+```json
+{
+  "id": "my-typescript-plugin",
+  "name": "My TypeScript Plugin",
+  "version": "1.0.0",
+  "description": "Example TypeScript plugin",
+  "skills": [
+    "skills"
+  ],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "apiKey": {
+        "type": "string"
+      },
+      "endpoint": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "apiKey"
+    ],
+    "additionalProperties": true
+  }
+}
+```
+
+当清单中声明 `"skills": ["skills"]` 时，插件加载成功后，`PluginHost` 会把插件根目录下的 `skills` 目录贡献给 `SkillLoader`，其优先级位于 bundled/managed 之后、workspace skills 之前。
+
+TypeScript 入口依赖 `jiti`，因此 `.ts` 插件目录或其上级 workspace 需要安装该依赖：
+
+```powershell
+npm install jiti
+```
+
+TS/JS Bridge 插件由 Node.js 子进程运行，不依赖 Gateway 的 JIT 能力；`Runtime:Mode` 可以是 `auto`、`jit` 或 `aot`。只有动态原生 .NET 插件才要求 JIT。
 
 ### 2.2 过滤与访问控制
 
@@ -67,6 +160,92 @@ Bridge 插件是由静态 `PluginDiscovery` 类从文件系统中发现的 TypeS
 
 发现位置按优先级顺序为：配置路径 → 工作区 `.openclaw/native-plugins/` → 全局 `~/.openclaw/native-plugins/`。
 
+#### 2.3.1 动态原生插件与随包 skills 的网关配置
+
+动态原生插件使用 `OpenClaw:Plugins:DynamicNative` 加载。配置路径应指向插件构建输出目录，而不是直接指向源码目录下的 `skills`。输出目录需要同时包含 `openclaw.native-plugin.json`、插件程序集 `.dll` 和清单中声明的 skills 目录。
+
+以 `OpenClaw.Plugins.EmploymentCoachWorkflow` 为例，构建命令为：
+
+```powershell
+dotnet build src/OpenClaw.Plugins.EmploymentCoachWorkflow/OpenClaw.Plugins.EmploymentCoachWorkflow.csproj
+```
+
+构建后，`bin/Debug/net10.0` 中应包含：
+
+```text
+openclaw.native-plugin.json
+OpenClaw.Plugins.EmploymentCoachWorkflow.dll
+skills/
+```
+
+对应的 Gateway 配置如下：
+
+```json
+{
+  "OpenClaw": {
+    "Runtime": {
+      "Mode": "jit",
+      "Orchestrator": "maf"
+    },
+    "Plugins": {
+      "Enabled": true,
+      "Prefer": "native",
+      "Load": {
+        "Paths": []
+      },
+      "Entries": {},
+      "Transport": {
+        "Mode": "stdio",
+        "SocketPath": null
+      },
+      "DynamicNative": {
+        "Enabled": true,
+        "Allow": [],
+        "Deny": [],
+        "Load": {
+          "Paths": [
+            "E:/gitee/kingcrab/src/OpenClaw.Plugins.EmploymentCoachWorkflow/bin/Debug/net10.0"
+          ]
+        },
+        "Entries": {
+          "employment-coach-workflow": {
+            "Enabled": true,
+            "Config": {
+              "tooling": {
+                "workspaceRoot": "env:OPENCLAW_WORKSPACE",
+                "allowedReadRoots": [
+                  "*"
+                ],
+                "allowedWriteRoots": [
+                  "*"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "Skills": {
+      "Enabled": true,
+      "Load": {
+        "ExtraDirs": [],
+        "IncludeBundled": true,
+        "IncludeManaged": true,
+        "IncludeWorkspace": true,
+        "Watch": false,
+        "WatchDebounceMs": 250
+      },
+      "Entries": {},
+      "AllowBundled": []
+    }
+  }
+}
+```
+
+该插件的 `openclaw.native-plugin.json` 中声明了 `"skills": ["skills"]`，因此加载插件后会自动把输出目录下的 `skills` 加入技能加载流程。此时不需要再把 `src/OpenClaw.Plugins.EmploymentCoachWorkflow/skills` 写入 `Skills:Load:ExtraDirs`；保持 `ExtraDirs` 为空可以避免源码目录与插件输出目录重复加载同一组 skill。
+
+如果需要 Release 构建，把 `DynamicNative:Load:Paths` 中的 `bin/Debug/net10.0` 改为 `bin/Release/net10.0`。
+
 ## 三、TS/JS Bridge 传输层
 
 Bridge 传输层是 OpenClaw 的进程间通信层，它使 TypeScript 和 JavaScript 插件能够作为一等参与者融入 .NET 网关运行时。
@@ -82,6 +261,7 @@ Bridge 传输层基于**宿主-工作模型**运行。.NET 网关充当 JSON-RPC
 Bridge 协议使用了一种简化的 JSON-RPC 2.0 变体。stdout 上的每条消息都是单个 JSON 对象，以换行符 (`\n`) 结尾。
 
 **请求封包（网关 → 插件）：**
+
 ```json
 {
   "method": "init",
@@ -91,6 +271,7 @@ Bridge 协议使用了一种简化的 JSON-RPC 2.0 变体。stdout 上的每条�
 ```
 
 **响应封包（插件 → 网关）：**
+
 ```json
 {
   "id": "req-001",
@@ -100,6 +281,7 @@ Bridge 协议使用了一种简化的 JSON-RPC 2.0 变体。stdout 上的每条�
 ```
 
 **通知封包（插件 → 网关）：**
+
 ```json
 {
   "notification": "channel_message",
@@ -142,7 +324,7 @@ readRequests(handleRequest);
 `BridgeTransportConfig` 定义了三种传输模式：
 
 | 模式 | 描述 | 状态 |
-|------|------|------|
+| ------ | ------ | ------ |
 | `stdio` | 基于进程 stdin/stdout 的双向 JSON-RPC | ✅ 完全实现 |
 | `socket` | Unix 域套接字或命名管道 | 🔧 可配置 |
 | `hybrid` | Stdio 用于控制平面，Socket 用于高吞吐量数据 | 🔧 预留 |
@@ -160,7 +342,7 @@ readRequests(handleRequest);
 加载上下文实现了一种刻意的程序集共享策略：
 
 | 程序集名称模式 | 解析行为 |
-|----------------|----------|
+| ---------------- | ---------- |
 | `System.*`, `System` | 从宿主共享 |
 | `Microsoft.*` | 从宿主共享 |
 | `netstandard` | 从宿主共享 |
@@ -227,7 +409,7 @@ public interface INativeDynamicPluginContext
 
 `RuntimeInitializationExtensions` 中的 `LoadPluginCompositionAsync` 方法是串联所有四个来源的唯一编排点：
 
-```
+```text
 Bridge 插件加载 → MCP 工具注册（到原生注册表）→ 动态原生插件加载 → 优先级解析 → PluginComposition
 ```
 
@@ -236,14 +418,14 @@ Bridge 插件加载 → MCP 工具注册（到原生注册表）→ 动态原生
 ## 七、三种扩展机制的对比
 
 | 维度 | Bridge (TS/JS) | 原生动态 (.NET) | MCP 服务器 |
-|------|----------------|-----------------|------------|
+| ------ | ---------------- | ----------------- | ------------ |
 | 语言 | TypeScript, JavaScript | C# (仅限 JIT 模式) | 任意 |
-| 运行时模式 | 仅限 JIT | 仅限 JIT | JIT 和 AOT |
+| 运行时模式 | JIT 和 AOT | 仅限 JIT | JIT 和 AOT |
 | 隔离性 | 进程边界 | AppDomain / 同进程 | 进程边界 |
 | 启动成本 | Node.js 进程生成 (~100-300ms) | 程序集加载 (~10-50ms) | 进程生成 (~100-500ms) |
 | 通道支持 | ✓ 完整 | ✓ 通过 IChannelAdapter | ✗ 不适用 |
 | Hook 支持 | ✓ 前置/后置 | ✓ 通过 IToolHook | ✗ 不适用 |
-| AOT 兼容 | ✗ | ✗ (JitOnly = true) | ✓ (stdio 传输) |
+| AOT 兼容 | ✓ | ✗ (JitOnly = true) | ✓ (stdio 传输) |
 
 ## 八、总结
 

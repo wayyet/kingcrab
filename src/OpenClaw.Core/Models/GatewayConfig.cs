@@ -18,6 +18,7 @@ public sealed class GatewayConfig
     public SecurityConfig Security { get; set; } = new();
     public WebSocketConfig WebSocket { get; set; } = new();
     public ToolingConfig Tooling { get; set; } = new();
+    public HandoffConfig Handoff { get; set; } = new();
     public SandboxConfig Sandbox { get; set; } = new();
     public ExecutionConfig Execution { get; set; } = new();
     public CodingBackendsConfig CodingBackends { get; set; } = new();
@@ -36,6 +37,8 @@ public sealed class GatewayConfig
     public GmailPubSubConfig GmailPubSub { get; set; } = new();
     public MdnsConfig Mdns { get; set; } = new();
     public DiagnosticsConfig Diagnostics { get; set; } = new();
+
+    public DingTalkChannelConfig DingTalk { get; set; } = new();
     public string UsageFooter { get; set; } = "off"; // "off", "tokens", "full"
 
     public int MaxConcurrentSessions { get; set; } = 64;
@@ -315,6 +318,24 @@ public sealed class WebSocketConfig
     public int ReceiveTimeoutSeconds { get; set; } = 120;
 }
 
+public sealed class HandoffConfig
+{
+    public string DefaultWorkflowId { get; set; } = "";
+    public Dictionary<string, HandoffWorkflowConfig> Workflows { get; set; } = new(StringComparer.Ordinal);
+}
+
+public sealed class HandoffWorkflowConfig
+{
+    public string Kind { get; set; } = "handoff_todo";
+    public string DefaultStatus { get; set; } = "drafting";
+    public string[] NewItemStatuses { get; set; } = [];
+    public string[] Stages { get; set; } = [];
+    public string[] TargetSkills { get; set; } = [];
+    public string[] Statuses { get; set; } = [];
+    public Dictionary<string, string[]> Transitions { get; set; } = new(StringComparer.Ordinal);
+    public Dictionary<string, string> IdPrefixes { get; set; } = new(StringComparer.Ordinal);
+}
+
 public sealed class ToolingConfig
 {
     /// <summary>Autonomy mode: "readonly", "supervised", or "full".</summary>
@@ -354,6 +375,19 @@ public sealed class ToolingConfig
 
     public bool EnableBrowserTool { get; set; } = true;
     public bool EnableXSearch { get; set; } = true;
+
+    /// <summary>Enable the <c>todo</c> tool for session-scoped task tracking. Default: false.</summary>
+    public bool EnableTodoTool { get; set; } = false;
+
+    /// <summary>Enable the <c>handoff</c> tool for transferring sessions to another agent. Default: false.</summary>
+    public bool EnableHandoffTool { get; set; } = false;
+
+    /// <summary>Enable the <c>publish_file</c> tool that publishes a local file as a downloadable attachment.</summary>
+    public bool EnablePublishFile { get; set; } = true;
+
+    /// <summary>Enable the <c>emit_artifact</c> tool that pushes skill artifacts (data/file) to the client over WebSocket.</summary>
+    public bool EnableEmitArtifact { get; set; } = true;
+
     public bool AllowBrowserEvaluate { get; set; } = true;
     public bool BrowserHeadless { get; set; } = true;
     public int BrowserTimeoutSeconds { get; set; } = 30;
@@ -374,6 +408,8 @@ public sealed class ChannelsConfig
     public DiscordChannelConfig Discord { get; set; } = new();
     public SignalChannelConfig Signal { get; set; } = new();
     public FeishuChannelConfig Feishu { get; set; } = new();
+    public DingTalkChannelConfig DingTalk { get; set; } = new();
+    public WeComChannelConfig WeCom { get; set; } = new();
 }
 
 public sealed class WhatsAppChannelConfig
@@ -661,6 +697,81 @@ public sealed class FeishuChannelConfig
     public bool ExposeInboundMediaUrls { get; set; } = true;
 }
 
+public sealed class DingTalkChannelConfig
+{
+    public bool Enabled { get; set; } = false;
+
+    public string? AppId { get; set; }
+    public string AppIdRef { get; set; } = "env:DINGTALK_APP_ID";
+
+    public string? AppKey { get; set; }
+    public string AppKeyRef { get; set; } = "env:DINGTALK_APP_KEY";
+
+    public string? AppSecret { get; set; }
+    public string AppSecretRef { get; set; } = "env:DINGTALK_APP_SECRET";
+
+    /// <summary>机器人 RobotCode，默认与 AppKey 相同，发消息时必填</summary>
+    public string? RobotCode { get; set; }
+    public string RobotCodeRef { get; set; } = "env:DINGTALK_ROBOT_CODE";
+
+    public string GroupPolicy { get; set; } = "open";
+    public string[] AllowedFromUserIds { get; set; } = [];
+    public string[] AllowedGroupIds { get; set; } = [];
+    public int MaxInboundChars { get; set; } = 4096;
+    public bool RequireMentionInGroup { get; set; } = true;
+    public bool ExposeInboundMediaUrls { get; set; } = true;
+    public int StreamPollIntervalMs { get; set; } = 500;
+}
+
+/// <summary>
+/// 企业微信（WeCom）智能机器人通道配置。
+/// 使用 WebSocket 长连接模式接收消息，REST API 发送消息。
+/// </summary>
+public sealed class WeComChannelConfig
+{
+    public bool Enabled { get; set; } = true;
+
+    // ── WebSocket 长连接凭证（智能机器人） ──
+    /// <summary>智能机器人 BotId，格式：aib-xxxxx</summary>
+    public string? BotId { get; set; }
+    public string BotIdRef { get; set; } = "env:WECOM_BOT_ID";
+
+    /// <summary>智能机器人长连接专用 Secret</summary>
+    public string? BotSecret { get; set; }
+    public string BotSecretRef { get; set; } = "env:WECOM_BOT_SECRET";
+
+    // ── REST API 凭证（自建应用，用于主动发送消息和媒体上传） ──
+    /// <summary>企业 CorpID</summary>
+    public string? CorpId { get; set; }
+    public string CorpIdRef { get; set; } = "env:WECOM_CORP_ID";
+
+    /// <summary>自建应用 AgentId</summary>
+    public int AgentId { get; set; }
+    public string AgentIdRef { get; set; } = "env:WECOM_AGENT_ID";
+
+    /// <summary>自建应用 Secret，用于换取 access_token</summary>
+    public string? CorpSecret { get; set; }
+    public string CorpSecretRef { get; set; } = "env:WECOM_CORP_SECRET";
+
+    // ── 通用配置 ──
+    /// <summary>群聊策略：open（全部允许）、allowlist（白名单）、disabled（丢弃群消息）</summary>
+    public string GroupPolicy { get; set; } = "open";
+
+    /// <summary>允许的发信人 userid 列表，空数组表示允许全部</summary>
+    public string[] AllowedFromUserIds { get; set; } = [];
+
+    /// <summary>允许的群聊 chatid 列表，仅在 GroupPolicy=allowlist 时生效</summary>
+    public string[] AllowedGroupIds { get; set; } = [];
+
+    /// <summary>入站消息最大字符数</summary>
+    public int MaxInboundChars { get; set; } = 4096;
+
+    /// <summary>群聊中是否需要 @机器人 才响应</summary>
+    public bool RequireMentionInGroup { get; set; } = true;
+}
+
+
+
 public sealed class CronConfig
 {
     public bool Enabled { get; set; } = false;
@@ -670,6 +781,10 @@ public sealed class CronConfig
 public sealed class CronJobConfig
 {
     public string Name { get; set; } = "";
+
+    /// <summary>Human-readable display name. For dynamic automations this is the automation's Name field; Name is the automation.Id.</summary>
+    public string? DisplayName { get; set; }
+
     public string CronExpression { get; set; } = "";
     public string Prompt { get; set; } = "";
     public bool RunOnStartup { get; set; } = false;
@@ -680,6 +795,15 @@ public sealed class CronJobConfig
 
     /// <summary>IANA timezone ID (e.g. "America/New_York"). Null defaults to UTC.</summary>
     public string? Timezone { get; set; }
+
+    /// <summary>Override the LLM model for this job. Null uses the session/profile default.</summary>
+    public string? ModelId { get; set; }
+
+    /// <summary>One-shot: run at this specific UTC time instead of the cron expression.</summary>
+    public DateTimeOffset? RunAt { get; set; }
+
+    /// <summary>Delete this job after it runs (used with RunAt one-shot jobs).</summary>
+    public bool DeleteAfterRun { get; set; }
 }
 
 public sealed class WebhooksConfig

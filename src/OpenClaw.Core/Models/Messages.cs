@@ -17,6 +17,8 @@ public sealed record InboundMessage
     public string? ReplyToMessageId { get; init; }
     public bool IsSystem { get; init; }
     public string? Subject { get; init; }
+    public string? ModelOverride { get; init; }
+    public bool DeleteAfterRun { get; init; }
     public string? ApprovalId { get; init; }
     public bool? Approved { get; init; }
     public DateTimeOffset ReceivedAt { get; init; } = DateTimeOffset.UtcNow;
@@ -34,6 +36,12 @@ public sealed record InboundMessage
     public string? MediaUrl { get; init; }
     public string? MediaMimeType { get; init; }
     public string? MediaFileName { get; init; }
+
+    /// <summary>
+    /// Verified identity from the channel's authentication layer (e.g. Keycloak JWT <c>sub</c>).
+    /// Only set when the channel has validated an OIDC token; <c>null</c> for anonymous channels.
+    /// </summary>
+    public string? AuthenticatedUserId { get; init; }
 
     /// <summary>
     /// Multiple media attachments (e.g. several images in one message).

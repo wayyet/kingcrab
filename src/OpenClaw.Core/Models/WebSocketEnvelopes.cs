@@ -38,4 +38,31 @@ public sealed record WsServerEnvelope
     public string? FileName { get; init; }
     public string? MimeType { get; init; }
     public long? FileSizeBytes { get; init; }
+
+    /// <summary>
+    /// Optional semantic type for artifact deliveries emitted by the emit_artifact tool.
+    /// Well-known values: "template_package", "skill_package", "ontology", "generic".
+    /// </summary>
+    public string? ArtifactType { get; init; }
+
+    /// <summary>
+    /// Unified artifact payload (type = "artifact"). Carries the full <see cref="SkillArtifact"/>
+    /// object for both file and data artifacts. Clients should prefer this over the flat
+    /// FileUrl/FileName/etc. fields which are kept only for backward compatibility.
+    /// </summary>
+    public SkillArtifact? Artifact { get; init; }
+
+    /// <summary>
+    /// Stage gate transition event (type = "skill_stage_gate") emitted after a terminal artifact.
+    /// </summary>
+    public SkillStageGateEvent? StageGate { get; init; }
+}
+
+public sealed record SkillStageGateEvent
+{
+    public required string SkillName { get; init; }
+    public required string CompletedStage { get; init; }
+    public required string NextStage { get; init; }
+    public required bool CanProceed { get; init; }
+    public string? BlockedReason { get; init; }
 }

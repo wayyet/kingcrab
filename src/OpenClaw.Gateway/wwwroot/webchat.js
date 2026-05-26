@@ -1,4 +1,5 @@
         // Set up marked to use highlight.js
+        console.log('%c[webchat.js] LOADED v-artifact-debug-2026-05-07', 'color:#14b8a6;font-weight:bold');
         marked.setOptions({
             highlight: function (code, lang) {
                 const language = hljs.getLanguage(lang) ? lang : 'plaintext';
@@ -17,6 +18,10 @@
         const oidcLoginButton = document.getElementById('oidc-login-button');
         const oidcLogoutButton = document.getElementById('oidc-logout-button');
         const typingRow = document.getElementById('typing-row');
+        const artifactPanel = document.getElementById('artifact-panel');
+        const artifactList = document.getElementById('artifact-list');
+        const artifactCount = document.getElementById('artifact-count');
+        const artifactEmptyState = document.getElementById('artifact-empty-state');
         const fileInput = document.getElementById('file-input');
         const attachBtn = document.getElementById('attach-btn');
         const imagePreviewStrip = document.getElementById('image-preview-strip');
@@ -25,7 +30,7 @@
 
         const OIDC_CONFIG = {
             enabled: true,
-            authority: 'https://auth.verdure-hiro.cn/realms/maker-community',
+            authority: 'https://passport.ai4c.cn/realms/ai4c-saas',
             //authority: 'http://localhost:8080/realms/ai4cbrain', // local-keycloak
             clientId: 'kingcrab-console',
             scope: 'openid profile email'
@@ -51,6 +56,7 @@
         let streamEpoch = 0;               // incremented on session switch to discard stale stream frames
         let boundEpoch = 0;               // epoch captured at typing_start; checked on each chunk
         let sessionAutoRefreshTimer = null; // setInterval handle for 15-second session list refresh
+        let artifactItems = [];
 
         const WEBCHAT_CONFIG = {
             streamRenderDebounceMs: Math.max(20, Number(window.OPENCLAW_WEBCHAT_CONFIG?.streamRenderDebounceMs ?? 120)),
@@ -249,11 +255,8 @@
                     out.push(`![](${url})`);
                     continue;
                 }
-                const mFileUrl = trimmed.match(/^\[FILE_URL:(.+)\]$/);
-                if (mFileUrl) {
-                    const url = mFileUrl[1].trim();
-                    const name = url.split('/').pop() || 'file';
-                    out.push(`[⬇ ${name}](${url})`);
+                // Strip [FILE_URL:] markers — extracted separately by extractFileAttachments for card rendering.
+                if (/^\[FILE_URL:.+\]$/.test(trimmed)) {
                     continue;
                 }
                 // Strip raw FILE_PATH markers – they are internal and should not be shown.
@@ -263,6 +266,50 @@
                 out.push(line);
             }
             return out.join('\n');
+        }
+
+        // Extracts [FILE_URL:] markers from assistant history content and returns
+        // { text, files: [{url, name}] } so each file can be rendered as a 📎 card.
+        function extractFileAttachments(content) {
+            const lines = (content || '').split('\n');
+            const files = [];
+            const textLines = [];
+            for (const line of lines) {
+                const trimmed = line.trim();
+                const m = trimmed.match(/^\[FILE_URL:(.+)\]$/);
+                if (m) {
+                    const raw = m[1].trim();
+                    const pipeIdx = raw.indexOf('|');
+                    const url = pipeIdx >= 0 ? raw.slice(0, pipeIdx) : raw;
+                    const name = pipeIdx >= 0 ? raw.slice(pipeIdx + 1) : (url.split('/').pop() || 'file');
+                    files.push({ url, name });
+                } else {
+                    textLines.push(line);
+                }
+            }
+            return { text: textLines.join('\n'), files };
+        }
+
+        // Renders a file as a 📎 attachment card (same style as live file_attachment envelope).
+        function appendFileCard(url, name) {
+            const row = createRow('assistant');
+            const card = document.createElement('div');
+            card.className = 'message assistant';
+            card.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 14px;';
+            const icon = document.createElement('span');
+            icon.textContent = '\uD83D\uDCCE';
+            icon.style.fontSize = '1.4em';
+            const info = document.createElement('div');
+            info.style.flex = '1';
+            const link = document.createElement('a');
+            link.href = url;
+            link.textContent = name;
+            link.style.cssText = 'font-weight:600;word-break:break-all;';
+            info.appendChild(link);
+            card.appendChild(icon);
+            card.appendChild(info);
+            row.appendChild(card);
+            chatContainer.insertBefore(row, typingRow);
         }
 
         // Intercept clicks on /media/ links rendered inside chat messages.
@@ -299,6 +346,340 @@
             row.appendChild(div);
             chatContainer.insertBefore(row, typingRow);
             scrollToBottom();
+        }
+
+        function normalizeArtifact(raw) {
+            if (!raw || typeof raw !== 'object') return null;
+            const kind = String(raw.kind || 'file').toLowerCase() === 'data' ? 'data' : 'file';
+            return {
+                kind,
+                artifactType: String(raw.artifactType || raw.artifact_type || raw.ArtifactType || 'generic'),
+                label: raw.label || raw.Label ? String(raw.label || raw.Label) : '',
+                skillName: raw.skillName || raw.SkillName ? String(raw.skillName || raw.SkillName) : '',
+                stage: raw.stage || raw.Stage ? String(raw.stage || raw.Stage) : '',
+                isTerminal: Boolean(raw.isTerminal ?? raw.IsTerminal),
+                fileUrl: raw.fileUrl || raw.FileUrl ? String(raw.fileUrl || raw.FileUrl) : '',
+                fileName: raw.fileName || raw.FileName ? String(raw.fileName || raw.FileName) : '',
+                mimeType: raw.mimeType || raw.MimeType ? String(raw.mimeType || raw.MimeType) : '',
+                fileSizeBytes: typeof (raw.fileSizeBytes ?? raw.FileSizeBytes) === 'number' ? (raw.fileSizeBytes ?? raw.FileSizeBytes) : null,
+                data: raw.data ?? raw.Data,
+                displayHint: raw.displayHint || raw.display_hint || raw.DisplayHint ? String(raw.displayHint || raw.display_hint || raw.DisplayHint) : ''
+            };
+        }
+
+        function appendArtifactCard(rawArtifact) {
+            console.log('[artifact] appendArtifactCard called, raw:', rawArtifact);
+            const artifact = normalizeArtifact(rawArtifact);
+            if (!artifact) { console.warn('[artifact] normalizeArtifact returned null'); return; }
+            console.log('[artifact] normalized:', artifact);
+
+            artifactItems.unshift(artifact);
+            renderArtifactPanel();
+            appendArtifactNotice(artifact);
+        }
+
+        function renderArtifactPanel() {
+            console.log('[artifact] renderArtifactPanel, items:', artifactItems.length, 'list el:', artifactList, 'count el:', artifactCount);
+            if (!artifactList || !artifactCount || !artifactEmptyState) {
+                console.error('[artifact] renderArtifactPanel: DOM refs missing', { artifactList, artifactCount, artifactEmptyState });
+                return;
+            }
+            artifactCount.textContent = String(artifactItems.length);
+            artifactList.innerHTML = '';
+            if (artifactItems.length === 0) {
+                artifactList.appendChild(artifactEmptyState);
+                return;
+            }
+
+            artifactItems.forEach(artifact => {
+                artifactList.appendChild(createArtifactCardElement(artifact));
+            });
+        }
+
+        function clearArtifactPanel() {
+            artifactItems = [];
+            renderArtifactPanel();
+        }
+
+        function createArtifactCardElement(artifact) {
+            const card = document.createElement('div');
+            card.className = 'artifact-card';
+
+            const header = document.createElement('div');
+            header.className = 'artifact-header';
+
+            const icon = document.createElement('div');
+            icon.className = 'artifact-icon';
+            icon.textContent = artifact.kind === 'file' ? 'FILE' : iconTextForDisplayHint(artifact.displayHint);
+
+            const titleWrap = document.createElement('div');
+            titleWrap.className = 'artifact-title-wrap';
+            const title = document.createElement('div');
+            title.className = 'artifact-title';
+            title.textContent = artifact.label || artifact.artifactType;
+            const meta = document.createElement('div');
+            meta.className = 'artifact-meta';
+            meta.textContent = [artifact.skillName, artifact.stage, artifact.isTerminal ? 'terminal' : '']
+                .filter(Boolean)
+                .join(' · ');
+            titleWrap.appendChild(title);
+            if (meta.textContent) titleWrap.appendChild(meta);
+
+            const badge = document.createElement('span');
+            badge.className = 'artifact-type-badge';
+            badge.textContent = artifact.artifactType;
+
+            header.append(icon, titleWrap, badge);
+            card.appendChild(header);
+
+            if (artifact.kind === 'file') {
+                card.appendChild(renderArtifactFile(artifact));
+            } else {
+                card.appendChild(renderArtifactData(artifact));
+            }
+
+            return card;
+        }
+
+        function appendArtifactNotice(artifact) {
+            const row = createRow('assistant');
+            const notice = document.createElement('button');
+            notice.type = 'button';
+            notice.className = 'message assistant artifact-notice';
+            notice.title = '查看右侧阶段产物面板';
+
+            const icon = document.createElement('span');
+            icon.className = 'artifact-notice-icon';
+            icon.textContent = artifact.kind === 'file' ? 'FILE' : iconTextForDisplayHint(artifact.displayHint);
+
+            const text = document.createElement('span');
+            text.className = 'artifact-notice-text';
+            text.textContent = `产物已更新：${artifact.label || artifact.artifactType}`;
+
+            notice.append(icon, text);
+            notice.addEventListener('click', () => {
+                artifactPanel?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+                artifactPanel?.classList.add('artifact-panel-highlight');
+                setTimeout(() => artifactPanel?.classList.remove('artifact-panel-highlight'), 900);
+            });
+
+            row.appendChild(notice);
+            chatContainer.insertBefore(row, typingRow);
+            scrollToBottom();
+        }
+
+        function iconTextForDisplayHint(hint) {
+            switch ((hint || '').toLowerCase()) {
+                case 'table': return 'TAB';
+                case 'code': return 'CODE';
+                case 'tree': return 'TREE';
+                case 'badge': return 'OK';
+                case 'progress': return '%';
+                default: return 'JSON';
+            }
+        }
+
+        function renderArtifactFile(artifact) {
+            const wrap = document.createElement('div');
+            wrap.className = 'artifact-file';
+
+            const link = document.createElement('a');
+            link.href = artifact.fileUrl || '#';
+            link.textContent = artifact.fileName || artifact.label || artifact.artifactType;
+            link.className = 'artifact-file-link';
+
+            const meta = document.createElement('div');
+            meta.className = 'artifact-file-meta';
+            const sizeLabel = artifact.fileSizeBytes != null ? formatFileSize(artifact.fileSizeBytes) : '';
+            meta.textContent = [sizeLabel, artifact.mimeType].filter(Boolean).join(' · ');
+
+            wrap.appendChild(link);
+            if (meta.textContent) wrap.appendChild(meta);
+            return wrap;
+        }
+
+        function renderArtifactData(artifact) {
+            const artifactType = (artifact.artifactType || '').toLowerCase();
+            if (artifactType === 'routing_decision') return renderRoutingDecisionArtifact(artifact.data);
+            if (artifactType === 'phase_state' || artifactType === 'skill_phase_state') return renderPhaseStateArtifact(artifact.data);
+            if (artifactType.endsWith('_progress') || artifactType === 'export_progress') return renderProgressArtifact(artifact.data);
+
+            const hint = (artifact.displayHint || 'text').toLowerCase();
+            if (hint === 'progress') return renderProgressArtifact(artifact.data);
+            if (hint === 'table') return renderTableArtifact(artifact.data);
+            if (hint === 'badge') return renderBadgeArtifact(artifact.data);
+            if (hint === 'code' || hint === 'tree') return renderCodeArtifact(artifact.data);
+            return renderTextArtifact(artifact.data);
+        }
+
+        function renderRoutingDecisionArtifact(data) {
+            const record = isPlainObject(data) ? data : {};
+            const wrap = document.createElement('div');
+            wrap.className = 'artifact-detail-grid';
+
+            wrap.appendChild(renderArtifactField('当前阶段', record.currentPhase));
+            wrap.appendChild(renderArtifactField('目标技能', record.targetSkill));
+            wrap.appendChild(renderArtifactField('原因', record.reason, true));
+
+            const persistedKeys = Array.isArray(record.persistedKeys) ? record.persistedKeys : [];
+            const keysField = document.createElement('div');
+            keysField.className = 'artifact-field artifact-field-wide';
+            const label = document.createElement('div');
+            label.className = 'artifact-field-label';
+            label.textContent = '已持久化数据';
+            const list = document.createElement('div');
+            list.className = 'artifact-key-list';
+            if (persistedKeys.length === 0) {
+                const empty = document.createElement('span');
+                empty.className = 'artifact-empty';
+                empty.textContent = '无';
+                list.appendChild(empty);
+            } else {
+                persistedKeys.forEach(key => {
+                    const chip = document.createElement('span');
+                    chip.className = 'artifact-key-chip';
+                    chip.textContent = String(key);
+                    list.appendChild(chip);
+                });
+            }
+            keysField.append(label, list);
+            wrap.appendChild(keysField);
+
+            return wrap;
+        }
+
+        function renderPhaseStateArtifact(data) {
+            const record = isPlainObject(data) ? data : {};
+            const wrap = document.createElement('div');
+            wrap.className = 'artifact-detail-grid';
+            wrap.appendChild(renderArtifactField('状态', record.value ?? record.status ?? data));
+            wrap.appendChild(renderArtifactField('阶段', record.phase ?? record.currentPhase));
+            wrap.appendChild(renderArtifactField('下一阶段', record.next ?? record.nextStage));
+            return wrap;
+        }
+
+        function renderArtifactField(labelText, value, wide = false) {
+            const field = document.createElement('div');
+            field.className = wide ? 'artifact-field artifact-field-wide' : 'artifact-field';
+            const label = document.createElement('div');
+            label.className = 'artifact-field-label';
+            label.textContent = labelText;
+            const body = document.createElement('div');
+            body.className = 'artifact-field-value';
+            body.textContent = stringifyArtifactValue(value) || '—';
+            field.append(label, body);
+            return field;
+        }
+
+        function renderProgressArtifact(data) {
+            const record = isPlainObject(data) ? data : {};
+            const rawPercent = Number(record.percent ?? record.progress ?? 0);
+            const percent = Number.isFinite(rawPercent) ? Math.max(0, Math.min(100, Math.round(rawPercent))) : 0;
+            const message = stringifyArtifactValue(record.message ?? record.label ?? '');
+
+            const wrap = document.createElement('div');
+            wrap.className = 'artifact-progress';
+            const track = document.createElement('div');
+            track.className = 'artifact-progress-track';
+            const bar = document.createElement('div');
+            bar.className = 'artifact-progress-bar';
+            bar.style.width = `${percent}%`;
+            track.appendChild(bar);
+
+            const label = document.createElement('div');
+            label.className = 'artifact-progress-label';
+            const msg = document.createElement('span');
+            msg.textContent = message;
+            const pct = document.createElement('span');
+            pct.textContent = `${percent}%`;
+            label.append(msg, pct);
+
+            wrap.append(track, label);
+            return wrap;
+        }
+
+        function renderTableArtifact(data) {
+            const rows = Array.isArray(data) ? data.filter(isPlainObject) : [];
+            if (rows.length === 0) return renderCodeArtifact(data);
+
+            const columns = Array.from(new Set(rows.flatMap(row => Object.keys(row)))).slice(0, 8);
+            const wrap = document.createElement('div');
+            wrap.className = 'artifact-table-wrap';
+            const table = document.createElement('table');
+            table.className = 'artifact-table';
+
+            const thead = document.createElement('thead');
+            const headRow = document.createElement('tr');
+            columns.forEach(col => {
+                const th = document.createElement('th');
+                th.textContent = col;
+                headRow.appendChild(th);
+            });
+            thead.appendChild(headRow);
+
+            const tbody = document.createElement('tbody');
+            rows.slice(0, 12).forEach(row => {
+                const tr = document.createElement('tr');
+                columns.forEach(col => {
+                    const td = document.createElement('td');
+                    td.textContent = stringifyArtifactValue(row[col]);
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+
+            table.append(thead, tbody);
+            wrap.appendChild(table);
+            return wrap;
+        }
+
+        function renderBadgeArtifact(data) {
+            const record = isPlainObject(data) ? data : null;
+            const value = stringifyArtifactValue(record ? (record.value ?? record.status ?? data) : data);
+            const badge = document.createElement('div');
+            badge.className = 'artifact-status-badge';
+            badge.textContent = value || 'updated';
+            return badge;
+        }
+
+        function renderCodeArtifact(data) {
+            const pre = document.createElement('pre');
+            pre.className = 'artifact-code';
+            const code = document.createElement('code');
+            code.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+            pre.appendChild(code);
+            return pre;
+        }
+
+        function renderTextArtifact(data) {
+            const div = document.createElement('div');
+            div.className = 'artifact-text';
+            div.textContent = stringifyArtifactValue(data);
+            return div;
+        }
+
+        function isPlainObject(value) {
+            return value !== null && typeof value === 'object' && !Array.isArray(value);
+        }
+
+        function stringifyArtifactValue(value) {
+            if (value === null || value === undefined) return '';
+            if (typeof value === 'string') return value;
+            if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+            return JSON.stringify(value);
+        }
+
+        function appendStageGate(gate) {
+            if (!gate || typeof gate !== 'object') return;
+            const skillName = gate.skillName || gate.SkillName || '';
+            const completedStage = gate.completedStage || gate.CompletedStage || '';
+            const nextStage = gate.nextStage || gate.NextStage || '';
+            const canProceed = Boolean(gate.canProceed ?? gate.CanProceed);
+            const blockedReason = gate.blockedReason || gate.BlockedReason || '';
+            const text = canProceed
+                ? `${skillName}: ${completedStage} completed, ${nextStage} is ready.`
+                : `${skillName}: ${nextStage} is blocked. ${blockedReason}`;
+            appendSystem(text, !canProceed);
         }
 
         function scrollToBottom(smooth = true) {
@@ -471,6 +852,7 @@
             ws.onmessage = (event) => {
                 try {
                     const env = JSON.parse(event.data);
+                    console.log('[ws] recv type:', JSON.stringify(env.type), 'keys:', Object.keys(env));
 
                     switch (env.type) {
                         case 'typing_start':
@@ -530,6 +912,14 @@
                         case 'tool_result':
                             break;
 
+                        case 'artifact':
+                            appendArtifactCard(env.artifact || env.Artifact || env);
+                            break;
+
+                        case 'skill_stage_gate':
+                            appendStageGate(env.stageGate || env.StageGate || env.stage_gate || env);
+                            break;
+
                         case 'file_attachment': {
                             const fileUrl = env.fileUrl || '';
                             const fileName = env.fileName || env.text || 'file';
@@ -584,6 +974,7 @@
                         }
                     }
                 } catch (e) {
+                    console.error('[ws] onmessage exception:', e, 'raw data:', event.data);
                     if (!activeResponseDiv) {
                         const row = createRow('assistant');
                         activeResponseDiv = document.createElement('div');
@@ -1133,6 +1524,7 @@
             activeRawContent = '';
             chatContainer.innerHTML = '';
             chatContainer.appendChild(typingRow);
+            clearArtifactPanel();
 
             const headers = await getAuthHeaders(10);
             try {
@@ -1152,13 +1544,19 @@
                                 row.appendChild(div);
                                 chatContainer.insertBefore(row, typingRow);
                             } else if (turn.role === 'assistant') {
-                                const row = createRow('assistant');
-                                const div = document.createElement('div');
-                                div.className = 'message assistant';
-                                div.innerHTML = DOMPurify.sanitize(marked.parse(preprocessMediaMarkers(turn.content || '')));
-                                div.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
-                                row.appendChild(div);
-                                chatContainer.insertBefore(row, typingRow);
+                                const { text: assistantText, files: attachedFiles } = extractFileAttachments(turn.content || '');
+                                if (assistantText.trim()) {
+                                    const row = createRow('assistant');
+                                    const div = document.createElement('div');
+                                    div.className = 'message assistant';
+                                    div.innerHTML = DOMPurify.sanitize(marked.parse(preprocessMediaMarkers(assistantText)));
+                                    div.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
+                                    row.appendChild(div);
+                                    chatContainer.insertBefore(row, typingRow);
+                                }
+                                for (const f of attachedFiles) {
+                                    appendFileCard(f.url, f.name);
+                                }
                             }
                             if (turn.toolCalls && turn.toolCalls.length > 0) {
                                 turn.toolCalls.forEach(tc => appendToolPill(tc.toolName));
@@ -1192,6 +1590,7 @@
             liveChatNodes = [];
             chatContainer.innerHTML = '';
             chatContainer.appendChild(typingRow);
+            clearArtifactPanel();
             activeResponseDiv = null;
             activeRawContent = '';
             document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
@@ -1210,6 +1609,41 @@
         newChatBtn.addEventListener('click', startNewChatSession);
         sidebarToggleBtn.addEventListener('click', toggleSidebar);
 
+        const clearSessionsBtn = document.getElementById('clear-sessions-btn');
+        clearSessionsBtn.addEventListener('click', async () => {
+            if (!confirm('确定要清除所有会话吗？此操作不可撤销。')) return;
+            clearSessionsBtn.disabled = true;
+            try {
+                // Fetch all sessions (up to 200 at a time, repeat until done)
+                let deleted = 0;
+                let errors = 0;
+                let page = 1;
+                while (true) {
+                    const headers = await getAuthHeaders(10);
+                    const resp = await fetch(getBasePath() + '/admin/sessions?page=' + page + '&pageSize=60', { headers });
+                    if (!resp.ok) break;
+                    const data = await resp.json().catch(() => null);
+                    const ids = (data?.active ?? []).map(s => s.id).concat((data?.persisted?.items ?? []).map(s => s.id));
+                    const unique = [...new Set(ids)];
+                    if (unique.length === 0) break;
+                    for (const id of unique) {
+                        const delHeaders = await getAuthHeaders(10);
+                        const delResp = await fetch(getBasePath() + '/admin/sessions/' + encodeURIComponent(id), { method: 'DELETE', headers: delHeaders });
+                        if (delResp.ok) deleted++;
+                        else errors++;
+                    }
+                    if (!data?.persisted?.hasMore) break;
+                    page++;
+                }
+                startNewChatSession();
+                await loadSessions();
+            } catch (e) {
+                alert('清除会话失败: ' + e.message);
+            } finally {
+                clearSessionsBtn.disabled = false;
+            }
+        });
+
         backToLiveBtn.addEventListener('click', () => {
             // Reset to default (no explicit session routing) and start fresh
             currentSessionId = null;
@@ -1217,6 +1651,7 @@
             liveChatNodes = [];
             chatContainer.innerHTML = '';
             chatContainer.appendChild(typingRow);
+            clearArtifactPanel();
             activeResponseDiv = null;
             activeRawContent = '';
             document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
@@ -1636,9 +2071,14 @@
                         for (const [id, srv] of Object.entries(rawBuiltin.servers || rawBuiltin.Servers || {})) {
                             builtinConfig.Servers[id] = normalizePascal(srv);
                         }
-                        // user config is raw file JSON — already PascalCase
-                        mcpConfig = Object.assign({ Enabled: true, Servers: {} }, data.user || {});
-                        if (!mcpConfig.Servers) mcpConfig.Servers = {};
+                        // Explicitly extract only the fields we need with PascalCase keys.
+                        // Avoid Object.assign(defaults, data.user) which would preserve any
+                        // camelCase keys returned by the server and produce duplicate-key JSON.
+                        const u = data.user || {};
+                        mcpConfig = {
+                            Enabled: !!(u.Enabled ?? u.enabled ?? true),
+                            Servers: Object.assign({}, u.Servers || u.servers || {})
+                        };
                     } else {
                         showStatus('Load failed (' + resp.status + ').', true);
                     }
@@ -1700,8 +2140,27 @@
             // Feishu field refs
             const fAppId         = document.getElementById('feishu-appid');
             const fAppSecret     = document.getElementById('feishu-appsecret');
+            const fAppSecretRef  = document.getElementById('feishu-appsecret-ref');
+            const fForm          = document.getElementById('ch-feishu-form');
+            const dForm          = document.getElementById('ch-dingtalk-form');
+
+            // DingTalk field refs
+            const dAppId    = document.getElementById('dingtalk-appid');
+            const dAppKey   = document.getElementById('dingtalk-appkey');
+            const dAppSecret = document.getElementById('dingtalk-appsecret');
+            const wForm     = document.getElementById('ch-wecom-form');
+
+            // WeCom field refs
+            const wBotId     = document.getElementById('wecom-botid');
+            const wBotSecret = document.getElementById('wecom-botsecret');
 
             let activeChannel = 'feishu';
+
+            function setChannelFormVisibility() {
+                fForm.style.display = activeChannel === 'feishu' ? '' : 'none';
+                dForm.style.display = activeChannel === 'dingtalk' ? '' : 'none';
+                wForm.style.display = activeChannel === 'wecom' ? '' : 'none';
+            }
 
             function showStatus(msg, isErr) {
                 statusBar.textContent = msg;
@@ -1720,9 +2179,9 @@
 
             // Populate the Feishu form from a config object (PascalCase keys from server)
             function populateFeishuForm(cfg) {
-                fAppId.value          = cfg.AppId ?? cfg.appId ?? '';
-                // Never pre-fill secret — leave blank so user must intentionally set it
-                fAppSecret.value      = '';
+                fAppId.value        = cfg.AppId        ?? cfg.appId        ?? '';
+                fAppSecret.value    = cfg.AppSecret    ?? cfg.appSecret    ?? '';
+                fAppSecretRef.value = cfg.AppSecretRef ?? cfg.appSecretRef ?? '';
             }
 
             // Build config object from the Feishu form
@@ -1734,6 +2193,47 @@
                 if (appId) cfg.appId = appId;
                 const appSecret = fAppSecret.value.trim();
                 if (appSecret) cfg.appSecret = appSecret;
+                const appSecretRef = fAppSecretRef.value.trim();
+                if (appSecretRef) cfg.appSecretRef = appSecretRef;
+                return cfg;
+            }
+
+            function readInputValue(el) {
+                return el ? el.value.trim() : '';
+            }
+
+            function setInputValue(el, value) {
+                if (el) el.value = value ?? '';
+            }
+
+            function populateDingTalkForm(cfg) {
+                setInputValue(dAppId, cfg.AppId ?? cfg.appId ?? '');
+                setInputValue(dAppKey, cfg.AppKey ?? cfg.appKey ?? '');
+                setInputValue(dAppSecret, cfg.AppSecret ?? cfg.appSecret ?? '');
+            }
+
+            function buildDingTalkConfig() {
+                const cfg = { enabled: true };
+                const appId = readInputValue(dAppId);
+                if (appId) cfg.appId = appId;
+                const appKey = readInputValue(dAppKey);
+                if (appKey) cfg.appKey = appKey;
+                const appSecret = readInputValue(dAppSecret);
+                if (appSecret) cfg.appSecret = appSecret;
+                return cfg;
+            }
+
+            function populateWeComForm(cfg) {
+                setInputValue(wBotId, cfg.BotId ?? cfg.botId ?? '');
+                setInputValue(wBotSecret, cfg.BotSecret ?? cfg.botSecret ?? '');
+            }
+
+            function buildWeComConfig() {
+                const cfg = { enabled: true };
+                const botId = readInputValue(wBotId);
+                if (botId) cfg.botId = botId;
+                const botSecret = readInputValue(wBotSecret);
+                if (botSecret) cfg.botSecret = botSecret;
                 return cfg;
             }
 
@@ -1749,6 +2249,8 @@
                     }
                     const cfg = await resp.json();
                     if (activeChannel === 'feishu') populateFeishuForm(cfg);
+                    if (activeChannel === 'dingtalk') populateDingTalkForm(cfg);
+                    if (activeChannel === 'wecom') populateWeComForm(cfg);
                     showStatus('加载成功 — 当前为生效中的配置', false);
                 } catch (e) {
                     showStatus('加载失败: ' + e.message, true);
@@ -1760,6 +2262,10 @@
                 let body;
                 if (activeChannel === 'feishu') {
                     body = buildFeishuConfig();
+                } else if (activeChannel === 'dingtalk') {
+                    body = buildDingTalkConfig();
+                } else if (activeChannel === 'wecom') {
+                    body = buildWeComConfig();
                 } else {
                     showFormError('未知渠道: ' + activeChannel);
                     return;
@@ -1809,6 +2315,7 @@
                 statusBar.style.display = 'none';
                 clearFormError();
                 overlay.classList.add('open');
+                setChannelFormVisibility();
                 await loadChannelConfig();
             });
 
@@ -1830,8 +2337,1201 @@
                     activeChannel = tab.dataset.channel;
                     clearFormError();
                     statusBar.style.display = 'none';
+                    setChannelFormVisibility();
                     await loadChannelConfig();
                 });
             });
+        })();
+        // ---
+
+        // ── Cron / Automation Management Panel ───────────────────────────────
+        (() => {
+            const overlay       = document.getElementById('cron-overlay');
+            const openBtn       = document.getElementById('cron-panel-btn');
+            const closeBtn      = document.getElementById('cron-close-btn');
+            const refreshBtn    = document.getElementById('cron-refresh-btn');
+            const addBtn        = document.getElementById('cron-add-btn');
+            const jobList       = document.getElementById('cron-job-list');
+            const formSection   = document.getElementById('cron-form-section');
+            const formTitle     = document.getElementById('cron-form-title');
+            const formError     = document.getElementById('cron-form-error');
+            const cancelBtn     = document.getElementById('cron-form-cancel-btn');
+            const saveBtn       = document.getElementById('cron-form-save-btn');
+            const statusBar     = document.getElementById('cron-panel-status');
+            const histSection   = document.getElementById('cron-history-section');
+            const histTitle     = document.getElementById('cron-history-title');
+            const histList      = document.getElementById('cron-history-list');
+            const histCloseBtn  = document.getElementById('cron-history-close-btn');
+            const sessViewBtn   = document.getElementById('cron-session-view-btn');
+            const sessSection   = document.getElementById('cron-session-section');
+            const sessTitle     = document.getElementById('cron-session-title');
+            const sessList      = document.getElementById('cron-session-list');
+            const sessCloseBtn  = document.getElementById('cron-session-close-btn');
+
+            let currentHistJob = null;
+
+            const fName         = document.getElementById('cron-f-name');
+            const fPrompt       = document.getElementById('cron-f-prompt');
+            const fTimezone     = document.getElementById('cron-f-timezone');
+            const fModel        = document.getElementById('cron-f-model');
+            const fChannel      = document.getElementById('cron-f-channel');
+            const fRecipient    = document.getElementById('cron-f-recipient');
+            const fEnabled      = document.getElementById('cron-f-enabled');
+            const fScheduleRaw  = document.getElementById('cron-f-schedule-raw');
+            const dailyTime     = document.getElementById('cron-daily-time');
+            const dailyWeekday  = document.getElementById('cron-daily-weekday');
+            const intervalVal   = document.getElementById('cron-interval-val');
+            const intervalUnit  = document.getElementById('cron-interval-unit');
+
+            let editingId  = null;  // null = new, string = id being edited
+            let currentPreset = 'daily';
+
+            // ── Frequency tab switching ────────────────────────────────────
+            document.querySelectorAll('.cron-freq-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    document.querySelectorAll('.cron-freq-tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    currentPreset = tab.dataset.preset;
+                    document.getElementById('cron-preset-daily').style.display    = currentPreset === 'daily'    ? '' : 'none';
+                    document.getElementById('cron-preset-interval').style.display = currentPreset === 'interval' ? '' : 'none';
+                    document.getElementById('cron-preset-custom').style.display   = currentPreset === 'custom'   ? '' : 'none';
+                });
+            });
+
+            // ── Status bar ────────────────────────────────────────────────
+            function showStatus(msg, isErr) {
+                statusBar.textContent = msg;
+                statusBar.className = 'mcp-panel-status ' + (isErr ? 'err' : 'ok');
+                statusBar.style.display = '';
+                clearTimeout(showStatus._t);
+                if (!isErr) showStatus._t = setTimeout(() => { statusBar.style.display = 'none'; }, 3500);
+            }
+
+            // ── Build schedule cron expression from preset UI ──────────────
+            function buildSchedule() {
+                if (currentPreset === 'custom') {
+                    return fScheduleRaw.value.trim();
+                }
+                if (currentPreset === 'daily') {
+                    const parts = (dailyTime.value || '09:00').split(':');
+                    const h = parseInt(parts[0], 10) || 9;
+                    const m = parseInt(parts[1], 10) || 0;
+                    const days = dailyWeekday.checked ? '1-5' : '*';
+                    return `${m} ${h} * * ${days}`;
+                }
+                if (currentPreset === 'interval') {
+                    const v = parseInt(intervalVal.value, 10) || 1;
+                    const unit = intervalUnit.value;
+                    if (unit === 'min') return `*/${v} * * * *`;
+                    return `0 */${v} * * *`;
+                }
+                return '';
+            }
+
+            // ── Parse cron expression back into preset UI (best-effort) ───
+            function applyScheduleToPreset(schedule) {
+                if (!schedule) return;
+                // Try to detect daily pattern: "M H * * *" or "M H * * 1-5"
+                const dailyMatch = schedule.match(/^(\d+)\s+(\d+)\s+\*\s+\*\s+([\d\-,]+|\*)$/);
+                if (dailyMatch) {
+                    const m = parseInt(dailyMatch[1], 10);
+                    const h = parseInt(dailyMatch[2], 10);
+                    const d = dailyMatch[3];
+                    dailyTime.value = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+                    dailyWeekday.checked = (d === '1-5');
+                    setPresetTab('daily');
+                    return;
+                }
+                // Interval in minutes: "*/N * * * *"
+                const minMatch = schedule.match(/^\*\/(\d+)\s+\*\s+\*\s+\*\s+\*$/);
+                if (minMatch) {
+                    intervalVal.value = minMatch[1];
+                    intervalUnit.value = 'min';
+                    setPresetTab('interval');
+                    return;
+                }
+                // Interval in hours: "0 */N * * *"
+                const hrMatch = schedule.match(/^0\s+\*\/(\d+)\s+\*\s+\*\s+\*$/);
+                if (hrMatch) {
+                    intervalVal.value = hrMatch[1];
+                    intervalUnit.value = 'hour';
+                    setPresetTab('interval');
+                    return;
+                }
+                // Fallback: show raw
+                fScheduleRaw.value = schedule;
+                setPresetTab('custom');
+            }
+
+            function setPresetTab(preset) {
+                currentPreset = preset;
+                document.querySelectorAll('.cron-freq-tab').forEach(t => {
+                    t.classList.toggle('active', t.dataset.preset === preset);
+                });
+                document.getElementById('cron-preset-daily').style.display    = preset === 'daily'    ? '' : 'none';
+                document.getElementById('cron-preset-interval').style.display = preset === 'interval' ? '' : 'none';
+                document.getElementById('cron-preset-custom').style.display   = preset === 'custom'   ? '' : 'none';
+            }
+
+            // ── Relative time helper ───────────────────────────────────────
+            function relTime(iso) {
+                if (!iso) return '—';
+                const ms = Date.now() - new Date(iso).getTime();
+                const sec = Math.floor(ms / 1000);
+                if (sec < 60) return '刚刚';
+                const min = Math.floor(sec / 60);
+                if (min < 60) return `${min} 分钟前`;
+                const hr = Math.floor(min / 60);
+                if (hr < 24) return `${hr} 小时前`;
+                return new Date(iso).toLocaleString('zh-CN');
+            }
+
+            // ── Source badge label ─────────────────────────────────────────
+            function sourceLabel(source) {
+                if (!source) return '未知';
+                if (source === 'legacy-cron') return '内置';
+                if (source === 'agent') return 'Agent';
+                if (source === 'webchat') return 'Web';
+                return source;
+            }
+            function sourceCls(source) {
+                if (source === 'legacy-cron') return 'source-legacy';
+                if (source === 'agent') return 'source-agent';
+                return 'source-webchat';
+            }
+
+            // ── Build a job card element ───────────────────────────────────
+            function buildCard(job) {
+                const isStatic = job.source === 'legacy-cron';
+
+                const card = document.createElement('div');
+                card.className = 'cron-job-card' + (job.enabled === false ? ' disabled' : '');
+                card.dataset.id = job.id;
+
+                // Status dot
+                const dot = document.createElement('div');
+                dot.className = 'cron-job-status';
+
+                // Info
+                const info = document.createElement('div');
+                info.className = 'cron-job-info';
+
+                const nameEl = document.createElement('div');
+                nameEl.className = 'cron-job-name';
+                nameEl.textContent = job.name || job.id;
+
+                const metaEl = document.createElement('div');
+                metaEl.className = 'cron-job-meta';
+                metaEl.textContent = job.schedule || '';
+
+                info.appendChild(nameEl);
+                info.appendChild(metaEl);
+
+                // Source badge
+                const badge = document.createElement('span');
+                badge.className = `cron-job-badge ${sourceCls(job.source)}`;
+                badge.textContent = sourceLabel(job.source);
+
+                // Actions
+                const actions = document.createElement('div');
+                actions.className = 'cron-job-actions';
+
+                // Run now
+                const runBtn = document.createElement('button');
+                runBtn.className = 'mcp-icon-btn';
+                runBtn.title = '立即执行';
+                runBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
+                runBtn.addEventListener('click', () => runJob(job.id, nameEl));
+
+                // History
+                const histBtn = document.createElement('button');
+                histBtn.className = 'mcp-icon-btn';
+                histBtn.title = '执行历史';
+                histBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
+                histBtn.addEventListener('click', () => loadHistory(job));
+
+                actions.appendChild(runBtn);
+                actions.appendChild(histBtn);
+
+                if (!isStatic) {
+                    // Edit
+                    const editBtn = document.createElement('button');
+                    editBtn.className = 'mcp-icon-btn';
+                    editBtn.title = '编辑';
+                    editBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+                    editBtn.addEventListener('click', () => openForm(job));
+
+                    // Delete
+                    const delBtn = document.createElement('button');
+                    delBtn.className = 'mcp-icon-btn danger';
+                    delBtn.title = '删除';
+                    delBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
+                    delBtn.addEventListener('click', () => deleteJob(job.id, job.name || job.id));
+
+                    actions.appendChild(editBtn);
+                    actions.appendChild(delBtn);
+                }
+
+                card.append(dot, info, badge, actions);
+                return card;
+            }
+
+            // ── Render job list ────────────────────────────────────────────
+            function renderJobs(items) {
+                jobList.innerHTML = '';
+                if (!items || items.length === 0) {
+                    const empty = document.createElement('div');
+                    empty.className = 'mcp-server-empty';
+                    empty.textContent = '暂无定时任务。';
+                    jobList.appendChild(empty);
+                    return;
+                }
+                // Static/legacy first, then managed/webchat/agent
+                const sorted = [...items].sort((a, b) => {
+                    const aStatic = a.source === 'legacy-cron' ? 0 : 1;
+                    const bStatic = b.source === 'legacy-cron' ? 0 : 1;
+                    return aStatic - bStatic || (a.name || a.id).localeCompare(b.name || b.id, 'zh-CN');
+                });
+                sorted.forEach(job => jobList.appendChild(buildCard(job)));
+            }
+
+            // ── Load job list from server ──────────────────────────────────
+            async function loadJobs() {
+                try {
+                    const headers = await getAuthHeaders();
+                    const resp = await fetch(getBasePath() + '/admin/automations', { headers });
+                    if (!resp.ok) {
+                        showStatus('加载失败 (' + resp.status + ')', true);
+                        return;
+                    }
+                    const data = await resp.json();
+                    renderJobs(data.items || []);
+                } catch (e) {
+                    showStatus('加载失败: ' + e.message, true);
+                }
+            }
+
+            // ── Load history for a specific job ───────────────────────────
+            async function loadHistory(job) {
+                const id = job.id;
+                const name = job.name || job.id;
+                currentHistJob = job;
+                histTitle.textContent = `${name} · 执行历史`;
+                histList.innerHTML = '<div style="opacity:0.5;font-size:0.8rem;padding:8px">加载中…</div>';
+                formSection.style.display = 'none';
+                sessSection.style.display = 'none';
+                histSection.style.display = '';
+                sessViewBtn.style.display = 'none';
+
+                try {
+                    const headers = await getAuthHeaders();
+                    const resp = await fetch(getBasePath() + '/admin/automations/' + encodeURIComponent(id), { headers });
+                    if (!resp.ok) {
+                        histList.innerHTML = '<div style="color:#ef4444;font-size:0.8rem;padding:8px">加载失败 (' + resp.status + ')</div>';
+                        return;
+                    }
+                    const data = await resp.json();
+                    renderHistory(data.runState);
+                } catch (e) {
+                    histList.innerHTML = `<div style="color:#ef4444;font-size:0.8rem;padding:8px">加载失败: ${e.message}</div>`;
+                }
+            }
+
+            function renderHistory(runState) {
+                histList.innerHTML = '';
+                // Show "查看完整会话" button if there's a session to view
+                if (currentHistJob) {
+                    sessViewBtn.style.display = '';
+                }
+                if (!runState) {
+                    histList.innerHTML = '<div style="opacity:0.5;font-size:0.8rem;padding:8px">无历史记录。</div>';
+                    return;
+                }
+
+                // Last run summary
+                if (runState.lastRunAtUtc) {
+                    const summary = document.createElement('div');
+                    summary.style.cssText = 'font-size:0.78rem;opacity:0.65;margin-bottom:10px;padding:0 2px';
+                    const outcomeLabel = runState.outcome === 'success' ? '✅ 成功'
+                        : runState.outcome === 'failure' ? '❌ 失败'
+                        : runState.outcome || '—';
+                    summary.textContent = `上次执行: ${relTime(runState.lastRunAtUtc)} · ${outcomeLabel}`;
+                    if (runState.messagePreview) {
+                        const prev = document.createElement('div');
+                        prev.style.cssText = 'opacity:0.5;margin-top:2px;font-size:0.73rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+                        prev.textContent = runState.messagePreview;
+                        summary.appendChild(prev);
+                    }
+                    histList.appendChild(summary);
+                }
+
+                const runs = runState.recentRuns || [];
+                if (runs.length === 0) {
+                    const empty = document.createElement('div');
+                    empty.style.cssText = 'opacity:0.5;font-size:0.8rem;padding:8px 2px';
+                    empty.textContent = '暂无详细执行记录。';
+                    histList.appendChild(empty);
+                    return;
+                }
+
+                runs.forEach(run => {
+                    const row = document.createElement('div');
+                    row.className = 'cron-history-row';
+                    row.style.cursor = 'pointer';
+
+                    const dotEl = document.createElement('div');
+                    dotEl.className = 'cron-history-dot ' + (run.outcome === 'success' ? 'ok' : run.outcome === 'failure' ? 'error' : '');
+
+                    const meta = document.createElement('div');
+                    meta.className = 'cron-history-meta';
+                    const tokens = (run.inputTokens || run.outputTokens)
+                        ? ` · ${(run.inputTokens || 0) + (run.outputTokens || 0)} tokens`
+                        : '';
+                    meta.textContent = `${relTime(run.ranAtUtc)}${tokens}`;
+
+                    const prev = document.createElement('div');
+                    prev.className = 'cron-history-preview';
+                    prev.textContent = run.messagePreview || '—';
+                    prev.title = run.messagePreview || '';
+
+                    // expandable detail panel
+                    const detail = document.createElement('div');
+                    detail.className = 'cron-history-detail';
+                    detail.style.display = 'none';
+
+                    const outcomeLabel = run.outcome === 'success' ? '✅ 成功'
+                        : run.outcome === 'failure' ? '❌ 失败'
+                        : run.outcome || '—';
+                    const ranAt = run.ranAtUtc ? new Date(run.ranAtUtc).toLocaleString() : '—';
+                    detail.innerHTML =
+                        `<div class="cron-history-detail-row"><span>执行时间</span><span>${ranAt}</span></div>` +
+                        `<div class="cron-history-detail-row"><span>结果</span><span>${outcomeLabel}</span></div>` +
+                        `<div class="cron-history-detail-row"><span>输入 tokens</span><span>${run.inputTokens ?? 0}</span></div>` +
+                        `<div class="cron-history-detail-row"><span>输出 tokens</span><span>${run.outputTokens ?? 0}</span></div>` +
+                        (run.messagePreview
+                            ? `<div class="cron-history-detail-preview">${run.messagePreview.replace(/</g, '&lt;')}</div>`
+                            : '');
+
+                    row.addEventListener('click', () => {
+                        const isOpen = detail.style.display !== 'none';
+                        detail.style.display = isOpen ? 'none' : 'block';
+                        row.classList.toggle('cron-history-row-open', !isOpen);
+                    });
+
+                    row.append(dotEl, meta, prev);
+                    histList.appendChild(row);
+                    histList.appendChild(detail);
+                });
+            }
+
+            // ── Open add/edit form ─────────────────────────────────────────
+            function openForm(job) {
+                editingId = job ? job.id : null;
+                formTitle.textContent = job ? '编辑定时任务' : '新建定时任务';
+                formError.style.display = 'none';
+                histSection.style.display = 'none';
+
+                if (job) {
+                    fName.value     = job.name || '';
+                    fPrompt.value   = job.prompt || '';
+                    fTimezone.value = job.timezone || '';
+                    fModel.value    = job.modelId || '';
+                    fChannel.value  = job.deliveryChannelId || '';
+                    fRecipient.value = job.deliveryRecipientId || '';
+                    fEnabled.checked = job.enabled !== false;
+                    applyScheduleToPreset(job.schedule || '');
+                } else {
+                    fName.value     = '';
+                    fPrompt.value   = '';
+                    fTimezone.value = 'Asia/Shanghai';
+                    fModel.value    = '';
+                    fChannel.value  = '';
+                    fRecipient.value = '';
+                    fEnabled.checked = true;
+                    dailyTime.value = '09:00';
+                    dailyWeekday.checked = false;
+                    intervalVal.value = '1';
+                    intervalUnit.value = 'hour';
+                    fScheduleRaw.value = '';
+                    setPresetTab('daily');
+                }
+
+                formSection.style.display = '';
+                addBtn.style.display = 'none';
+                fName.focus();
+            }
+
+            function closeForm() {
+                formSection.style.display = 'none';
+                histSection.style.display = 'none';
+                addBtn.style.display = '';
+                editingId = null;
+            }
+
+            // ── Save (create or update) ────────────────────────────────────
+            async function saveJob() {
+                const name = fName.value.trim();
+                const schedule = buildSchedule();
+                const prompt = fPrompt.value.trim();
+
+                if (!name) {
+                    formError.textContent = '请填写任务名称。';
+                    formError.style.display = '';
+                    return;
+                }
+                if (!schedule) {
+                    formError.textContent = '请设置执行计划。';
+                    formError.style.display = '';
+                    return;
+                }
+                if (!prompt) {
+                    formError.textContent = '请填写提示词。';
+                    formError.style.display = '';
+                    return;
+                }
+                formError.style.display = 'none';
+
+                const payload = {
+                    id: editingId || '',
+                    name,
+                    schedule,
+                    prompt,
+                    timezone: fTimezone.value.trim() || null,
+                    modelId: fModel.value.trim() || null,
+                    deliveryChannelId: fChannel.value.trim() || null,
+                    deliveryRecipientId: fRecipient.value.trim() || null,
+                    enabled: fEnabled.checked,
+                    source: editingId ? undefined : 'webchat'
+                };
+
+                try {
+                    const headers = Object.assign({ 'Content-Type': 'application/json' }, await getAuthHeaders());
+                    let resp;
+                    if (editingId) {
+                        resp = await fetch(getBasePath() + '/admin/automations/' + encodeURIComponent(editingId), {
+                            method: 'PUT',
+                            headers,
+                            body: JSON.stringify(payload)
+                        });
+                    } else {
+                        resp = await fetch(getBasePath() + '/admin/automations', {
+                            method: 'POST',
+                            headers,
+                            body: JSON.stringify(payload)
+                        });
+                    }
+                    if (!resp.ok) {
+                        const err = await resp.json().catch(() => ({ error: '保存失败 (' + resp.status + ')' }));
+                        formError.textContent = err.error || '保存失败 (' + resp.status + ')';
+                        formError.style.display = '';
+                        return;
+                    }
+                    closeForm();
+                    showStatus('保存成功！', false);
+                    await loadJobs();
+                } catch (e) {
+                    formError.textContent = '保存失败: ' + e.message;
+                    formError.style.display = '';
+                }
+            }
+
+            // ── Delete a job ──────────────────────────────────────────────
+            async function deleteJob(id, name) {
+                if (!confirm(`确定删除定时任务 "${name}"？`)) return;
+                try {
+                    const headers = Object.assign({ 'Content-Type': 'application/json' }, await getAuthHeaders());
+                    const resp = await fetch(getBasePath() + '/admin/automations/' + encodeURIComponent(id), {
+                        method: 'DELETE',
+                        headers
+                    });
+                    if (!resp.ok) {
+                        const err = await resp.json().catch(() => ({ error: '删除失败 (' + resp.status + ')' }));
+                        showStatus(err.error || '删除失败 (' + resp.status + ')', true);
+                        return;
+                    }
+                    showStatus('已删除。', false);
+                    await loadJobs();
+                } catch (e) {
+                    showStatus('删除失败: ' + e.message, true);
+                }
+            }
+
+            // ── Load full session conversation ─────────────────────────────
+            async function loadSession() {
+                if (!currentHistJob) return;
+                const sessionId = currentHistJob.sessionId || ('automation:' + currentHistJob.id);
+                const label = currentHistJob.name || currentHistJob.id;
+                sessTitle.textContent = `${label} · 完整会话`;
+                sessList.innerHTML = '<div style="opacity:0.5;font-size:0.8rem;padding:8px">加载中…</div>';
+                histSection.style.display = 'none';
+                sessSection.style.display = '';
+
+                try {
+                    const headers = await getAuthHeaders();
+                    const resp = await fetch(getBasePath() + '/admin/sessions/' + encodeURIComponent(sessionId), { headers });
+                    if (resp.status === 404) {
+                        sessList.innerHTML = '<div style="opacity:0.5;font-size:0.8rem;padding:8px">暂无会话记录（该任务尚未执行过）。</div>';
+                        return;
+                    }
+                    if (!resp.ok) {
+                        sessList.innerHTML = `<div style="color:#ef4444;font-size:0.8rem;padding:8px">加载失败 (${resp.status})</div>`;
+                        return;
+                    }
+                    const data = await resp.json();
+                    renderSession(data.session?.history || []);
+                } catch (e) {
+                    sessList.innerHTML = `<div style="color:#ef4444;font-size:0.8rem;padding:8px">加载失败: ${e.message}</div>`;
+                }
+            }
+
+            function renderSession(history) {
+                sessList.innerHTML = '';
+                if (!history || history.length === 0) {
+                    sessList.innerHTML = '<div style="opacity:0.5;font-size:0.8rem;padding:8px">暂无对话记录。</div>';
+                    return;
+                }
+                // Filter out system-only turns (tool-only with no content, etc.)
+                history.forEach(turn => {
+                    if (!turn.content && (!turn.toolCalls || turn.toolCalls.length === 0)) return;
+                    const wrap = document.createElement('div');
+                    wrap.className = 'cron-sess-turn cron-sess-turn-' + (turn.role === 'user' ? 'user' : 'assistant');
+
+                    const header = document.createElement('div');
+                    header.className = 'cron-sess-turn-header';
+                    const roleLabel = turn.role === 'user' ? '指令' : 'AI 回复';
+                    const ts = turn.timestamp ? new Date(turn.timestamp).toLocaleString('zh-CN') : '';
+                    header.textContent = roleLabel + (ts ? '  ' + ts : '');
+
+                    const body = document.createElement('div');
+                    body.className = 'cron-sess-turn-body';
+                    body.textContent = turn.content || '';
+
+                    wrap.appendChild(header);
+                    wrap.appendChild(body);
+
+                    if (turn.toolCalls && turn.toolCalls.length > 0) {
+                        turn.toolCalls.forEach(tc => {
+                            const tcEl = document.createElement('div');
+                            tcEl.className = 'cron-sess-tool-call';
+                            tcEl.textContent = `🔧 ${tc.toolName}`;
+                            tcEl.title = tc.arguments || '';
+                            wrap.appendChild(tcEl);
+                        });
+                    }
+
+                    sessList.appendChild(wrap);
+                });
+                // Scroll to bottom
+                sessList.scrollTop = sessList.scrollHeight;
+            }
+
+            // ── Run now ───────────────────────────────────────────────────
+            async function runJob(id, nameEl) {
+                try {
+                    const headers = Object.assign({ 'Content-Type': 'application/json' }, await getAuthHeaders());
+                    const resp = await fetch(getBasePath() + '/admin/automations/' + encodeURIComponent(id) + '/run', {
+                        method: 'POST',
+                        headers
+                    });
+                    if (!resp.ok) {
+                        const err = await resp.json().catch(() => ({ error: '执行失败 (' + resp.status + ')' }));
+                        showStatus(err.error || '执行失败 (' + resp.status + ')', true);
+                        return;
+                    }
+                    showStatus('已触发立即执行！', false);
+                } catch (e) {
+                    showStatus('执行失败: ' + e.message, true);
+                }
+            }
+
+            // ── Event wiring ──────────────────────────────────────────────
+            openBtn.addEventListener('click', async () => {
+                overlay.classList.add('open');
+                closeForm();
+                statusBar.style.display = 'none';
+                await loadJobs();
+            });
+
+            closeBtn.addEventListener('click', () => {
+                overlay.classList.remove('open');
+                closeForm();
+            });
+
+            overlay.addEventListener('click', e => {
+                if (e.target === overlay) {
+                    overlay.classList.remove('open');
+                    closeForm();
+                }
+            });
+
+            refreshBtn.addEventListener('click', loadJobs);
+            addBtn.addEventListener('click', () => openForm(null));
+            cancelBtn.addEventListener('click', closeForm);
+            histCloseBtn.addEventListener('click', closeForm);
+            sessViewBtn.addEventListener('click', loadSession);
+            sessCloseBtn.addEventListener('click', () => {
+                sessSection.style.display = 'none';
+                histSection.style.display = '';
+            });
+            saveBtn.addEventListener('click', saveJob);
+        })();
+        // ---
+
+        // ─── Digital Employee Management ──────────────────────────────────────
+        (function () {
+            const overlay   = document.getElementById('de-overlay');
+            const openBtn   = document.getElementById('de-panel-btn');
+            const closeBtn  = document.getElementById('de-close-btn');
+            const statusBar = document.getElementById('de-panel-status');
+
+            // Tabs
+            const tabList     = document.getElementById('de-tab-list');
+            const tabSkillPkg = document.getElementById('de-tab-skill-pkg');
+            const tabPkg      = document.getElementById('de-tab-pkg');
+            const panelList   = document.getElementById('de-panel-list');
+            const panelSkillPkg = document.getElementById('de-panel-skill-pkg');
+            const panelPkg    = document.getElementById('de-panel-pkg');
+
+            // Skills list tab
+            const skillListEl = document.getElementById('de-skill-list');
+            const refreshBtn  = document.getElementById('de-refresh-btn');
+
+            // Skill ZIP upload tab
+            const skillDropzone     = document.getElementById('de-skill-dropzone');
+            const skillPkgInput     = document.getElementById('de-skill-pkg-file-input');
+            const skillPkgFilename  = document.getElementById('de-skill-pkg-filename');
+            const skillPkgUploadBtn = document.getElementById('de-skill-pkg-upload-btn');
+            const skillPkgResult    = document.getElementById('de-skill-pkg-result');
+            let   skillPkgFile      = null;
+
+            // Package upload tab
+            const pkgDropzone  = document.getElementById('de-pkg-dropzone');
+            const pkgFileInput = document.getElementById('de-pkg-file-input');
+            const pkgFilename  = document.getElementById('de-pkg-filename');
+            const pkgUploadBtn = document.getElementById('de-pkg-upload-btn');
+            const pkgResult    = document.getElementById('de-pkg-result');
+            let   pkgFile      = null;
+
+            // ── Utilities ─────────────────────────────────────────────────
+            function escHtml(s) {
+                return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            }
+
+            function showStatus(msg, isErr) {
+                statusBar.textContent = msg;
+                statusBar.className = 'mcp-panel-status ' + (isErr ? 'err' : 'ok');
+                statusBar.style.display = 'block';
+            }
+
+            function hideStatus() { statusBar.style.display = 'none'; }
+
+            function switchTab(tab) {
+                tabList.classList.toggle('active', tab === 'list');
+                tabSkillPkg.classList.toggle('active', tab === 'skill-pkg');
+                tabPkg.classList.toggle('active', tab === 'pkg');
+                panelList.style.display     = tab === 'list'      ? '' : 'none';
+                panelSkillPkg.style.display = tab === 'skill-pkg' ? '' : 'none';
+                panelPkg.style.display      = tab === 'pkg'       ? '' : 'none';
+                hideStatus();
+            }
+
+            // ── Skills List ───────────────────────────────────────────────
+            async function loadSkills() {
+                skillListEl.innerHTML = '<div class="de-skill-loading mcp-hint">加载中…</div>';
+                try {
+                    const headers = await getAuthHeaders();
+                    const resp = await fetch(getBasePath() + '/admin/skills', { headers });
+                    if (!resp.ok) {
+                        skillListEl.innerHTML = '<div class="de-skill-loading mcp-hint de-skill-err">加载失败（HTTP ' + resp.status + '）</div>';
+                        return;
+                    }
+                    const data = await resp.json();
+                    renderSkillList(data.skills || []);
+                } catch (e) {
+                    skillListEl.innerHTML = '<div class="de-skill-loading mcp-hint de-skill-err">加载失败：' + escHtml(e.message) + '</div>';
+                }
+            }
+
+            function renderSkillList(skills) {
+                if (!skills.length) {
+                    skillListEl.innerHTML = '<div class="de-skill-loading mcp-hint">暂无已安装的技能</div>';
+                    return;
+                }
+                skillListEl.innerHTML = skills.map(s => {
+                    const emoji    = s.emoji || '🔧';
+                    const src      = s.source || 'builtin';
+                    const isWs     = !!s.isUserInstalled;
+                    const srcLabel = src === 'workspace' ? '用户安装' : src === 'plugin' ? '插件' : '内置';
+                    const srcCls   = src === 'workspace' ? 'workspace' : src === 'plugin' ? 'plugin' : 'builtin';
+                    const delBtn   = isWs
+                        ? `<button class="mcp-icon-btn danger de-skill-del-btn" data-skill="${escHtml(s.name)}" title="删除技能 ${escHtml(s.name)}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg></button>`
+                        : '';
+                    return `<div class="de-skill-card">
+                        <div class="de-skill-emoji">${emoji}</div>
+                        <div class="de-skill-info">
+                            <div class="de-skill-name">${escHtml(s.name)}</div>
+                            ${s.description ? `<div class="de-skill-desc">${escHtml(s.description)}</div>` : ''}
+                        </div>
+                        <span class="de-skill-badge ${srcCls}">${srcLabel}</span>
+                        ${delBtn}
+                    </div>`;
+                }).join('');
+
+                skillListEl.querySelectorAll('.de-skill-del-btn').forEach(btn => {
+                    btn.addEventListener('click', async () => {
+                        const name = btn.dataset.skill;
+                        if (!confirm(`确定删除技能 "${name}"？此操作不可撤销。`)) return;
+                        btn.disabled = true;
+                        try {
+                            const headers = await getAuthHeaders();
+                            const resp = await fetch(getBasePath() + '/admin/skills/' + encodeURIComponent(name), {
+                                method: 'DELETE',
+                                headers
+                            });
+                            const d = await resp.json().catch(() => null);
+                            if (resp.ok && d && d.success) {
+                                showStatus('✅ 已删除技能 "' + name + '"，当前共 ' + d.totalLoaded + ' 个技能', false);
+                                await loadSkills();
+                            } else {
+                                showStatus('❌ 删除失败：' + ((d && d.error) || 'HTTP ' + resp.status), true);
+                                btn.disabled = false;
+                            }
+                        } catch (e) {
+                            showStatus('❌ 删除失败：' + e.message, true);
+                            btn.disabled = false;
+                        }
+                    });
+                });
+            }
+
+            // ── Skill ZIP Upload ──────────────────────────────────────────
+            function setSkillPkgFile(file) {
+                if (!file) return;
+                skillPkgFile = file;
+                skillPkgFilename.textContent = file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)';
+                skillPkgFilename.style.display = 'block';
+                skillPkgUploadBtn.disabled = false;
+                skillPkgResult.style.display = 'none';
+            }
+
+            skillPkgInput.addEventListener('change', () => {
+                if (skillPkgInput.files.length) setSkillPkgFile(skillPkgInput.files[0]);
+            });
+
+            skillDropzone.addEventListener('dragover', e => { e.preventDefault(); skillDropzone.classList.add('de-drag-over'); });
+            skillDropzone.addEventListener('dragleave', () => skillDropzone.classList.remove('de-drag-over'));
+            skillDropzone.addEventListener('drop', e => {
+                e.preventDefault();
+                skillDropzone.classList.remove('de-drag-over');
+                if (e.dataTransfer.files.length) setSkillPkgFile(e.dataTransfer.files[0]);
+            });
+
+            skillPkgUploadBtn.addEventListener('click', async () => {
+                if (!skillPkgFile) return;
+                skillPkgUploadBtn.disabled = true;
+                skillPkgUploadBtn.textContent = '上传中…';
+                skillPkgResult.style.display = 'none';
+                hideStatus();
+                try {
+                    const headers = await getAuthHeaders();
+                    const formData = new FormData();
+                    formData.append('file', skillPkgFile);
+                    const resp = await fetch(getBasePath() + '/admin/skills/upload', {
+                        method: 'POST',
+                        headers,
+                        body: formData
+                    });
+                    const data = await resp.json().catch(() => null);
+                    if (resp.ok && data && data.success) {
+                        skillPkgResult.innerHTML =
+                            '<strong>技能安装成功</strong><br>当前技能总数：' + (data.totalLoaded ?? 0) +
+                            (data.loadedNames && data.loadedNames.length
+                                ? '<br><span style="font-size:.78rem;opacity:.7">' + data.loadedNames.map(escHtml).join('、') + '</span>'
+                                : '');
+                        skillPkgResult.className = 'de-result-box ok';
+                        skillPkgResult.style.display = 'block';
+                        showStatus('✅ 技能安装成功', false);
+                        panelList.dataset.dirty = '1';
+                    } else {
+                        const msg = (data && data.error) || ('HTTP ' + resp.status);
+                        skillPkgResult.innerHTML = '<strong>安装失败：</strong>' + escHtml(msg);
+                        skillPkgResult.className = 'de-result-box err';
+                        skillPkgResult.style.display = 'block';
+                        showStatus('❌ 安装失败：' + msg, true);
+                    }
+                } catch (e) {
+                    showStatus('❌ 请求失败：' + e.message, true);
+                } finally {
+                    skillPkgUploadBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> 上传技能';
+                    skillPkgUploadBtn.disabled = !skillPkgFile;
+                }
+            });
+
+            // ── Package Upload ────────────────────────────────────────────
+            function setPkgFile(file) {
+                if (!file) return;
+                pkgFile = file;
+                pkgFilename.textContent = file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)';
+                pkgFilename.style.display = 'block';
+                pkgUploadBtn.disabled = false;
+                pkgResult.style.display = 'none';
+            }
+
+            pkgFileInput.addEventListener('change', () => {
+                if (pkgFileInput.files.length) setPkgFile(pkgFileInput.files[0]);
+            });
+
+            pkgDropzone.addEventListener('dragover', e => { e.preventDefault(); pkgDropzone.classList.add('de-drag-over'); });
+            pkgDropzone.addEventListener('dragleave', () => pkgDropzone.classList.remove('de-drag-over'));
+            pkgDropzone.addEventListener('drop', e => {
+                e.preventDefault();
+                pkgDropzone.classList.remove('de-drag-over');
+                if (e.dataTransfer.files.length) setPkgFile(e.dataTransfer.files[0]);
+            });
+
+            pkgUploadBtn.addEventListener('click', async () => {
+                if (!pkgFile) return;
+                pkgUploadBtn.disabled = true;
+                pkgUploadBtn.textContent = '上传中…';
+                pkgResult.style.display = 'none';
+                hideStatus();
+                try {
+                    const headers = await getAuthHeaders();
+                    const formData = new FormData();
+                    formData.append('file', pkgFile);
+                    const resp = await fetch(getBasePath() + '/admin/digital-employee/upload', {
+                        method: 'POST',
+                        headers,
+                        body: formData
+                    });
+                    const data = await resp.json().catch(() => null);
+                    if (resp.ok && data && data.success) {
+                        const lines = [];
+                        if (data.name) lines.push('<strong>模板名称：</strong>' + escHtml(data.name));
+                        lines.push('<strong>安装技能数：</strong>' + (data.skillsInstalled ?? 0));
+                        if (data.totalSkillsLoaded != null) lines.push('<strong>当前技能总数：</strong>' + data.totalSkillsLoaded);
+                        if (data.installedFiles && data.installedFiles.length) {
+                            lines.push('<strong>写入文件：</strong>');
+                            lines.push('<ul class="de-file-list">' +
+                                data.installedFiles.map(f => '<li>' + escHtml(f) + '</li>').join('') +
+                                '</ul>');
+                        }
+                        pkgResult.innerHTML = lines.join('<br>');
+                        pkgResult.className = 'de-result-box ok';
+                        pkgResult.style.display = 'block';
+                        showStatus('✅ 数字员工模板安装成功', false);
+                        panelList.dataset.dirty = '1';
+                    } else {
+                        const msg = (data && data.error) || ('HTTP ' + resp.status);
+                        pkgResult.innerHTML = '<strong>安装失败：</strong>' + escHtml(msg);
+                        pkgResult.className = 'de-result-box err';
+                        pkgResult.style.display = 'block';
+                        showStatus('❌ 安装失败：' + msg, true);
+                    }
+                } catch (e) {
+                    showStatus('❌ 请求失败：' + e.message, true);
+                } finally {
+                    pkgUploadBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> 上传并安装';
+                    pkgUploadBtn.disabled = !pkgFile;
+                }
+            });
+
+            // ── Event Wiring ──────────────────────────────────────────────
+            openBtn.addEventListener('click', async () => {
+                overlay.classList.add('open');
+                hideStatus();
+                switchTab('list');
+                await loadSkills();
+            });
+
+            closeBtn.addEventListener('click', () => overlay.classList.remove('open'));
+            overlay.addEventListener('click', e => { if (e.target === overlay) overlay.classList.remove('open'); });
+            refreshBtn.addEventListener('click', () => loadSkills());
+
+            tabList.addEventListener('click', async () => {
+                switchTab('list');
+                if (panelList.dataset.dirty || !skillListEl.querySelector('.de-skill-card')) {
+                    delete panelList.dataset.dirty;
+                    await loadSkills();
+                }
+            });
+            tabSkillPkg.addEventListener('click', () => switchTab('skill-pkg'));
+            tabPkg.addEventListener('click', () => switchTab('pkg'));
+        })();
+        // ---
+
+        // ─── Workspace File Manager ───────────────────────────────────────────
+        (function () {
+            const overlay      = document.getElementById('wf-overlay');
+            const openBtn      = document.getElementById('wf-panel-btn');
+            const closeBtn     = document.getElementById('wf-close-btn');
+            const statusBar    = document.getElementById('wf-panel-status');
+
+            // Tabs
+            const tabUpload    = document.getElementById('wf-tab-upload');
+            const tabDownload  = document.getElementById('wf-tab-download');
+            const tabBrowse    = document.getElementById('wf-tab-browse');
+            const panelUpload  = document.getElementById('wf-panel-upload');
+            const panelDownload = document.getElementById('wf-panel-download');
+            const panelBrowse  = document.getElementById('wf-panel-browse');
+
+            // Upload tab
+            const uploadDirInput   = document.getElementById('wf-upload-dir');
+            const uploadDropzone   = document.getElementById('wf-upload-dropzone');
+            const uploadFileInput  = document.getElementById('wf-upload-file-input');
+            const uploadFilenames  = document.getElementById('wf-upload-filenames');
+            const uploadBtn        = document.getElementById('wf-upload-btn');
+            const uploadResult     = document.getElementById('wf-upload-result');
+            let   uploadFiles      = [];
+
+            // Download tab
+            const downloadPathInput = document.getElementById('wf-download-path');
+            const downloadBtn       = document.getElementById('wf-download-btn');
+            const downloadResult    = document.getElementById('wf-download-result');
+
+            // Browse tab
+            const browsePathInput  = document.getElementById('wf-browse-path');
+            const browseDepthInput = document.getElementById('wf-browse-depth');
+            const browseBtn        = document.getElementById('wf-browse-btn');
+            const browseResult     = document.getElementById('wf-browse-result');
+
+            // ── Utilities ─────────────────────────────────────────────────
+            function escHtml(s) {
+                return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            }
+
+            function showStatus(msg, isErr) {
+                statusBar.textContent = msg;
+                statusBar.className = 'mcp-panel-status ' + (isErr ? 'err' : 'ok');
+                statusBar.style.display = 'block';
+            }
+
+            function hideStatus() { statusBar.style.display = 'none'; }
+
+            function switchTab(tab) {
+                tabUpload.classList.toggle('active', tab === 'upload');
+                tabDownload.classList.toggle('active', tab === 'download');
+                tabBrowse.classList.toggle('active', tab === 'browse');
+                panelUpload.style.display   = tab === 'upload'   ? '' : 'none';
+                panelDownload.style.display = tab === 'download' ? '' : 'none';
+                panelBrowse.style.display   = tab === 'browse'   ? '' : 'none';
+                hideStatus();
+            }
+
+            // ── Upload ────────────────────────────────────────────────────
+            function setUploadFiles(files) {
+                uploadFiles = Array.from(files);
+                if (uploadFiles.length === 0) {
+                    uploadFilenames.style.display = 'none';
+                    uploadFilenames.textContent = '';
+                    uploadBtn.disabled = true;
+                } else {
+                    const names = uploadFiles.map(f => f.name).join('、');
+                    uploadFilenames.textContent = uploadFiles.length === 1
+                        ? uploadFiles[0].name
+                        : uploadFiles.length + ' 个文件：' + names;
+                    uploadFilenames.style.display = 'block';
+                    uploadBtn.disabled = false;
+                }
+                uploadResult.style.display = 'none';
+            }
+
+            uploadFileInput.addEventListener('change', () => setUploadFiles(uploadFileInput.files));
+
+            uploadDropzone.addEventListener('dragover', e => {
+                e.preventDefault();
+                uploadDropzone.classList.add('drag-over');
+            });
+            uploadDropzone.addEventListener('dragleave', () => uploadDropzone.classList.remove('drag-over'));
+            uploadDropzone.addEventListener('drop', e => {
+                e.preventDefault();
+                uploadDropzone.classList.remove('drag-over');
+                if (e.dataTransfer.files.length) setUploadFiles(e.dataTransfer.files);
+            });
+
+            uploadBtn.addEventListener('click', async () => {
+                if (!uploadFiles.length) return;
+                uploadBtn.disabled = true;
+                hideStatus();
+                uploadResult.style.display = 'none';
+
+                const dir = uploadDirInput.value.trim();
+                const url = getBasePath() + '/admin/workspace/upload' + (dir ? '?dir=' + encodeURIComponent(dir) : '');
+
+                try {
+                    const headers = await getAuthHeaders();
+                    const fd = new FormData();
+                    uploadFiles.forEach(f => fd.append('files', f, f.name));
+
+                    const resp = await fetch(url, { method: 'POST', headers, body: fd });
+                    const data = await resp.json().catch(() => null);
+
+                    if (resp.ok && data && data.success) {
+                        const paths = (data.files || []).map(p => escHtml(p));
+                        uploadResult.innerHTML = '<strong>✅ 上传成功</strong>'
+                            + (paths.length
+                                ? '<ul style="margin:6px 0 0 0;padding-left:18px">' + paths.map(p => `<li>${p}</li>`).join('') + '</ul>'
+                                : '');
+                        uploadResult.style.display = 'block';
+                        showStatus('✅ 上传成功，共写入 ' + (data.files || []).length + ' 个文件', false);
+                        setUploadFiles([]);
+                        uploadFileInput.value = '';
+                    } else {
+                        const msg = (data && data.error) || 'HTTP ' + resp.status;
+                        uploadResult.innerHTML = '<strong>❌ 上传失败</strong><br>' + escHtml(msg);
+                        uploadResult.style.display = 'block';
+                        showStatus('❌ 上传失败：' + msg, true);
+                        uploadBtn.disabled = false;
+                    }
+                } catch (e) {
+                    uploadResult.innerHTML = '<strong>❌ 网络错误</strong><br>' + escHtml(e.message);
+                    uploadResult.style.display = 'block';
+                    showStatus('❌ 网络错误：' + e.message, true);
+                    uploadBtn.disabled = false;
+                }
+            });
+
+            // ── Download ──────────────────────────────────────────────────
+            downloadBtn.addEventListener('click', async () => {
+                const path = downloadPathInput.value.trim();
+                downloadBtn.disabled = true;
+                hideStatus();
+                downloadResult.style.display = 'none';
+
+                const url = getBasePath() + '/admin/workspace/download'
+                    + (path ? '?path=' + encodeURIComponent(path) : '');
+
+                try {
+                    const headers = await getAuthHeaders();
+                    const resp = await fetch(url, { headers });
+
+                    if (!resp.ok) {
+                        const data = await resp.json().catch(() => null);
+                        const msg = (data && data.error) || 'HTTP ' + resp.status;
+                        downloadResult.innerHTML = '<strong>❌ 下载失败</strong><br>' + escHtml(msg);
+                        downloadResult.style.display = 'block';
+                        showStatus('❌ 下载失败：' + msg, true);
+                        downloadBtn.disabled = false;
+                        return;
+                    }
+
+                    // Derive filename from Content-Disposition or URL
+                    const cd = resp.headers.get('Content-Disposition') || '';
+                    let filename = path ? path.replace(/.*[\\/]/, '') || 'download' : 'workspace.zip';
+                    const cdMatch = cd.match(/filename[^;=\n]*=["']?([^"';\n]*)["']?/);
+                    if (cdMatch && cdMatch[1].trim()) filename = cdMatch[1].trim();
+
+                    const blob = await resp.blob();
+                    const objUrl = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = objUrl;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    setTimeout(() => URL.revokeObjectURL(objUrl), 10000);
+
+                    downloadResult.innerHTML = '✅ 已触发下载：<code>' + escHtml(filename) + '</code>（' + (blob.size / 1024).toFixed(1) + ' KB）';
+                    downloadResult.style.display = 'block';
+                    showStatus('✅ 下载完成：' + filename, false);
+                } catch (e) {
+                    downloadResult.innerHTML = '<strong>❌ 网络错误</strong><br>' + escHtml(e.message);
+                    downloadResult.style.display = 'block';
+                    showStatus('❌ 网络错误：' + e.message, true);
+                } finally {
+                    downloadBtn.disabled = false;
+                }
+            });
+
+            // ── Browse ────────────────────────────────────────────────────
+            function renderTree(entries, indent) {
+                if (!entries || !entries.length) return '';
+                return entries.map(entry => {
+                    const pad  = '&nbsp;'.repeat(indent * 4);
+                    const icon = entry.isDir
+                        ? '<span style="color:#e6c07b">📁</span>'
+                        : '<span style="color:#abb2bf">📄</span>';
+                    const size = (!entry.isDir && entry.size != null)
+                        ? ' <span style="color:#5c6370;font-size:11px">(' + formatSize(entry.size) + ')</span>'
+                        : '';
+                    const line = `<div style="white-space:nowrap">${pad}${icon} ${escHtml(entry.name)}${size}</div>`;
+                    const children = entry.isDir && entry.children
+                        ? renderTree(entry.children, indent + 1)
+                        : '';
+                    return line + children;
+                }).join('');
+            }
+
+            function formatSize(bytes) {
+                if (bytes < 1024) return bytes + ' B';
+                if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+                return (bytes / 1048576).toFixed(1) + ' MB';
+            }
+
+            browseBtn.addEventListener('click', async () => {
+                const path  = browsePathInput.value.trim();
+                const depth = parseInt(browseDepthInput.value, 10);
+                browseBtn.disabled = true;
+                hideStatus();
+                browseResult.style.display = 'none';
+
+                let url = getBasePath() + '/admin/workspace/tree';
+                const params = new URLSearchParams();
+                if (path)  params.set('path', path);
+                if (!isNaN(depth)) params.set('depth', String(depth));
+                if ([...params].length) url += '?' + params.toString();
+
+                try {
+                    const headers = await getAuthHeaders();
+                    const resp = await fetch(url, { headers });
+                    const data = await resp.json().catch(() => null);
+
+                    if (resp.ok && data && data.success) {
+                        const rootLabel = data.root ? data.root : '（工作区根目录）';
+                        const treeHtml  = renderTree(data.entries || [], 0);
+                        browseResult.innerHTML = '<div style="color:#98c379;margin-bottom:6px">📂 ' + escHtml(rootLabel) + '</div>'
+                            + (treeHtml || '<div style="color:#5c6370">（空目录）</div>');
+                        browseResult.style.display = 'block';
+                        const count = countEntries(data.entries || []);
+                        showStatus('✅ 共 ' + count.dirs + ' 个目录，' + count.files + ' 个文件', false);
+                    } else {
+                        const msg = (data && data.error) || 'HTTP ' + resp.status;
+                        browseResult.innerHTML = '<span style="color:#e06c75">❌ ' + escHtml(msg) + '</span>';
+                        browseResult.style.display = 'block';
+                        showStatus('❌ 查询失败：' + msg, true);
+                    }
+                } catch (e) {
+                    browseResult.innerHTML = '<span style="color:#e06c75">❌ 网络错误：' + escHtml(e.message) + '</span>';
+                    browseResult.style.display = 'block';
+                    showStatus('❌ 网络错误：' + e.message, true);
+                } finally {
+                    browseBtn.disabled = false;
+                }
+            });
+
+            browsePathInput.addEventListener('keydown', e => { if (e.key === 'Enter') browseBtn.click(); });
+
+            function countEntries(entries) {
+                let dirs = 0, files = 0;
+                for (const e of entries) {
+                    if (e.isDir) { dirs++; if (e.children) { const c = countEntries(e.children); dirs += c.dirs; files += c.files; } }
+                    else files++;
+                }
+                return { dirs, files };
+            }
+
+            // ── Panel open/close ──────────────────────────────────────────
+            openBtn.addEventListener('click', () => {
+                overlay.classList.add('open');
+                hideStatus();
+                switchTab('upload');
+            });
+
+            closeBtn.addEventListener('click', () => overlay.classList.remove('open'));
+            overlay.addEventListener('click', e => { if (e.target === overlay) overlay.classList.remove('open'); });
+
+            tabUpload.addEventListener('click', () => switchTab('upload'));
+            tabDownload.addEventListener('click', () => switchTab('download'));
+            tabBrowse.addEventListener('click', () => switchTab('browse'));
         })();
         // ---

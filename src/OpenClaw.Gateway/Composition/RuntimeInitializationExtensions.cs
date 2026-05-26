@@ -50,10 +50,12 @@ internal static class RuntimeInitializationExtensions
         var services = ResolveRuntimeServices(app);
         var blockedPluginIds = services.PluginHealth.GetBlockedPluginIds();
         var channelComposition = await BuildChannelCompositionAsync(app, startup, services, loggerFactory);
+        var artifactRuntime = new SkillArtifactRuntime();
         var builtInTools = CreateBuiltInTools(
             config,
             services,
-            startup.WorkspacePath);
+            startup.WorkspacePath,
+            artifactRuntime);
         if (config.Plugins.Mcp.Enabled)
             await services.McpRegistry.RegisterToolsAsync(services.NativeRegistry, app.Lifetime.ApplicationStopping);
 
@@ -98,6 +100,7 @@ internal static class RuntimeInitializationExtensions
 
         var skillLogger = loggerFactory.CreateLogger("SkillLoader");
         var skills = SkillLoader.LoadAll(config.Skills, startup.WorkspacePath, skillLogger, combinedPluginSkillRoots);
+        artifactRuntime.ReplaceSkills(skills);
         if (skills.Count > 0)
             skillLogger.LogInformation("{Summary}", SkillPromptBuilder.BuildSummary(skills));
 
@@ -145,6 +148,10 @@ internal static class RuntimeInitializationExtensions
         //}
 
         var middlewarePipeline = CreateMiddlewarePipeline(config, loggerFactory, services.ContractGovernance, services.SessionManager);
+
+        // Keep SkillArtifactRuntime in sync whenever the agent reloads skills.
+        agentRuntime.SkillsReloaded += skills => artifactRuntime.ReplaceSkills(skills);
+
         var skillWatcher = new SkillWatcherService(
             config.Skills,
             startup.WorkspacePath,
@@ -157,7 +164,9 @@ internal static class RuntimeInitializationExtensions
             services.McpRegistry,
             agentRuntime,
             startup.WorkspacePath,
-            app.Services.GetRequiredService<ILogger<McpWorkspaceWatcherService>>());
+            app.Services.GetRequiredService<ILogger<McpWorkspaceWatcherService>>(),
+            app.Services.GetRequiredService<OpenClaw.Gateway.Mcp.McpConfigStore>());
+        app.Services.GetRequiredService<OpenClaw.Gateway.Mcp.McpWatcherHolder>().Watcher = mcpWatcher;
         mcpWatcher.Start(app.Lifetime.ApplicationStopping);
 
         await services.AutomationService.RefreshCacheAsync(app.Lifetime.ApplicationStopping);
@@ -250,6 +259,7 @@ internal static class RuntimeInitializationExtensions
             ToolSandbox = app.Services.GetService<IToolSandbox>(),
             Pipeline = app.Services.GetRequiredService<MessagePipeline>(),
             WebSocketChannel = app.Services.GetRequiredService<WebSocketChannel>(),
+            MediaCache = app.Services.GetRequiredService<MediaCacheStore>(),
             NativeRegistry = app.Services.GetRequiredService<NativePluginRegistry>(),
             McpRegistry = app.Services.GetRequiredService<McpServerToolRegistry>()
         };
@@ -292,6 +302,8 @@ internal static class RuntimeInitializationExtensions
 
         // Feishu is always added to adapters (enables hot-enable via config without restart)
         channelAdapters["feishu"] = app.Services.GetRequiredService<FeishuChannel>();
+        channelAdapters["dingtalk"] = app.Services.GetRequiredService<DingTalkChannel>();
+        channelAdapters["wecom"] = app.Services.GetRequiredService<WeComChannel>();
 
         // Restore persisted channel configs from volume storage (survives container restarts).
         // This must happen before StartAsync is called in PipelineExtensions.StartChannels.
@@ -301,6 +313,20 @@ internal static class RuntimeInitializationExtensions
         {
             app.Services.GetRequiredService<FeishuChannel>().SetRuntimeConfig(persistedFeishu);
             app.Logger.LogInformation("Restored persisted Feishu config from volume storage.");
+        }
+
+        var persistedDingTalk = channelStore.TryLoad("dingtalk", CoreJsonContext.Default.DingTalkChannelConfig);
+        if (persistedDingTalk is not null)
+        {
+            app.Services.GetRequiredService<DingTalkChannel>().SetRuntimeConfig(persistedDingTalk);
+            app.Logger.LogInformation("Restored persisted DingTalk config from volume storage.");
+        }
+
+        var persistedWeCom = channelStore.TryLoad("wecom", CoreJsonContext.Default.WeComChannelConfig);
+        if (persistedWeCom is not null)
+        {
+            app.Services.GetRequiredService<WeComChannel>().SetRuntimeConfig(persistedWeCom);
+            app.Logger.LogInformation("Restored persisted WeCom config from volume storage.");
         }
 
         var whatsAppWorkerHost = await CreateWhatsAppChannelAsync(app, startup, services, loggerFactory, channelAdapters);
@@ -402,7 +428,8 @@ internal static class RuntimeInitializationExtensions
                 config.Plugins.DynamicNative,
                 startup.RuntimeState,
                 loggerFactory.CreateLogger<NativeDynamicPluginHost>(),
-                blockedPluginIds);
+                blockedPluginIds,
+                services.SessionMetadataStore);
             nativeDynamicTools = await nativeDynamicPluginHost.LoadAsync(startup.WorkspacePath, app.Lifetime.ApplicationStopping);
 
             RegisterNativeDynamicChannels(channelAdapters, nativeDynamicPluginHost, runtimeDiagnostics);
@@ -511,7 +538,8 @@ internal static class RuntimeInitializationExtensions
     private static IReadOnlyList<ITool> CreateBuiltInTools(
         GatewayConfig config,
         RuntimeServices services,
-        string? workspacePath)
+        string? workspacePath,
+        SkillArtifactRuntime artifactRuntime)
     {
         var projectId = config.Memory.ProjectId
             ?? Environment.GetEnvironmentVariable("OPENCLAW_PROJECT")
@@ -522,7 +550,6 @@ internal static class RuntimeInitializationExtensions
             new ShellTool(config.Tooling),
             new FileReadTool(config.Tooling),
             new FileWriteTool(config.Tooling),
-            new PublishFileTool(config.Tooling),
             new ProcessTool(services.ProcessService, config.Tooling),
             new MemoryNoteTool(services.MemoryStore),
             new MemorySearchTool((IMemoryNoteSearch)services.MemoryStore),
@@ -530,7 +557,7 @@ internal static class RuntimeInitializationExtensions
             new SessionsTool(services.SessionManager, services.Pipeline.InboundWriter),
             new SessionSearchTool(services.SessionSearchStore),
             new ProfileReadTool(services.UserProfileStore),
-            new TodoTool(services.SessionMetadataStore),
+
             new AutomationTool(services.AutomationService, services.Pipeline),
             new VisionAnalyzeTool(services.GeminiMultimodalService),
             new TextToSpeechTool(services.TextToSpeechService),
@@ -547,7 +574,7 @@ internal static class RuntimeInitializationExtensions
             new AgentsListTool(config.Delegation),
 
             // System management tools
-            new CronTool(services.CronJobSource, services.Pipeline),
+            new CronTool(services.CronJobSource, services.Pipeline, services.AutomationService),
             new GatewayTool(services.RuntimeMetrics, services.SessionManager, config),
 
             // Communication & data tools
@@ -557,11 +584,23 @@ internal static class RuntimeInitializationExtensions
             new SessionsYieldTool(services.SessionManager, services.Pipeline, services.MemoryStore),
         };
 
+        if (config.Tooling.EnableTodoTool)
+            tools.Add(new TodoTool(services.SessionMetadataStore));
+
+        if (config.Tooling.EnableHandoffTool)
+            tools.Add(new HandoffTool(services.SessionMetadataStore, config.Handoff));
+
         if (config.Tooling.EnableBrowserTool)
             tools.Add(new BrowserTool(config.Tooling, services.RuntimeMetrics));
 
         if (config.Tooling.EnableXSearch)
             tools.Add(new XSearchTool());
+
+        if (config.Tooling.EnablePublishFile)
+            tools.Add(new PublishFileTool(config.Tooling));
+
+        if (config.Tooling.EnableEmitArtifact)
+            tools.Add(new EmitArtifactTool(services.MediaCache, services.WebSocketChannel, config, artifactRuntime));
 
         if (string.Equals(Environment.GetEnvironmentVariable("OPENCLAW_ENABLE_STREAMING_SMOKE_TOOL"), "1", StringComparison.Ordinal))
             tools.Add(new StreamingSmokeEchoTool());
@@ -1085,6 +1124,7 @@ internal static class RuntimeInitializationExtensions
         public IToolSandbox? ToolSandbox { get; init; }
         public required MessagePipeline Pipeline { get; init; }
         public required WebSocketChannel WebSocketChannel { get; init; }
+        public required MediaCacheStore MediaCache { get; init; }
         public required NativePluginRegistry NativeRegistry { get; init; }
         public required McpServerToolRegistry McpRegistry { get; init; }
     }

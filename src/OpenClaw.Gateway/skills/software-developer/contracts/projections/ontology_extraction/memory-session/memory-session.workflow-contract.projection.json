@@ -1,0 +1,133 @@
+{
+  "$schema": "../../../../../../../../docs/skill-projection-document.schema.json",
+  "template_type": "ontology_projection",
+  "projection_version": "1.0.0",
+  "projection": {
+    "projection_id": "software-developer-memory-session-workflow-contract-v1",
+    "projection_type": "workflow_contract_projection",
+    "target_name": "SoftwareDeveloperMemorySessionWorkflowContract",
+    "target_format": "workflow_contract",
+    "target_runtime": "openclaw_gateway",
+    "projection_goal": "Provide the software-developer skill with a workflow contract for recall injection, session persistence, retention sweeps, and lifecycle-sensitive cleanup steps.",
+    "source_slice": {
+      "path": "../../../../../../../../docs/OpenClaw-Session-Management.md",
+      "slice_topic": "session admission, persistence, recall, and retention lifecycle sequencing",
+      "schema_version": "1.0.0"
+    },
+    "intended_consumers": [
+      "software_developer_skill",
+      "workflow_orchestrator"
+    ]
+  },
+  "mapping_policy": {
+    "preserve_source_trace": true,
+    "preserve_constraints": true,
+    "relation_flattening_policy": "disallow_by_default",
+    "unresolved_item_policy": "block_or_escalate",
+    "dropped_item_policy": "disallow_drop",
+    "prompt_assumption_policy": "disallow_unmapped_terms"
+  },
+  "concept_mappings": [
+    {
+      "concept_id": "C1",
+      "projection_action": "map",
+      "target_kind": "workflow_input",
+      "target_name": "memoryConfig",
+      "target_path": "workflow.inputs.memoryConfig",
+      "source_ids": [
+        "S1",
+        "S3"
+      ],
+      "notes": "Expose memory configuration as a first-class workflow input so recall and retention operations start from bounded runtime settings."
+    },
+    {
+      "concept_id": "C2",
+      "projection_action": "map",
+      "target_kind": "workflow_input",
+      "target_name": "sessionState",
+      "target_path": "workflow.steps.loadSession.outputs.sessionState",
+      "source_ids": [
+        "S2",
+        "S3"
+      ],
+      "notes": "Make session state an explicit workflow payload so lifecycle decisions do not hide behind implicit cache reads."
+    },
+    {
+      "concept_id": "C3",
+      "projection_action": "map",
+      "target_kind": "workflow_input",
+      "target_name": "retentionSweepRequest",
+      "target_path": "workflow.steps.runRetentionSweep.inputs.request",
+      "source_ids": [
+        "S1"
+      ],
+      "notes": "Represent retention sweep inputs explicitly so dry-run, archive, and delete behaviors remain reviewable."
+    }
+  ],
+  "relation_mappings": [
+    {
+      "relation_id": "R1",
+      "projection_action": "map",
+      "target_kind": "workflow_edge",
+      "target_name": "SessionPersistencePrecedesRecallInjection",
+      "representation": "workflow_step_edge",
+      "source_ids": [
+        "S1",
+        "S2",
+        "S3"
+      ],
+      "notes": "Preserve the sequencing between loading or persisting session state and injecting recalled memory into prompt context."
+    }
+  ],
+  "constraint_mappings": [
+    {
+      "constraint_id": "K1",
+      "projection_action": "map",
+      "target_kind": "workflow_precondition",
+      "target_name": "InjectRecalledMemoryOnlyAsUntrustedUserContext",
+      "severity_mapping": "high -> blocking_workflow_precondition",
+      "source_ids": [
+        "S1"
+      ],
+      "notes": "Require the workflow to preserve the untrusted-data boundary when recalled memory is injected into the conversation context."
+    }
+  ],
+  "prompt_projection": {
+    "allowed_terms": [
+      "memory_config",
+      "session_state",
+      "retention_sweep",
+      "recall_injection"
+    ],
+    "forbidden_assumptions": [
+      "Do not model retention cleanup as an optional afterthought when capacity or TTL enforcement is in scope.",
+      "Do not inject recalled memory as system-level instructions in workflow designs."
+    ],
+    "required_clarifications": [],
+    "reasoning_paths": [
+      "load_session -> inject_recall -> process_turn -> persist_session",
+      "retention_policy -> run_retention_sweep -> archive_or_delete"
+    ],
+    "source_digest": [
+      "Primary source: docs/OpenClaw-Session-Management.md",
+      "Primary source: docs/openclaw-memory-recall-and-retention.md",
+      "Supporting source: docs/openclaw-gateway-startup-layers.md"
+    ]
+  },
+  "delivery_artifacts": [
+    {
+      "artifact_name": "memory-session.workflow-contract.json",
+      "artifact_type": "workflow_contract",
+      "path": "src/OpenClaw.Gateway/skills/software-developer/contracts/generated/memory-session/memory-session.workflow-contract.json",
+      "status": "planned"
+    }
+  ],
+  "dropped_items": [],
+  "open_questions": [],
+  "meta": {
+    "generated_at": "2026-04-22T00:00:00Z",
+    "generated_by": "ontology_extraction",
+    "workspace": "kingcrab",
+    "notes": "This consumer-skill workflow projection gives software-developer an orchestration-ready contract for memory/session lifecycle, recall injection, and retention operations."
+  }
+}

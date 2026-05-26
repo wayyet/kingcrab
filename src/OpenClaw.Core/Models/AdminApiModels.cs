@@ -251,6 +251,7 @@ public sealed class SkillInfoDto
     /// <summary>bundled | managed | workspace | extra | plugin</summary>
     public required string Source { get; init; }
     public bool IsUserInstalled { get; init; }
+    public OpenClaw.Core.Skills.SkillArtifactContract? ArtifactContract { get; init; }
 }
 
 public sealed class SkillsDetailResponse
@@ -264,4 +265,47 @@ public sealed class SkillMutationResponse
     public string? Error { get; init; }
     public int TotalLoaded { get; init; }
     public IReadOnlyList<string> LoadedNames { get; init; } = [];
+}
+
+public sealed class DigitalEmployeeUploadResponse
+{
+    public bool Success { get; init; }
+    public string? Error { get; init; }
+    /// <summary>Value of the 'name' field from manifest.json (if present).</summary>
+    public string? Name { get; init; }
+    /// <summary>Number of workspace skill directories installed/updated.</summary>
+    public int SkillsInstalled { get; init; }
+    /// <summary>Relative paths of all files written to the workspace.</summary>
+    public IReadOnlyList<string> InstalledFiles { get; init; } = [];
+    /// <summary>Number of skills loaded after the optional hot-reload step.</summary>
+    public int TotalSkillsLoaded { get; init; }
+}
+
+public sealed class WorkspaceUploadResponse
+{
+    public bool Success { get; init; }
+    public string? Error { get; init; }
+    /// <summary>Workspace-relative paths of all files written or extracted.</summary>
+    public List<string>? Files { get; init; }
+    public int FileCount { get; init; }
+}
+
+public sealed class WorkspaceTreeEntry
+{
+    public string Name { get; init; } = "";
+    /// <summary>Workspace-relative path (forward slashes).</summary>
+    public string Path { get; init; } = "";
+    public bool IsDir { get; init; }
+    /// <summary>File size in bytes; null for directories.</summary>
+    public long? Size { get; init; }
+    public List<WorkspaceTreeEntry>? Children { get; init; }
+}
+
+public sealed class WorkspaceTreeResponse
+{
+    public bool Success { get; init; }
+    public string? Error { get; init; }
+    /// <summary>The queried workspace-relative root path.</summary>
+    public string Root { get; init; } = "";
+    public List<WorkspaceTreeEntry>? Entries { get; init; }
 }

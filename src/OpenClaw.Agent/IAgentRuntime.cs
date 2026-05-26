@@ -26,9 +26,17 @@ public interface IAgentRuntime
         string userMessage,
         CancellationToken ct,
         ToolApprovalCallback? approvalCallback = null,
-        JsonElement? responseSchema = null);
+        JsonElement? responseSchema = null,
+        bool isSystemEvent = false);
 
     Task<IReadOnlyList<string>> ReloadSkillsAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Raised after <see cref="ReloadSkillsAsync"/> applies a fresh skill set, allowing
+    /// auxiliary subsystems (e.g., artifact runtime) to refresh their state without
+    /// re-running <c>SkillLoader</c>.
+    /// </summary>
+    event Action<IReadOnlyList<Core.Skills.SkillDefinition>>? SkillsReloaded;
 
     /// <summary>
     /// Applies a diff of workspace MCP tools: registers <paramref name="toAdd"/> and
@@ -43,5 +51,6 @@ public interface IAgentRuntime
         Session session,
         string userMessage,
         CancellationToken ct,
-        ToolApprovalCallback? approvalCallback = null);
+        ToolApprovalCallback? approvalCallback = null,
+        bool isSystemEvent = false);
 }

@@ -3,6 +3,7 @@ using System.Threading.Channels;
 using OpenClaw.Agent;
 using OpenClaw.Agent.Plugins;
 using OpenClaw.Core.Plugins;
+using OpenClaw.Gateway.Mcp;
 
 namespace OpenClaw.Gateway;
 
@@ -10,6 +11,11 @@ namespace OpenClaw.Gateway;
 /// Watches <c>{WorkspacePath}/.kingcrab/mcp.json</c> and hot-reloads workspace
 /// MCP servers without restarting the service.  Follows the same
 /// <c>Start(CancellationToken)</c> pattern as <see cref="SkillWatcherService"/>.
+/// <para>
+/// Also integrates with <see cref="McpConfigStore"/> so that configs saved via the
+/// admin API (stored in the memory data volume) are picked up immediately without
+/// relying on <see cref="FileSystemWatcher"/>.
+/// </para>
 /// </summary>
 internal sealed class McpWorkspaceWatcherService : IDisposable
 {
@@ -19,6 +25,7 @@ internal sealed class McpWorkspaceWatcherService : IDisposable
     private readonly McpServerToolRegistry _registry;
     private readonly IAgentRuntime _agentRuntime;
     private readonly string? _workspacePath;
+    private readonly McpConfigStore? _configStore;
     private readonly ILogger<McpWorkspaceWatcherService> _logger;
 
     // Bounded channel (capacity 1, DropOldest) acts as a debounce queue:
@@ -31,7 +38,6 @@ internal sealed class McpWorkspaceWatcherService : IDisposable
             SingleWriter = false,
         });
 
-    private FileSystemWatcher? _watcher;
     private bool _started;
     private bool _disposed;
 
@@ -39,13 +45,21 @@ internal sealed class McpWorkspaceWatcherService : IDisposable
         McpServerToolRegistry registry,
         IAgentRuntime agentRuntime,
         string? workspacePath,
-        ILogger<McpWorkspaceWatcherService> logger)
+        ILogger<McpWorkspaceWatcherService> logger,
+        McpConfigStore? configStore = null)
     {
         _registry = registry;
         _agentRuntime = agentRuntime;
         _workspacePath = workspacePath;
+        _configStore = configStore;
         _logger = logger;
     }
+
+    /// <summary>
+    /// Enqueues an immediate reload without waiting for a file-system event.
+    /// Called by the admin API after saving MCP config to <see cref="McpConfigStore"/>.
+    /// </summary>
+    public void TriggerReload() => _reloadChannel.Writer.TryWrite(true);
 
     /// <summary>Starts the file watcher and the background reload loop.</summary>
     public void Start(CancellationToken stoppingToken)
@@ -55,81 +69,16 @@ internal sealed class McpWorkspaceWatcherService : IDisposable
 
         _started = true;
 
-        // Perform an initial load if the file already exists at startup.
-        if (!string.IsNullOrEmpty(_workspacePath))
-        {
-            var initialFile = Path.Combine(_workspacePath, McpJsonRelativePath);
-            if (File.Exists(initialFile))
-                _reloadChannel.Writer.TryWrite(true);
+        // Trigger initial load if memory store or workspace file has a config.
+        var hasWorkspaceFile = !string.IsNullOrEmpty(_workspacePath) &&
+            File.Exists(Path.Combine(_workspacePath, McpJsonRelativePath));
 
-            StartWatcher(_workspacePath, stoppingToken);
-        }
-        else
-        {
-            _logger.LogInformation(
-                "McpWorkspaceWatcher: no workspace path configured; workspace MCP hot-reload disabled.");
-        }
+        if (_configStore is not null || hasWorkspaceFile)
+            _reloadChannel.Writer.TryWrite(true);
 
+        stoppingToken.Register(Dispose);
         _ = RunReloadLoopAsync(stoppingToken);
     }
-
-    // ── FileSystemWatcher ─────────────────────────────────────────────────────
-
-    private void StartWatcher(string watchRoot, CancellationToken stoppingToken)
-    {
-        // Watch the workspace root with subdirectory recursion so that we also
-        // get a Created event when the .kingcrab/ directory is created later.
-        if (!Directory.Exists(watchRoot))
-            return;
-
-        try
-        {
-            _watcher = new FileSystemWatcher(watchRoot)
-            {
-                IncludeSubdirectories = true,
-                Filter = "mcp.json",
-                NotifyFilter = NotifyFilters.FileName |
-                               NotifyFilters.LastWrite |
-                               NotifyFilters.CreationTime,
-                EnableRaisingEvents = true,
-            };
-
-            _watcher.Changed += OnFileEvent;
-            _watcher.Created += OnFileEvent;
-            _watcher.Deleted += OnFileEvent;
-            _watcher.Renamed += OnRenamedEvent;
-
-            stoppingToken.Register(Dispose);
-
-            _logger.LogInformation(
-                "McpWorkspaceWatcher: watching {Root} for .kingcrab/mcp.json changes.",
-                watchRoot);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "McpWorkspaceWatcher: failed to create FileSystemWatcher on {Root}. " +
-                "Workspace MCP hot-reload will be unavailable.", watchRoot);
-        }
-    }
-
-    private void OnFileEvent(object sender, FileSystemEventArgs e)
-    {
-        if (IsMcpJsonPath(e.FullPath))
-            _reloadChannel.Writer.TryWrite(true);
-    }
-
-    private void OnRenamedEvent(object sender, RenamedEventArgs e)
-    {
-        // Trigger on either the old or new name matching (handles atomic-write
-        // patterns that rename a temp file to mcp.json).
-        if (IsMcpJsonPath(e.FullPath) || IsMcpJsonPath(e.OldFullPath))
-            _reloadChannel.Writer.TryWrite(true);
-    }
-
-    private bool IsMcpJsonPath(string fullPath) =>
-        fullPath.EndsWith(Path.Combine(".kingcrab", "mcp.json"),
-            StringComparison.OrdinalIgnoreCase);
 
     // ── Reload loop ───────────────────────────────────────────────────────────
 
@@ -157,10 +106,25 @@ internal sealed class McpWorkspaceWatcherService : IDisposable
     {
         Dictionary<string, McpServerConfig>? servers = null;
 
-        if (!string.IsNullOrEmpty(_workspacePath))
+        // Priority 1: memory-store config (written by admin API, reliable in containers).
+        if (_configStore is not null)
+        {
+            servers = await _configStore.TryLoadServersAsync(ct).ConfigureAwait(false);
+            if (servers is null)
+                _logger.LogWarning("McpWorkspaceWatcher: memory-store config missing or unparseable — will fall back to workspace file.");
+            else if (servers.Count == 0)
+                _logger.LogInformation("McpWorkspaceWatcher: memory-store config has Enabled=false or no servers.");
+            else
+                _logger.LogInformation("McpWorkspaceWatcher: memory-store config loaded, {Count} server(s) defined.", servers.Count);
+        }
+
+        // Priority 2: fallback to workspace file (manual edits / legacy path).
+        if (servers is null && !string.IsNullOrEmpty(_workspacePath))
         {
             var filePath = Path.Combine(_workspacePath, McpJsonRelativePath);
             servers = await TryReadConfigAsync(filePath, ct).ConfigureAwait(false);
+            if (servers is not null)
+                _logger.LogInformation("McpWorkspaceWatcher: fell back to workspace file, {Count} server(s) defined.", servers.Count);
         }
 
         // null means file was missing/invalid → pass empty dict to remove all workspace tools
@@ -170,7 +134,8 @@ internal sealed class McpWorkspaceWatcherService : IDisposable
 
         if (result.AddedTools.Count == 0 && result.RemovedToolNames.Count == 0)
         {
-            _logger.LogInformation("McpWorkspaceWatcher: reload produced no tool changes.");
+            _logger.LogInformation("McpWorkspaceWatcher: reload produced no tool changes (servers in registry: {Count}).",
+                servers?.Count ?? 0);
             return;
         }
 
@@ -251,6 +216,5 @@ internal sealed class McpWorkspaceWatcherService : IDisposable
 
         _disposed = true;
         _reloadChannel.Writer.TryComplete();
-        _watcher?.Dispose();
     }
 }

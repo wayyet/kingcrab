@@ -1,5 +1,5 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
+using Cronos;
+using TimeZoneConverter;
 using System.Threading.Channels;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -38,16 +38,34 @@ public sealed class CronScheduler : BackgroundService
         using var timer = new PeriodicTimer(TimeSpan.FromMinutes(1));
         _logger.LogInformation("Cron Scheduler started. Monitoring {Count} initial jobs.", initialJobs.Count);
 
-        // Optional: run selected jobs immediately once on startup (useful for testing / boot-time reports)
+        // On startup: fire RunOnStartup jobs and catch up any missed one-shot (RunAt) jobs.
+        // A one-shot job is considered "missed" if its RunAt time is in the past (within 1 hour)
+        // and it has not yet been executed (DeleteAfterRun would have removed it if it had run).
+        var startupNow = DateTimeOffset.UtcNow;
+        var missedCutoff = startupNow - TimeSpan.FromHours(1);
         foreach (var job in initialJobs)
         {
-            if (!job.RunOnStartup)
+            bool shouldRun = job.RunOnStartup;
+
+            if (!shouldRun && job.RunAt.HasValue && !job.RunAt.Value.ToUniversalTime().Equals(default))
+            {
+                var targetUtc = job.RunAt.Value.ToUniversalTime();
+                // Fire if the scheduled time already passed but is within the 1-hour catch-up window
+                if (targetUtc <= startupNow && targetUtc >= missedCutoff)
+                {
+                    _logger.LogInformation(
+                        "Cron job '{JobName}' was scheduled for {Target:u} (missed by {Elapsed:g}). Running now.",
+                        job.Name, targetUtc, startupNow - targetUtc);
+                    shouldRun = true;
+                }
+            }
+
+            if (!shouldRun)
                 continue;
 
             try
             {
-                var now = DateTimeOffset.UtcNow;
-                _logger.LogInformation("Triggering cron job '{JobName}' on startup at {Time}", job.Name, now);
+                _logger.LogInformation("Triggering cron job '{JobName}' on startup at {Time}", job.Name, startupNow);
                 await EnqueueJobIfNotRunningAsync(job, stoppingToken);
             }
             catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
@@ -68,25 +86,9 @@ public sealed class CronScheduler : BackgroundService
             // Re-evaluate jobs at the top of the minute
             foreach (var job in jobs)
             {
-                // Convert to job-specific timezone if configured, otherwise use UTC
-                var now = utcNow;
-                if (!string.IsNullOrWhiteSpace(job.Timezone))
+                if (IsTimeForJob(job, utcNow))
                 {
-                    try
-                    {
-                        var tz = TimeZoneInfo.FindSystemTimeZoneById(job.Timezone);
-                        now = TimeZoneInfo.ConvertTime(utcNow, tz);
-                    }
-                    catch (TimeZoneNotFoundException)
-                    {
-                        _logger.LogWarning("Cron job '{JobName}' has invalid timezone '{Timezone}', falling back to UTC.",
-                            job.Name, job.Timezone);
-                    }
-                }
-
-                if (IsTime(job.CronExpression, now))
-                {
-                    _logger.LogInformation("Triggering cron job '{JobName}' at {Time}", job.Name, now);
+                    _logger.LogInformation("Triggering cron job '{JobName}' at {Time}", job.Name, utcNow);
                     await EnqueueJobIfNotRunningAsync(job, stoppingToken);
                 }
             }
@@ -151,94 +153,53 @@ public sealed class CronScheduler : BackgroundService
             ChannelId = channelId,
             SenderId = senderId,
             Subject = job.Subject ?? (string.IsNullOrWhiteSpace(job.Name) ? null : $"OpenClaw Cron: {job.Name}"),
-            Text = job.Prompt
+            Text = job.Prompt,
+            ModelOverride = string.IsNullOrWhiteSpace(job.ModelId) ? null : job.ModelId,
+            DeleteAfterRun = job.DeleteAfterRun
         };
 
         await _pipelineChannel.WriteAsync(msg, ct);
     }
 
     /// <summary>
-    /// Evaluates a standard 5-field cron expression against a given time.
-    /// (Minutes, Hours, Day of Month, Month, Day of Week)
+    /// Returns true if the job should fire now — either via RunAt (one-shot) or the cron expression.
+    /// Timezone handling and DST-safe matching are delegated to Cronos.
     /// </summary>
-    public static bool IsTime(string expression, DateTimeOffset time)
+    internal bool IsTimeForJob(CronJobConfig job, DateTimeOffset utcNow)
     {
-        if (string.IsNullOrWhiteSpace(expression)) return false;
-
-        expression = NormalizeExpression(expression);
-
-        var parts = expression.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length != 5) return false;
-
-        var minMatch = MatchField(parts[0], time.Minute, 0, 59, time);
-        var hourMatch = MatchField(parts[1], time.Hour, 0, 23, time);
-        var domMatch = MatchField(parts[2], time.Day, 1, 31, time);
-        var monthMatch = MatchField(parts[3], time.Month, 1, 12, time);
-        var dowMatch = MatchField(parts[4], (int)time.DayOfWeek, 0, 6, time);
-
-        return minMatch && hourMatch && domMatch && monthMatch && dowMatch;
-    }
-
-    private static string NormalizeExpression(string expression)
-    {
-        return expression.Trim().ToLowerInvariant() switch
+        if (job.RunAt.HasValue)
         {
-            "@hourly" => "0 * * * *",
-            "@daily" => "0 0 * * *",
-            "@weekly" => "0 0 * * 0",
-            "@monthly" => "0 0 1 * *",
-            _ => expression
-        };
-    }
-
-    private static bool MatchField(string field, int value, int minValue, int maxValue, DateTimeOffset time)
-    {
-        if (field == "*") return true;
-
-        if (field == "L")
-            return value == DateTime.DaysInMonth(time.Year, time.Month);
-
-        if (int.TryParse(field, out var exact))
-            return exact == value;
-
-        if (field.Contains(','))
-            return field.Split(',').Any(option => MatchField(option, value, minValue, maxValue, time));
-
-        if (field.Contains('/'))
-        {
-            var stepParts = field.Split('/');
-            if (stepParts.Length == 2 && int.TryParse(stepParts[1], out var step) && step > 0)
-            {
-                var range = stepParts[0];
-                if (range == "*")
-                    return (value - minValue) % step == 0;
-
-                if (TryParseRange(range, out var start, out var end))
-                {
-                    if (!IsValueInRange(value, start, end))
-                        return false;
-
-                    return (value - start) % step == 0;
-                }
-            }
+            // One-shot: fire if the current UTC minute matches the RunAt minute (window: 0–59 s into that minute)
+            var target = job.RunAt.Value.ToUniversalTime();
+            return utcNow.Year == target.Year
+                && utcNow.Month == target.Month
+                && utcNow.Day == target.Day
+                && utcNow.Hour == target.Hour
+                && utcNow.Minute == target.Minute;
         }
 
-        if (TryParseRange(field, out var rangeStart, out var rangeEnd))
-            return IsValueInRange(value, rangeStart, rangeEnd);
-
-        return false;
-    }
-
-    private static bool TryParseRange(string field, out int start, out int end)
-    {
-        start = 0;
-        end = 0;
-        var rangeParts = field.Split('-');
-        if (rangeParts.Length != 2)
+        if (string.IsNullOrWhiteSpace(job.CronExpression))
             return false;
 
-        return int.TryParse(rangeParts[0], out start)
-            && int.TryParse(rangeParts[1], out end);
+        try
+        {
+            var tz = string.IsNullOrWhiteSpace(job.Timezone)
+                ? TimeZoneInfo.Utc
+                : FindTimeZone(job.Timezone);
+
+            var expr = CronExpression.Parse(job.CronExpression, CronFormat.Standard);
+            // Start of the current UTC minute
+            var minuteStart = new DateTimeOffset(utcNow.Year, utcNow.Month, utcNow.Day,
+                utcNow.Hour, utcNow.Minute, 0, TimeSpan.Zero);
+            // If the next occurrence after (minuteStart - 1s) is exactly minuteStart, fire now
+            var next = expr.GetNextOccurrence(minuteStart.AddSeconds(-1), tz);
+            return next.HasValue && next.Value.ToUniversalTime() == minuteStart;
+        }
+        catch (Exception ex) when (ex is CronFormatException or TimeZoneNotFoundException or InvalidTimeZoneException)
+        {
+            _logger.LogWarning("Cron job '{JobName}' skipped — invalid expression or timezone: {Error}", job.Name, ex.Message);
+            return false;
+        }
     }
 
     private void CleanupStaleRunningJobs(DateTimeOffset nowUtc)
@@ -258,11 +219,54 @@ public sealed class CronScheduler : BackgroundService
         }
     }
 
-    private static bool IsValueInRange(int value, int start, int end)
+    /// <summary>
+    /// Returns <c>true</c> if <paramref name="schedule"/> is a valid 5-field standard cron
+    /// expression or a Cronos alias (@hourly, @daily, @weekly, @monthly, @yearly).
+    /// </summary>
+    public static bool IsValidExpression(string schedule)
     {
-        if (start <= end)
-            return value >= start && value <= end;
-
-        return value >= start || value <= end;
+        if (string.IsNullOrWhiteSpace(schedule))
+            return false;
+        try
+        {
+            CronExpression.Parse(schedule, CronFormat.Standard);
+            return true;
+        }
+        catch (CronFormatException)
+        {
+            return false;
+        }
     }
+
+    /// <summary>
+    /// Determines whether a cron expression fires at the given UTC time (ignoring seconds).
+    /// Supports standard 5-field expressions plus Cronos aliases (@hourly, @daily, etc.)
+    /// and special chars (L, W, #, ?).
+    /// </summary>
+    public static bool IsTime(string expression, DateTimeOffset utcTime)
+    {
+        if (string.IsNullOrWhiteSpace(expression))
+            return false;
+        try
+        {
+            var expr = CronExpression.Parse(expression, CronFormat.Standard);
+            var minuteStart = new DateTimeOffset(utcTime.Year, utcTime.Month, utcTime.Day,
+                utcTime.Hour, utcTime.Minute, 0, TimeSpan.Zero);
+            var next = expr.GetNextOccurrence(minuteStart.AddSeconds(-1), TimeZoneInfo.Utc);
+            return next.HasValue && next.Value.ToUniversalTime() == minuteStart;
+        }
+        catch (CronFormatException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Resolves a timezone ID that may be either a Windows ID ("China Standard Time")
+    /// or an IANA ID ("Asia/Shanghai"), on any platform and regardless of ICU availability.
+    /// Uses the TimeZoneConverter package which embeds the full CLDR IANA↔Windows mapping table.
+    /// </summary>
+    private static TimeZoneInfo FindTimeZone(string timezoneId)
+        => TZConvert.GetTimeZoneInfo(timezoneId);
+
 }

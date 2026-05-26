@@ -47,7 +47,9 @@ public sealed class MafAgentRuntime : IAgentRuntime
     private readonly object _skillGate = new();
     private readonly object _mafToolsLock = new();
     private IList<AITool> _mafTools;
-    private string _systemPrompt = string.Empty;
+    private IReadOnlyDictionary<string, AITool> _mafToolsByName;
+    private string _baseSystemPrompt = string.Empty;
+    private SkillDefinition[] _loadedSkills = [];
     private string[] _loadedSkillNames = [];
     private int _systemPromptLength;
     private int _skillPromptLength;
@@ -70,7 +72,9 @@ public sealed class MafAgentRuntime : IAgentRuntime
             context.RuntimeMetrics,
             logger,
             config: context.Config,
-            toolSandbox: context.ToolSandbox);
+            toolSandbox: context.ToolSandbox,
+            toolPresetResolver: context.Services.GetService(typeof(IToolPresetResolver)) as IToolPresetResolver
+        );
         _options = options;
         _agentFactory = agentFactory;
         _sessionStateStore = sessionStateStore;
@@ -107,6 +111,7 @@ public sealed class MafAgentRuntime : IAgentRuntime
         _mafTools = context.Tools
             .Select(tool => (AITool)new MafToolAdapter(tool, _toolExecutor))
             .ToArray();
+        _mafToolsByName = _mafTools.ToDictionary(tool => tool.Name, StringComparer.Ordinal);
 
         ApplySkills(context.Skills);
     }
@@ -124,7 +129,18 @@ public sealed class MafAgentRuntime : IAgentRuntime
         }
     }
 
-    public IReadOnlyList<AITool> LoadedTools => _mafTools is IReadOnlyList<AITool> r ? r : [.. _mafTools];
+    public IReadOnlyList<AITool> LoadedTools
+    {
+        get
+        {
+            lock (_mafToolsLock)
+            {
+                return _mafTools is IReadOnlyList<AITool> r ? r : [.. _mafTools];
+            }
+        }
+    }
+
+    public event Action<IReadOnlyList<SkillDefinition>>? SkillsReloaded;
 
     public Task ApplyMcpToolChangesAsync(
         IReadOnlyList<ITool> toAdd,
@@ -133,12 +149,10 @@ public sealed class MafAgentRuntime : IAgentRuntime
     {
         ct.ThrowIfCancellationRequested();
 
-        // Update the executor dispatch table first (fast, non-blocking)
-        _toolExecutor.ReplaceMcpTools(toAdd, toRemove);
-
-        // Atomically swap the LLM-visible tool list
         lock (_mafToolsLock)
         {
+            _toolExecutor.ReplaceMcpTools(toAdd, toRemove);
+
             var removedSet = new HashSet<string>(toRemove, StringComparer.Ordinal);
             var updated = _mafTools
                 .Where(t => !removedSet.Contains(t.Name))
@@ -146,6 +160,7 @@ public sealed class MafAgentRuntime : IAgentRuntime
             foreach (var tool in toAdd)
                 updated.Add(new MafToolAdapter(tool, _toolExecutor));
             _mafTools = updated;
+            _mafToolsByName = updated.ToDictionary(tool => tool.Name, StringComparer.Ordinal);
         }
 
         return Task.CompletedTask;
@@ -167,6 +182,9 @@ public sealed class MafAgentRuntime : IAgentRuntime
         else
             logger.LogInformation("No skills loaded for the MAF experiment runtime.");
 
+        try { SkillsReloaded?.Invoke(skills); }
+        catch (Exception ex) { logger.LogWarning(ex, "SkillsReloaded subscriber threw"); }
+
         return Task.FromResult<IReadOnlyList<string>>(LoadedSkillNames);
     }
 
@@ -175,7 +193,8 @@ public sealed class MafAgentRuntime : IAgentRuntime
         string userMessage,
         CancellationToken ct,
         ToolApprovalCallback? approvalCallback = null,
-        System.Text.Json.JsonElement? responseSchema = null)
+        System.Text.Json.JsonElement? responseSchema = null,
+        bool isSystemEvent = false)
     {
         using var activity = _telemetry.StartRunActivity("Agent.Maf.RunAsync", session, _runtimeState);
         var turnCtx = new TurnContext
@@ -186,10 +205,11 @@ public sealed class MafAgentRuntime : IAgentRuntime
 
         _metrics.IncrementRequests();
         _logger?.LogInformation(
-            "[{CorrelationId}] MAF turn start session={SessionId} channel={ChannelId}",
+            "[{CorrelationId}] MAF turn start session={SessionId} channel={ChannelId} isSystemEvent={IsSystemEvent}",
             turnCtx.CorrelationId,
             session.Id,
-            session.ChannelId);
+            session.ChannelId,
+            isSystemEvent);
 
         if (TryRejectContractBudget(session, out var contractBudgetMessage))
         {
@@ -204,11 +224,17 @@ public sealed class MafAgentRuntime : IAgentRuntime
             return "You've reached the token limit for this session. Please start a new conversation.";
         }
 
-        ChatClientAgent agent = CreateAgent(session);
+        // For system events (e.g. cron jobs), inject the event as a system-level
+        // instruction rather than a user turn so the assistant appears to proactively
+        // send the message with no visible user prompt in session history.
+        ChatClientAgent agent = isSystemEvent
+            ? CreateAgentWithSystemEvent(session, userMessage)
+            : CreateAgent(session, userMessage);
         AgentSession mafSession = await _sessionStateStore.LoadAsync(agent, session, ct);
         var toolInvocations = new List<ToolInvocation>();
 
-        session.History.Add(new ChatTurn { Role = "user", Content = userMessage });
+        if (!isSystemEvent)
+            session.History.Add(new ChatTurn { Role = "user", Content = userMessage });
 
         if (_enableCompaction)
             await CompactHistoryAsync(session, ct);
@@ -216,7 +242,18 @@ public sealed class MafAgentRuntime : IAgentRuntime
             TrimHistory(session);
 
         var messages = BuildMessages(session);
+        // For system events the recall query uses the event text but the query is not
+        // surfaced as a user turn in the message list.
         await TryInjectRecallAsync(messages, userMessage, ct);
+
+        // System events need a minimal synthetic user trigger because most LLM providers
+        // require the messages list to end with a user turn.  This trigger is never
+        // persisted to history.
+        if (isSystemEvent)
+        {
+            var trigger = "[scheduled task trigger]";
+            messages.Add(new ChatMessage(ChatRole.User, trigger));
+        }
 
         try
         {
@@ -224,7 +261,7 @@ public sealed class MafAgentRuntime : IAgentRuntime
             {
                 Session = session,
                 TurnContext = turnCtx,
-                SystemPromptLength = GetSystemPromptLength(session),
+                SystemPromptLength = GetSystemPromptLength(session, userMessage),
                 SkillPromptLength = _skillPromptLength,
                 SessionTokenBudget = _sessionTokenBudget,
                 ToolInvocations = toolInvocations,
@@ -291,7 +328,8 @@ public sealed class MafAgentRuntime : IAgentRuntime
         Session session,
         string userMessage,
         [EnumeratorCancellation] CancellationToken ct,
-        ToolApprovalCallback? approvalCallback = null)
+        ToolApprovalCallback? approvalCallback = null,
+        bool isSystemEvent = false)
     {
         if (!_options.EnableStreaming)
             throw new NotSupportedException("MAF streaming is disabled for this experiment runtime.");
@@ -305,10 +343,11 @@ public sealed class MafAgentRuntime : IAgentRuntime
 
         _metrics.IncrementRequests();
         _logger?.LogInformation(
-            "[{CorrelationId}] MAF streaming turn start session={SessionId} channel={ChannelId}",
+            "[{CorrelationId}] MAF streaming turn start session={SessionId} channel={ChannelId} isSystemEvent={IsSystemEvent}",
             turnCtx.CorrelationId,
             session.Id,
-            session.ChannelId);
+            session.ChannelId,
+            isSystemEvent);
 
         if (TryRejectContractBudget(session, out var contractBudgetMessage))
         {
@@ -329,7 +368,9 @@ public sealed class MafAgentRuntime : IAgentRuntime
             yield break;
         }
 
-        ChatClientAgent agent = CreateAgent(session);
+        ChatClientAgent agent = isSystemEvent
+            ? CreateAgentWithSystemEvent(session, userMessage)
+            : CreateAgent(session, userMessage);
         AgentSession mafSession = await _sessionStateStore.LoadAsync(agent, session, ct);
         var eventChannel = Channel.CreateBounded<AgentStreamEvent>(new BoundedChannelOptions(256)
         {
@@ -338,7 +379,8 @@ public sealed class MafAgentRuntime : IAgentRuntime
             FullMode = BoundedChannelFullMode.Wait
         });
 
-        session.History.Add(new ChatTurn { Role = "user", Content = userMessage });
+        if (!isSystemEvent)
+            session.History.Add(new ChatTurn { Role = "user", Content = userMessage });
 
         if (_enableCompaction)
             await CompactHistoryAsync(session, ct);
@@ -348,8 +390,12 @@ public sealed class MafAgentRuntime : IAgentRuntime
         var messages = BuildMessages(session);
         await TryInjectRecallAsync(messages, userMessage, ct);
 
+        if (isSystemEvent)
+            messages.Add(new ChatMessage(ChatRole.User, "[scheduled task trigger]"));
+
         var producer = ProduceStreamingRunAsync(
             session,
+            userMessage,
             messages,
             agent,
             mafSession,
@@ -364,13 +410,33 @@ public sealed class MafAgentRuntime : IAgentRuntime
         await producer;
     }
 
-    private ChatClientAgent CreateAgent(Session session)
+    private ChatClientAgent CreateAgent(Session session, string userMessage)
     {
-        return _agentFactory.Create(_chatClient, GetSystemPrompt(session), _mafTools);
+        AITool[] tools;
+        lock (_mafToolsLock)
+        {
+            tools = _toolExecutor.GetToolDeclarations(session)
+                .Select(tool => _mafToolsByName[tool.Name])
+                .ToArray();
+        }
+        return _agentFactory.Create(_chatClient, GetSystemPrompt(session, userMessage), tools);
+    }
+
+    /// <summary>
+    /// Creates an agent whose system prompt is temporarily augmented with the cron/system
+    /// event text.  The event is injected as a system-level instruction so the LLM
+    /// generates an assistant-initiated message without a visible user turn in history.
+    /// </summary>
+    private ChatClientAgent CreateAgentWithSystemEvent(Session session, string eventText)
+    {
+        var systemPrompt = GetSystemPrompt(session, eventText)
+            + $"\n\n[Scheduled Task]\nA scheduled task has just fired. Generate a proactive assistant message based on the following task description — do NOT mention that this was scheduled or ask the user anything; just deliver the message naturally:\n{eventText.Trim()}";
+        return _agentFactory.Create(_chatClient, systemPrompt, _mafTools);
     }
 
     private async Task ProduceStreamingRunAsync(
         Session session,
+        string userMessage,
         IReadOnlyList<ChatMessage> messages,
         ChatClientAgent agent,
         AgentSession mafSession,
@@ -391,7 +457,7 @@ public sealed class MafAgentRuntime : IAgentRuntime
             {
                 Session = session,
                 TurnContext = turnCtx,
-                SystemPromptLength = GetSystemPromptLength(session),
+                SystemPromptLength = GetSystemPromptLength(session, userMessage),
                 SkillPromptLength = _skillPromptLength,
                 SessionTokenBudget = _sessionTokenBudget,
                 ToolInvocations = toolInvocations,
@@ -508,12 +574,29 @@ public sealed class MafAgentRuntime : IAgentRuntime
         return options;
     }
 
-    private string GetSystemPrompt(Session session)
+    private string GetSystemPrompt(Session session, string userMessage)
     {
-        string systemPrompt;
+        string baseSystemPrompt;
+        SkillDefinition[] loadedSkills;
         lock (_skillGate)
         {
-            systemPrompt = _systemPrompt;
+            baseSystemPrompt = _baseSystemPrompt;
+            loadedSkills = _loadedSkills;
+        }
+
+        var effectiveSkills = ResolveSkillsForTurn(loadedSkills, userMessage, out var blockedRoutes);
+        var skillSection = SkillPromptBuilder.Build(effectiveSkills);
+        var systemPrompt = string.IsNullOrEmpty(skillSection)
+            ? baseSystemPrompt
+            : baseSystemPrompt + "\n" + skillSection;
+
+        if (!string.IsNullOrWhiteSpace(blockedRoutes))
+            systemPrompt += "\n\n[Blocked Skill Routes]\n" + blockedRoutes.Trim();
+
+        lock (_skillGate)
+        {
+            _skillPromptLength = skillSection.Length;
+            _systemPromptLength = systemPrompt.Length;
         }
 
         systemPrompt += AgentSystemPromptBuilder.BuildDynamicSuffix();
@@ -524,8 +607,8 @@ public sealed class MafAgentRuntime : IAgentRuntime
         return systemPrompt + "\n\n[Route Instructions]\n" + session.SystemPromptOverride.Trim();
     }
 
-    private int GetSystemPromptLength(Session session)
-        => GetSystemPrompt(session).Length;
+    private int GetSystemPromptLength(Session session, string userMessage)
+        => GetSystemPrompt(session, userMessage).Length;
 
     private async ValueTask TryInjectRecallAsync(List<ChatMessage> messages, string userMessage, CancellationToken ct)
     {
@@ -902,17 +985,76 @@ public sealed class MafAgentRuntime : IAgentRuntime
     {
         lock (_skillGate)
         {
-            var skillSection = SkillPromptBuilder.Build(skills);
-            var basePrompt = AgentSystemPromptBuilder.BuildBaseSystemPrompt(_requireToolApproval);
-            _skillPromptLength = skillSection.Length;
-            _systemPrompt = string.IsNullOrEmpty(skillSection) ? basePrompt : basePrompt + "\n" + skillSection;
-            _systemPromptLength = _systemPrompt.Length;
+            _baseSystemPrompt = AgentSystemPromptBuilder.BuildBaseSystemPrompt(_requireToolApproval);
+            _loadedSkills = [.. skills];
+            _skillPromptLength = SkillPromptBuilder.Build(skills).Length;
+            _systemPromptLength = _baseSystemPrompt.Length;
             _loadedSkillNames = skills
                 .Select(skill => skill.Name)
                 .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
         }
     }
+
+    private SkillDefinition[] ResolveSkillsForTurn(
+        IReadOnlyList<SkillDefinition> skills,
+        string userMessage,
+        out string blockedRoutes)
+    {
+        var resolvedSkills = new List<SkillDefinition>(skills.Count);
+        var blocked = new StringBuilder();
+
+        foreach (var skill in skills)
+        {
+            if (skill.ProjectionContracts.Count == 0)
+            {
+                resolvedSkills.Add(skill);
+                continue;
+            }
+
+            var resolution = SkillProjectionResolver.ResolveForRequest(skill, userMessage, _logger ?? NullLogger.Instance);
+            if (resolution.IsBlocked)
+            {
+                blocked.Append("- ");
+                blocked.Append(skill.Name);
+                blocked.Append(": ");
+                blocked.AppendLine(resolution.BlockReason ?? "Projection contract resolution blocked this skill for the current request.");
+                resolvedSkills.Add(CloneSkill(skill, skill.Instructions, disableModelInvocation: true));
+                continue;
+            }
+
+            var patch = SkillProjectionResolver.BuildPromptPatch(resolution);
+            if (string.IsNullOrWhiteSpace(patch))
+            {
+                resolvedSkills.Add(skill);
+                continue;
+            }
+
+            var patchedInstructions = string.Concat(skill.Instructions.TrimEnd(), "\n\n", patch);
+            resolvedSkills.Add(CloneSkill(skill, patchedInstructions, skill.DisableModelInvocation));
+        }
+
+        blockedRoutes = blocked.ToString();
+        return [.. resolvedSkills];
+    }
+
+    private static SkillDefinition CloneSkill(SkillDefinition source, string instructions, bool disableModelInvocation)
+        => new()
+        {
+            Name = source.Name,
+            Description = source.Description,
+            Instructions = instructions,
+            Location = source.Location,
+            Source = source.Source,
+            Metadata = source.Metadata,
+            UserInvocable = source.UserInvocable,
+            DisableModelInvocation = disableModelInvocation,
+            CommandDispatch = source.CommandDispatch,
+            CommandTool = source.CommandTool,
+            CommandArgMode = source.CommandArgMode,
+            ProjectionContracts = source.ProjectionContracts,
+            ProjectionDiscovery = source.ProjectionDiscovery
+        };
 
     private void TrimHistory(Session session)
     {

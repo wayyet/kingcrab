@@ -203,6 +203,8 @@ internal static class GatewayWorkers
                             var bridgedTypingStarted = false;
                             long initialInputTokens = 0;
                             long initialOutputTokens = 0;
+                            var cronRunOutcome = "failed";
+                            string? cronRunPreview = null;
                             var conversationRecipientId = ResolveConversationRecipientId(msg);
                             using var processingCts = CreateProcessingCts(msg.RequestCancellation, lifetime.ApplicationStopping);
                             var processingCt = processingCts?.Token ?? lifetime.ApplicationStopping;
@@ -412,6 +414,22 @@ internal static class GatewayWorkers
                                 : await sessionManager.GetOrCreateAsync(msg.ChannelId, conversationRecipientId, lifetime.ApplicationStopping);
                             if (session is null)
                                 throw new InvalidOperationException("Session manager returned null session.");
+
+                            // Refresh transient routing identity each turn. The persisted Session.SenderId may
+                            // hold a stale connection id (e.g. WebSocket Connection.Id from a previous session
+                            // load), which causes mid-turn envelope routing (artifact, stage gate) to silently
+                            // drop because the dead id is no longer in the channel's connection table.
+                            session.ChannelId = msg.ChannelId;
+                            session.SenderId = conversationRecipientId;
+                            // Propagate the OIDC-verified user identity when the channel provides it.
+                            // Only overwrite if non-null so reconnects from unauthenticated paths
+                            // don't erase a previously verified identity.
+                            if (msg.AuthenticatedUserId is not null)
+                                session.AuthenticatedUserId = msg.AuthenticatedUserId;
+
+                            // Apply cron job model override before route resolution (route can further override)
+                            if (!string.IsNullOrWhiteSpace(msg.ModelOverride))
+                                session.ModelOverride = msg.ModelOverride;
 
                             // Apply route overrides to session
                             if (resolvedRoute is not null)
@@ -675,7 +693,7 @@ internal static class GatewayWorkers
                                 AgentStreamEvent? doneEvent = null;
                                 var streamHistoryCountBefore = session.History.Count;
                                 await foreach (var evt in agentRuntime.RunStreamingAsync(
-                                    session, messageText, executionCt, approvalCallback: ApprovalCallback))
+                                    session, messageText, executionCt, approvalCallback: ApprovalCallback, isSystemEvent: msg.IsSystem))
                                 {
                                     if (string.Equals(evt.EnvelopeType, "assistant_done", StringComparison.Ordinal))
                                     {
@@ -792,7 +810,7 @@ internal static class GatewayWorkers
                                 }
 
                                 var historyCountBefore = session.History.Count;
-                                var responseText = await agentRuntime.RunAsync(session, messageText, executionCt, approvalCallback: ApprovalCallback);
+                                var responseText = await agentRuntime.RunAsync(session, messageText, executionCt, approvalCallback: ApprovalCallback, isSystemEvent: msg.IsSystem);
 
                                 // Upload files from write_file tool results and build asset list BEFORE persisting,
                                 // so FILE_URL markers are injected into history for replay.
@@ -822,7 +840,10 @@ internal static class GatewayWorkers
                                 if (nonStreamFileUploads.Count > 0)
                                 {
                                     InjectFileUrlMarkersIntoHistory(session, nonStreamFileUploads);
-                                    responseText += BuildFileUrlSuffix(nonStreamFileUploads);
+                                    // WebSocket envelope clients receive a dedicated file_attachment envelope below;
+                                    // appending FILE_URL to responseText would produce a duplicate download link.
+                                    if (!(msg.ChannelId == "websocket" && wsChannel.IsClientUsingEnvelopes(msg.SenderId)))
+                                        responseText += BuildFileUrlSuffix(nonStreamFileUploads);
                                 }
 
                                 await sessionManager.PersistAsync(session, processingCt, sessionLockHeld: true);
@@ -889,6 +910,12 @@ internal static class GatewayWorkers
                                         Subject = msg.Subject,
                                         ReplyToMessageId = msg.MessageId
                                     }, processingCt);
+                                }
+
+                                if (!string.IsNullOrWhiteSpace(msg.CronJobName))
+                                {
+                                    cronRunOutcome = "completed";
+                                    cronRunPreview = responseText.Length > 200 ? responseText[..200] : responseText;
                                 }
                             }
                         }
@@ -965,6 +992,43 @@ internal static class GatewayWorkers
 
                             cronScheduler?.MarkJobCompleted(msg.CronJobName);
                             automationService?.MarkRunCompleted(msg.CronJobName);
+
+                            // Record run history for dynamic automations
+                            if (automationService is not null && !string.IsNullOrWhiteSpace(msg.CronJobName)
+                                && !heartbeatService.IsManagedHeartbeatJob(msg.CronJobName))
+                            {
+                                try
+                                {
+                                    var inputDelta = session is null ? 0 : session.TotalInputTokens - initialInputTokens;
+                                    var outputDelta = session is null ? 0 : session.TotalOutputTokens - initialOutputTokens;
+                                    await automationService.AppendRunHistoryAsync(msg.CronJobName, new RunHistoryEntry
+                                    {
+                                        RanAtUtc = DateTimeOffset.UtcNow,
+                                        Outcome = cronRunOutcome,
+                                        InputTokens = inputDelta,
+                                        OutputTokens = outputDelta,
+                                        MessagePreview = cronRunPreview
+                                    }, CancellationToken.None);
+                                }
+                                catch (Exception ex)
+                                {
+                                    logger.LogWarning(ex, "Failed to record run history for cron job '{JobName}'.", msg.CronJobName);
+                                }
+                            }
+
+                            // Delete one-shot jobs that requested cleanup after running
+                            if (msg.DeleteAfterRun && automationService is not null && !string.IsNullOrWhiteSpace(msg.CronJobName))
+                            {
+                                try
+                                {
+                                    await automationService.DeleteAsync(msg.CronJobName, CancellationToken.None);
+                                    logger.LogInformation("One-shot cron job '{JobName}' deleted after run.", msg.CronJobName);
+                                }
+                                catch (Exception ex)
+                                {
+                                    logger.LogWarning(ex, "Failed to delete one-shot cron job '{JobName}' after run.", msg.CronJobName);
+                                }
+                            }
 
                             if (session is not null)
                                 abortRegistry?.Unregister(session.Id);
@@ -1311,11 +1375,15 @@ internal static class GatewayWorkers
         };
 
     // Builds a newline-prefixed block of [FILE_URL:] markers to append to response text.
+    // Format: [FILE_URL:/media/{id}|{fileName}] so preprocessMediaMarkers can show the real name.
     private static string BuildFileUrlSuffix(List<StoredMediaAsset> assets)
     {
         var sb = new System.Text.StringBuilder();
         foreach (var a in assets)
-            sb.Append($"\n[FILE_URL:/media/{a.Id}]");
+        {
+            var nameSuffix = string.IsNullOrWhiteSpace(a.FileName) ? "" : $"|{a.FileName}";
+            sb.Append($"\n[FILE_URL:/media/{a.Id}{nameSuffix}]");
+        }
         return sb.ToString();
     }
 

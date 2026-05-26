@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <NoWarn>NU1902</NoWarn>
     <InvariantGlobalization>true</InvariantGlobalization>
     <!-- NativeAOT perf: trim aggressively -->
     <TrimMode>link</TrimMode>

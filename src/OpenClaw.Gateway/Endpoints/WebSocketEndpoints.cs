@@ -21,7 +21,13 @@ internal static class WebSocketEndpoints
 
             var ws = await ctx.WebSockets.AcceptWebSocketAsync();
             var clientId = ctx.Connection.Id;
-            await runtime.WebSocketChannel.HandleConnectionAsync(ws, clientId, ctx.Connection.RemoteIpAddress, ctx.RequestAborted);
+            // ASP.NET Core JWT 中间件默认把 sub 映射为 ClaimTypes.NameIdentifier（长 URL 形式），
+            // 同时保留原始 "sub"。两者都尝试以兼容不同的 claim 映射配置。
+            var userId = ctx.User.Identity?.IsAuthenticated == true
+                ? (ctx.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)
+                   ?? ctx.User.FindFirst("sub"))?.Value
+                : null;
+            await runtime.WebSocketChannel.HandleConnectionAsync(ws, clientId, ctx.Connection.RemoteIpAddress, ctx.RequestAborted, userId);
         });
 
         app.Map("/ws/live", async (HttpContext ctx) =>

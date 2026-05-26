@@ -20,13 +20,24 @@ public sealed class Session
     private long _totalCacheWriteTokens;
 
     public required string Id { get; init; }
-    public required string ChannelId { get; init; }
-    public required string SenderId { get; init; }
+    // ChannelId / SenderId describe the *current* routing identity of the conversation party.
+    // They must be mutable because a persisted session can be reactivated by a fresh connection
+    // (e.g. a WebSocket reconnect produces a new Connection.Id) and mid-turn envelope routing
+    // (artifact, stage gate) consults Session.SenderId to look up the live socket.
+    public required string ChannelId { get; set; }
+    public required string SenderId { get; set; }
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset LastActiveAt { get; set; } = DateTimeOffset.UtcNow;
     public List<ChatTurn> History { get; init; } = [];
     public SessionState State { get; set; } = SessionState.Active;
     
+    /// <summary>
+    /// Authenticated user identity from the identity provider (e.g. Keycloak JWT <c>sub</c> claim).
+    /// Set once per connection when the channel verifies an OIDC token; <c>null</c> for anonymous channels.
+    /// Must NOT be used for routing — use <see cref="SenderId"/> for that.
+    /// </summary>
+    public string? AuthenticatedUserId { get; set; }
+
     /// <summary>Optional model override for this specific session (set via /model command).</summary>
     public string? ModelOverride { get; set; }
 
@@ -155,6 +166,12 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(OutboundMessage))]
 [JsonSerializable(typeof(WsClientEnvelope))]
 [JsonSerializable(typeof(WsServerEnvelope))]
+[JsonSerializable(typeof(SkillArtifact))]
+[JsonSerializable(typeof(SkillStageGateEvent))]
+[JsonSerializable(typeof(SkillArtifactContract))]
+[JsonSerializable(typeof(SkillArtifactStageContract))]
+[JsonSerializable(typeof(SkillArtifactStageGateContract))]
+[JsonSerializable(typeof(SkillArtifactTypeContract))]
 [JsonSerializable(typeof(GatewayConfig))]
 [JsonSerializable(typeof(RuntimeConfig))]
 [JsonSerializable(typeof(GatewayRuntimeState))]
@@ -188,6 +205,10 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(MemoryRetentionConfig))]
 [JsonSerializable(typeof(SecurityConfig))]
 [JsonSerializable(typeof(WebSocketConfig))]
+[JsonSerializable(typeof(HandoffConfig))]
+[JsonSerializable(typeof(HandoffWorkflowConfig))]
+[JsonSerializable(typeof(Dictionary<string, HandoffWorkflowConfig>))]
+[JsonSerializable(typeof(Dictionary<string, string[]>))]
 [JsonSerializable(typeof(ToolingConfig))]
 [JsonSerializable(typeof(ToolsetConfig))]
 [JsonSerializable(typeof(Dictionary<string, ToolsetConfig>))]
@@ -338,6 +359,8 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(AutomationDefinition))]
 [JsonSerializable(typeof(List<AutomationDefinition>))]
 [JsonSerializable(typeof(AutomationRunState))]
+[JsonSerializable(typeof(RunHistoryEntry))]
+[JsonSerializable(typeof(List<RunHistoryEntry>))]
 [JsonSerializable(typeof(AutomationTemplate))]
 [JsonSerializable(typeof(List<AutomationTemplate>))]
 [JsonSerializable(typeof(AutomationValidationIssue))]
@@ -536,6 +559,11 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(List<SessionMetadataSnapshot>))]
 [JsonSerializable(typeof(SessionTodoItem))]
 [JsonSerializable(typeof(List<SessionTodoItem>))]
+[JsonSerializable(typeof(SessionHandoffItem))]
+[JsonSerializable(typeof(List<SessionHandoffItem>))]
+[JsonSerializable(typeof(SessionHandoffListResponse))]
+[JsonSerializable(typeof(SessionHandoffMutationResponse))]
+[JsonSerializable(typeof(SessionHandoffRemoveResponse))]
 [JsonSerializable(typeof(SessionMetadataUpdateRequest))]
 [JsonSerializable(typeof(SessionDiffResponse))]
 [JsonSerializable(typeof(SessionTimelineResponse))]
@@ -587,10 +615,18 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(List<SkillInfoDto>))]
 [JsonSerializable(typeof(SkillsDetailResponse))]
 [JsonSerializable(typeof(SkillMutationResponse))]
+[JsonSerializable(typeof(DigitalEmployeeUploadResponse))]
+[JsonSerializable(typeof(WorkspaceUploadResponse))]
+[JsonSerializable(typeof(WorkspaceTreeEntry))]
+[JsonSerializable(typeof(List<WorkspaceTreeEntry>))]
+[JsonSerializable(typeof(WorkspaceTreeResponse))]
+[JsonSerializable(typeof(List<string>))]
 [JsonSerializable(typeof(SlackChannelConfig))]
 [JsonSerializable(typeof(DiscordChannelConfig))]
 [JsonSerializable(typeof(SignalChannelConfig))]
 [JsonSerializable(typeof(FeishuChannelConfig))]
+[JsonSerializable(typeof(DingTalkChannelConfig))]
+[JsonSerializable(typeof(WeComChannelConfig))]
 [JsonSerializable(typeof(RoutingConfig))]
 [JsonSerializable(typeof(AgentRouteConfig))]
 [JsonSerializable(typeof(TailscaleConfig))]

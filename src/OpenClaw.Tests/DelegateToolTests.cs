@@ -104,18 +104,26 @@ public sealed class DelegateToolTests
 
         public IReadOnlyList<AITool> LoadedTools => throw new NotImplementedException();
 
+        public event Action<IReadOnlyList<OpenClaw.Core.Skills.SkillDefinition>>? SkillsReloaded
+        {
+            add { }
+            remove { }
+        }
+
         public Task<string> RunAsync(
             Session session,
             string userMessage,
             CancellationToken ct,
             ToolApprovalCallback? approvalCallback = null,
-            JsonElement? responseSchema = null)
+            JsonElement? responseSchema = null,
+            bool isSystemEvent = false)
         {
             _ = session;
             _ = userMessage;
             _ = ct;
             _ = approvalCallback;
             _ = responseSchema;
+            _ = isSystemEvent;
             return Task.FromResult(response);
         }
 
@@ -138,12 +146,14 @@ public sealed class DelegateToolTests
             Session session,
             string userMessage,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct,
-            ToolApprovalCallback? approvalCallback = null)
+            ToolApprovalCallback? approvalCallback = null,
+            bool isSystemEvent = false)
         {
             _ = session;
             _ = userMessage;
             _ = ct;
             _ = approvalCallback;
+            _ = isSystemEvent;
             yield break;
         }
     }

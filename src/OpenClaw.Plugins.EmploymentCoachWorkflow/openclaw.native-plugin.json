@@ -1,0 +1,10 @@
+{
+  "id": "employment-coach-workflow",
+  "name": "Employment Coach Workflow",
+  "version": "1.0.0",
+  "assemblyPath": "OpenClaw.Plugins.EmploymentCoachWorkflow.dll",
+  "typeName": "OpenClaw.Plugins.EmploymentCoachWorkflow.EmploymentCoachWorkflowPlugin, OpenClaw.Plugins.EmploymentCoachWorkflow",
+  "capabilities": [ "skills" ],
+  "skills": [ "skills" ],
+  "jitOnly": true
+}

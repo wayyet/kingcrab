@@ -1,0 +1,149 @@
+{
+  "$schema": "../../../../../../../../docs/skill-projection-document.schema.json",
+  "template_type": "ontology_projection",
+  "projection_version": "1.0.0",
+  "projection": {
+    "projection_id": "software-developer-tool-orchestration-domain-model-v1",
+    "projection_type": "domain_model_projection",
+    "target_name": "SoftwareDeveloperToolOrchestrationModel",
+    "target_format": "csharp_domain_model",
+    "target_runtime": "dotnet",
+    "projection_goal": "Provide the software-developer skill with a domain model for tool-orchestration planning, source-aware routing, and precondition enforcement.",
+    "source_slice": {
+      "path": "../../../../../ontology_extraction/examples/ready/sample.json",
+      "slice_topic": "skill loading order, source precedence, and eligibility filtering",
+      "schema_version": "1.0.0"
+    },
+    "intended_consumers": [
+      "software_developer_skill",
+      "code_generator"
+    ]
+  },
+  "mapping_policy": {
+    "preserve_source_trace": true,
+    "preserve_constraints": true,
+    "relation_flattening_policy": "disallow_by_default",
+    "unresolved_item_policy": "block_or_escalate",
+    "dropped_item_policy": "disallow_drop",
+    "prompt_assumption_policy": "disallow_unmapped_terms"
+  },
+  "concept_mappings": [
+    {
+      "concept_id": "C1",
+      "projection_action": "map",
+      "target_kind": "domain_entity",
+      "target_name": "ToolOrchestrationConfigModel",
+      "target_path": "contracts/generated/tool-orchestration/Domain/ToolOrchestrationConfigModel.cs",
+      "source_ids": [
+        "S2",
+        "S3"
+      ],
+      "notes": "Model orchestration configuration as the aggregate root so execution routing stays bounded by the same config semantics as the source slice."
+    },
+    {
+      "concept_id": "C2",
+      "projection_action": "map",
+      "target_kind": "value_object",
+      "target_name": "ToolRoutingSourceSelectionModel",
+      "target_path": "contracts/generated/tool-orchestration/Domain/ToolRoutingSourceSelectionModel.cs",
+      "source_ids": [
+        "S2",
+        "S3"
+      ],
+      "notes": "Keep source selection as a dedicated value object so orchestration routing decisions can remain explicit and reviewable."
+    },
+    {
+      "concept_id": "C3",
+      "projection_action": "map",
+      "target_kind": "domain_entity",
+      "target_name": "ToolOrchestrationSkillDefinitionModel",
+      "target_path": "contracts/generated/tool-orchestration/Domain/ToolOrchestrationSkillDefinitionModel.cs",
+      "source_ids": [
+        "S2",
+        "S3"
+      ],
+      "notes": "Treat each discovered skill definition as a routable orchestration participant so tool planning can preserve provenance."
+    },
+    {
+      "concept_id": "C4",
+      "projection_action": "map",
+      "target_kind": "enum",
+      "target_name": "ToolOrchestrationSourceTier",
+      "target_path": "contracts/generated/tool-orchestration/Domain/ToolOrchestrationSourceTier.cs",
+      "source_ids": [
+        "S1",
+        "S2",
+        "S3",
+        "S4"
+      ],
+      "notes": "Keep source tiers as a bounded enum so routing logic can preserve precedence semantics."
+    }
+  ],
+  "relation_mappings": [
+    {
+      "relation_id": "R3",
+      "projection_action": "map",
+      "target_kind": "association",
+      "target_name": "ToolOrchestrationSkillDefinitionUsesSourceTier",
+      "representation": "domain_association",
+      "source_ids": [
+        "S2",
+        "S3"
+      ],
+      "notes": "Preserve the definition-to-source association so orchestration routing never detaches execution from provenance."
+    }
+  ],
+  "constraint_mappings": [
+    {
+      "constraint_id": "K1",
+      "projection_action": "map",
+      "target_kind": "runtime_guard",
+      "target_name": "RespectToolOrchestrationSourcePrecedence",
+      "severity_mapping": "high -> blocking_validation",
+      "source_ids": [
+        "S1",
+        "S2",
+        "S4"
+      ],
+      "notes": "Project source precedence into a runtime guard so tool orchestration cannot reorder source priority by accident."
+    }
+  ],
+  "prompt_projection": {
+    "allowed_terms": [
+      "tool_orchestration_config",
+      "tool_orchestration_skill_definition",
+      "tool_orchestration_source_tier",
+      "source_precedence"
+    ],
+    "forbidden_assumptions": [
+      "Do not assume orchestration routing can bypass source precedence.",
+      "Do not flatten tool-routing provenance into generic step labels."
+    ],
+    "required_clarifications": [],
+    "reasoning_paths": [
+      "tool_orchestration_config -> tool_orchestration_skill_definition -> tool_orchestration_source_tier",
+      "tool_orchestration_source_tier -> source_precedence -> routing_decision"
+    ],
+    "source_digest": [
+      "Primary source: S2 src/OpenClaw.Core/Skills/SkillLoader.cs",
+      "Primary source: S3 src/OpenClaw.Core/Skills/SkillModels.cs",
+      "Supporting source: S1 docs/skillloader-loadall-analysis.md"
+    ]
+  },
+  "delivery_artifacts": [
+    {
+      "artifact_name": "ToolOrchestrationConfigModel.cs",
+      "artifact_type": "code_file",
+      "path": "src/OpenClaw.Gateway/skills/software-developer/contracts/generated/tool-orchestration/Domain/ToolOrchestrationConfigModel.cs",
+      "status": "planned"
+    }
+  ],
+  "dropped_items": [],
+  "open_questions": [],
+  "meta": {
+    "generated_at": "2026-04-21T00:00:00Z",
+    "generated_by": "ontology_extraction",
+    "workspace": "kingcrab",
+    "notes": "This consumer-skill domain-model projection gives software-developer a routing-oriented tool-orchestration model while preserving precedence and provenance semantics."
+  }
+}

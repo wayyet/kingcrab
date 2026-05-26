@@ -38,6 +38,7 @@ internal static class AdminEndpoints
         var learningService = FeatureFallbackServices.ResolveLearningService(startup, app.Services, fallbackFeatureStore);
         var facade = IntegrationApiFacade.Create(startup, runtime, app.Services);
         var sessionAdminStore = app.Services.GetRequiredService<ISessionAdminStore>();
+        var memoryStore = app.Services.GetRequiredService<IMemoryStore>();
         var operations = runtime.Operations;
         var modelEvaluationRunner = app.Services.GetService<ModelEvaluationRunner>()
             ?? new ModelEvaluationRunner(
@@ -617,6 +618,15 @@ internal static class AdminEndpoints
             if (automation is null)
                 return Results.BadRequest(new MutationResponse { Success = false, Error = "Automation payload is required." });
 
+            // Load existing record so we can preserve delivery config if caller omits it
+            var existing = await automationService.GetAsync(id, ctx.RequestAborted);
+
+            // Preserve delivery channel/recipient from existing record if not provided in the payload
+            var resolvedChannelId = string.IsNullOrWhiteSpace(automation.DeliveryChannelId)
+                ? existing?.DeliveryChannelId ?? "cron"
+                : automation.DeliveryChannelId;
+            var resolvedRecipientId = automation.DeliveryRecipientId ?? existing?.DeliveryRecipientId;
+
             var saved = await automationService.SaveAsync(new AutomationDefinition
             {
                 Id = id,
@@ -627,15 +637,15 @@ internal static class AdminEndpoints
                 Prompt = automation.Prompt,
                 ModelId = automation.ModelId,
                 RunOnStartup = automation.RunOnStartup,
-                SessionId = automation.SessionId,
-                DeliveryChannelId = automation.DeliveryChannelId,
-                DeliveryRecipientId = automation.DeliveryRecipientId,
-                DeliverySubject = automation.DeliverySubject,
+                SessionId = automation.SessionId ?? existing?.SessionId,
+                DeliveryChannelId = resolvedChannelId,
+                DeliveryRecipientId = resolvedRecipientId,
+                DeliverySubject = automation.DeliverySubject ?? existing?.DeliverySubject,
                 Tags = automation.Tags,
                 IsDraft = automation.IsDraft,
                 Source = automation.Source,
-                TemplateKey = automation.TemplateKey,
-                CreatedAtUtc = automation.CreatedAtUtc,
+                TemplateKey = automation.TemplateKey ?? existing?.TemplateKey,
+                CreatedAtUtc = existing?.CreatedAtUtc ?? automation.CreatedAtUtc,
                 UpdatedAtUtc = automation.UpdatedAtUtc
             }, ctx.RequestAborted);
 
@@ -659,6 +669,64 @@ internal static class AdminEndpoints
                     RunState = await automationService.GetRunStateAsync(saved.Id, ctx.RequestAborted)
                 },
                 CoreJsonContext.Default.IntegrationAutomationDetailResponse);
+        });
+
+        app.MapPost("/admin/automations", async (HttpContext ctx) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: true, endpointScope: "admin.automations.mutate");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+
+            var requestPayload = await ReadJsonBodyAsync(ctx, CoreJsonContext.Default.AutomationDefinition);
+            if (requestPayload.Failure is not null)
+                return requestPayload.Failure;
+
+            var automation = requestPayload.Value;
+            if (automation is null)
+                return Results.BadRequest(new MutationResponse { Success = false, Error = "Automation payload is required." });
+
+            var saved = await automationService.SaveAsync(new AutomationDefinition
+            {
+                Id = "",  // empty → server generates new ID
+                Name = automation.Name,
+                Enabled = automation.Enabled,
+                Schedule = automation.Schedule,
+                Timezone = automation.Timezone,
+                Prompt = automation.Prompt,
+                ModelId = automation.ModelId,
+                RunOnStartup = automation.RunOnStartup,
+                SessionId = automation.SessionId,
+                DeliveryChannelId = automation.DeliveryChannelId,
+                DeliveryRecipientId = automation.DeliveryRecipientId,
+                DeliverySubject = automation.DeliverySubject,
+                Tags = automation.Tags,
+                IsDraft = automation.IsDraft,
+                Source = string.IsNullOrWhiteSpace(automation.Source) ? "webchat" : automation.Source,
+                TemplateKey = automation.TemplateKey
+            }, ctx.RequestAborted);
+
+            return Results.Json(
+                new IntegrationAutomationDetailResponse
+                {
+                    Automation = saved,
+                    RunState = await automationService.GetRunStateAsync(saved.Id, ctx.RequestAborted)
+                },
+                CoreJsonContext.Default.IntegrationAutomationDetailResponse,
+                statusCode: StatusCodes.Status201Created);
+        });
+
+        app.MapDelete("/admin/automations/{id}", async (HttpContext ctx, string id) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: true, endpointScope: "admin.automations.mutate");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+
+            var automation = await automationService.GetAsync(id, ctx.RequestAborted);
+            if (automation is null)
+                return Results.NotFound(new MutationResponse { Success = false, Error = "Automation not found." });
+
+            await automationService.DeleteAsync(id, ctx.RequestAborted);
+            return Results.Json(new MutationResponse { Success = true }, CoreJsonContext.Default.MutationResponse);
         });
 
         app.MapPost("/admin/automations/{id}/run", async (HttpContext ctx, string id) =>
@@ -999,6 +1067,28 @@ internal static class AdminEndpoints
 
             var ids = runtime.AbortRegistry.ActiveSessionIds.ToList();
             return Results.Json(ids, CoreJsonContext.Default.ListString);
+        });
+
+        app.MapDelete("/admin/sessions/{id}", async (HttpContext ctx, string id) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: false, endpointScope: "admin.session.delete");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+            var auth = authResult.Authorization!;
+
+            try
+            {
+                runtime.AbortRegistry.TryAbort(id);
+                runtime.SessionManager.RemoveActive(id);
+                await memoryStore.DeleteSessionAsync(id, ctx.RequestAborted);
+                RecordOperatorAudit(ctx, operations, auth, "session_delete", id, $"Deleted session '{id}'.", success: true, before: null, after: null);
+                return Results.Json(new OperationStatusResponse { Success = true, Message = "Session deleted." }, CoreJsonContext.Default.OperationStatusResponse);
+            }
+            catch (Exception ex)
+            {
+                RecordOperatorAudit(ctx, operations, auth, "session_delete", id, $"Failed to delete session '{id}': {ex.Message}", success: false, before: null, after: null);
+                return Results.Json(new OperationStatusResponse { Success = false, Error = ex.Message }, CoreJsonContext.Default.OperationStatusResponse, statusCode: StatusCodes.Status500InternalServerError);
+            }
         });
 
         app.MapPost("/admin/sessions/{id}/metadata", async (HttpContext ctx, string id) =>
@@ -1649,35 +1739,52 @@ internal static class AdminEndpoints
 
             var builtinPayload = new { builtinCfg.Enabled, Servers = builtinServers };
 
-            // User workspace servers from .kingcrab/mcp.json
+            // User workspace servers — read from memory store first, fall back to workspace file
             object userPayload;
-            var workspacePath = startup.WorkspacePath;
-            if (string.IsNullOrEmpty(workspacePath))
+            var mcpConfigStoreGet = app.Services.GetRequiredService<OpenClaw.Gateway.Mcp.McpConfigStore>();
+            string? raw = null;
+            try
             {
-                userPayload = new { Enabled = true, Servers = new Dictionary<string, object>() };
+                raw = await mcpConfigStoreGet.TryLoadRawAsync(ctx.RequestAborted);
+            }
+            catch (IOException ex)
+            {
+                app.Services.GetRequiredService<ILoggerFactory>()
+                    .CreateLogger("WorkspaceMcp")
+                    .LogWarning(ex, "Failed to read workspace MCP config from memory store");
+            }
+
+            // Fallback: workspace file (legacy / manual edits)
+            if (raw is null && !string.IsNullOrEmpty(startup.WorkspacePath))
+            {
+                var filePath = Path.Combine(startup.WorkspacePath, ".kingcrab", "mcp.json");
+                if (File.Exists(filePath))
+                {
+                    try { raw = await File.ReadAllTextAsync(filePath, ctx.RequestAborted); }
+                    catch (IOException) { /* ignore, fall through to empty template */ }
+                }
+            }
+
+            // Always return a JsonElement so the casing in the JSON response is
+            // determined by the file content (PascalCase), never by ASP.NET Core's
+            // default camelCase naming policy for anonymous objects. This prevents
+            // the frontend from receiving mixed-case keys that later cause duplicate-key
+            // corruption on round-trip save.
+            const string emptyMcpTemplate = """{"Enabled":true,"Servers":{}}""";  
+            if (raw is null)
+            {
+                userPayload = JsonDocument.Parse(emptyMcpTemplate).RootElement.Clone();
             }
             else
             {
-                var filePath = Path.Combine(workspacePath, ".kingcrab", "mcp.json");
-                if (!File.Exists(filePath))
+                try
                 {
-                    userPayload = new { Enabled = true, Servers = new Dictionary<string, object>() };
+                    using var doc = JsonDocument.Parse(raw);
+                    userPayload = doc.RootElement.Clone();
                 }
-                else
+                catch (JsonException)
                 {
-                    try
-                    {
-                        var raw = await File.ReadAllTextAsync(filePath, ctx.RequestAborted);
-                        using var doc = JsonDocument.Parse(raw);
-                        userPayload = doc.RootElement.Clone();
-                    }
-                    catch (IOException ex)
-                    {
-                        app.Services.GetRequiredService<ILoggerFactory>()
-                            .CreateLogger("WorkspaceMcp")
-                            .LogWarning(ex, "Failed to read workspace MCP config from {Path}", filePath);
-                        return Results.StatusCode(StatusCodes.Status500InternalServerError);
-                    }
+                    userPayload = JsonDocument.Parse(emptyMcpTemplate).RootElement.Clone();
                 }
             }
 
@@ -1689,11 +1796,6 @@ internal static class AdminEndpoints
             var auth = EndpointHelpers.AuthorizeOperatorRequest(ctx, startup, browserSessions, requireCsrf: false);
             if (!auth.IsAuthorized)
                 return Results.Unauthorized();
-
-            var workspacePath = startup.WorkspacePath;
-            if (string.IsNullOrEmpty(workspacePath))
-                return Results.Json(new { success = false, error = "No workspace path configured." },
-                    statusCode: StatusCodes.Status409Conflict);
 
             if (ctx.Request.ContentLength is > MaxAdminJsonBodyBytes)
                 return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
@@ -1712,10 +1814,14 @@ internal static class AdminEndpoints
                 return Results.StatusCode(StatusCodes.Status500InternalServerError);
             }
 
-            // Validate it's well-formed JSON that matches our config shape
+            // Validate it's well-formed JSON that matches our config shape.
+            // Also normalize: re-serialize from the deserialized object so the saved file
+            // always has clean PascalCase keys — eliminates any duplicate / camelCase keys
+            // that the frontend might produce on a round-trip (e.g. both "Servers" and "servers").
+            McpPluginsConfig? parsed;
             try
             {
-                var parsed = JsonSerializer.Deserialize<McpPluginsConfig>(body,
+                parsed = JsonSerializer.Deserialize<McpPluginsConfig>(body,
                     new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                 if (parsed is null)
                     return Results.Json(new { success = false, error = "Invalid MCP config." },
@@ -1727,22 +1833,23 @@ internal static class AdminEndpoints
                     statusCode: StatusCodes.Status400BadRequest);
             }
 
-            var dir = Path.Combine(workspacePath, ".kingcrab");
-            var filePath = Path.Combine(dir, "mcp.json");
+            // Normalized JSON uses PascalCase property names as declared on McpPluginsConfig.
+            var normalizedJson = JsonSerializer.Serialize(parsed);
+
+            // Save to memory store and trigger immediate reload (no FSW dependency)
+            var mcpConfigStore = app.Services.GetRequiredService<OpenClaw.Gateway.Mcp.McpConfigStore>();
+            var mcpWatcherHolder = app.Services.GetRequiredService<OpenClaw.Gateway.Mcp.McpWatcherHolder>();
             try
             {
-                Directory.CreateDirectory(dir);
-                // Atomic write via temp file + rename
-                var tmp = filePath + ".tmp";
-                await File.WriteAllTextAsync(tmp, body, ctx.RequestAborted);
-                File.Move(tmp, filePath, overwrite: true);
+                await mcpConfigStore.SaveAsync(normalizedJson, ctx.RequestAborted);
+                mcpWatcherHolder.Watcher?.TriggerReload();
                 return Results.Json(new { success = true });
             }
             catch (IOException ex)
             {
                 app.Services.GetRequiredService<ILoggerFactory>()
                     .CreateLogger("WorkspaceMcp")
-                    .LogWarning(ex, "Failed to write workspace MCP config to {Path}", filePath);
+                    .LogWarning(ex, "Failed to save workspace MCP config");
                 return Results.StatusCode(StatusCodes.Status500InternalServerError);
             }
         });

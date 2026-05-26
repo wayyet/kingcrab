@@ -57,7 +57,7 @@ internal static class AgentSystemPromptBuilder
 
         var basePrompt =
             """
-            You are OpenClaw, a self-hosted AI assistant. You run locally on the user's machine.
+            You are an NCrew digital employee.
             You can execute tools to interact with the operating system, files, and external services.
             Be concise, helpful, and security-conscious. Never expose credentials or sensitive data.
             When using tools, explain what you're doing and why.
@@ -78,11 +78,19 @@ internal static class AgentSystemPromptBuilder
 
         var workspacePath = Environment.GetEnvironmentVariable("OPENCLAW_WORKSPACE") ?? Directory.GetCurrentDirectory();
 
+        // Load order matches OpenClaw upstream CONTEXT_FILE_ORDER priority:
+        // AGENTS(10) → SOUL(20) → IDENTITY(30) → MEMORY(70) → Ontology(80)
         var agentsFile = Path.Combine(workspacePath, "AGENTS.md");
         AppendOptionalPromptFile(ref basePrompt, "Workspace Memory (AGENTS.md)", agentsFile, PromptFileMaxChars);
 
         var soulFile = Path.Combine(workspacePath, "SOUL.md");
         AppendOptionalPromptFile(ref basePrompt, "Agent Personality (SOUL.md)", soulFile, PromptFileMaxChars);
+
+        var identityFile = Path.Combine(workspacePath, "IDENTITY.md");
+        AppendOptionalPromptFile(ref basePrompt, "Agent Identity (IDENTITY.md)", identityFile, PromptFileMaxChars);
+
+        var memoryFile = Path.Combine(workspacePath, "MEMORY.md");
+        AppendOptionalPromptFile(ref basePrompt, "Agent Memory Schema (MEMORY.md)", memoryFile, PromptFileMaxChars);
 
         return basePrompt;
     }

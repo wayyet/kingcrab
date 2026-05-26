@@ -11,7 +11,9 @@ internal static class ChannelReadinessEvaluator
         [
             EvaluateSms(config, isNonLoopbackBind),
             EvaluateTelegram(config, isNonLoopbackBind),
-            EvaluateWhatsApp(config, isNonLoopbackBind)
+            EvaluateWhatsApp(config, isNonLoopbackBind),
+            EvaluateDingTalk(config, isNonLoopbackBind),
+            EvaluateWeCom(config, isNonLoopbackBind)
         ];
     }
 
@@ -269,6 +271,123 @@ internal static class ChannelReadinessEvaluator
         }
 
         return ChannelReadinessState.From("whatsapp", "WhatsApp", whatsapp.Type, missing, warnings, guidance);
+    }
+
+    private static ChannelReadinessState EvaluateDingTalk(GatewayConfig config, bool isNonLoopbackBind)
+    {
+        var dingtalk = config.Channels.DingTalk;
+        if (!dingtalk.Enabled)
+            return ChannelReadinessState.Disabled("dingtalk", "DingTalk", "official", [
+                new ChannelFixGuidance
+                {
+                    Label = "Enable DingTalk channel",
+                    Href = "#dingtalk-enabled-input",
+                    Reference = "OpenClaw:Channels:DingTalk:Enabled"
+                }
+            ]);
+
+        var missing = new List<string>();
+        var warnings = new List<string>();
+        var guidance = new List<ChannelFixGuidance>();
+
+        if (string.IsNullOrWhiteSpace(ResolveSecretRefOrNull(dingtalk.AppKeyRef) ?? dingtalk.AppKey))
+        {
+            missing.Add("DingTalk AppKey or AppKeyRef");
+            guidance.Add(new ChannelFixGuidance
+            {
+                Label = "Set DingTalk app key",
+                Href = "#setup-ref-dingtalk-app-key",
+                Reference = "OpenClaw:Channels:DingTalk:AppKeyRef = env:DINGTALK_APP_KEY"
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(ResolveSecretRefOrNull(dingtalk.AppSecretRef) ?? dingtalk.AppSecret))
+        {
+            missing.Add("DingTalk AppSecret or AppSecretRef");
+            guidance.Add(new ChannelFixGuidance
+            {
+                Label = "Set DingTalk app secret",
+                Href = "#setup-ref-dingtalk-app-secret",
+                Reference = "OpenClaw:Channels:DingTalk:AppSecretRef = env:DINGTALK_APP_SECRET"
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(ResolveSecretRefOrNull(dingtalk.RobotCodeRef) ?? dingtalk.RobotCode))
+        {
+            missing.Add("DingTalk RobotCode 或 RobotCodeRef");
+            guidance.Add(new ChannelFixGuidance
+            {
+                Label = "设置钉钉 RobotCode",
+                Href = "#setup-ref-dingtalk-robot-code",
+                Reference = "OpenClaw:Channels:DingTalk:RobotCodeRef = env:DINGTALK_ROBOT_CODE"
+            });
+        }
+
+        if (dingtalk.RequireMentionInGroup && isNonLoopbackBind)
+        {
+            warnings.Add("DingTalk group @mention filtering depends on the bot user id fetched from the DingTalk API.");
+        }
+
+        return ChannelReadinessState.From("dingtalk", "DingTalk", "official", missing, warnings, guidance);
+    }
+
+    private static ChannelReadinessState EvaluateWeCom(GatewayConfig config, bool isNonLoopbackBind)
+    {
+        var wecom = config.Channels.WeCom;
+        if (!wecom.Enabled)
+            return ChannelReadinessState.Disabled("wecom", "WeCom", "official", [
+                new ChannelFixGuidance
+                {
+                    Label = "启用企业微信通道",
+                    Href = "#wecom-enabled-input",
+                    Reference = "OpenClaw:Channels:WeCom:Enabled"
+                }
+            ]);
+
+        var missing = new List<string>();
+        var warnings = new List<string>();
+        var guidance = new List<ChannelFixGuidance>();
+
+        // WebSocket 长连接凭证（必需）
+        if (string.IsNullOrWhiteSpace(ResolveSecretRefOrNull(wecom.BotIdRef) ?? wecom.BotId))
+        {
+            missing.Add("WeCom BotId 或 BotIdRef");
+            guidance.Add(new ChannelFixGuidance
+            {
+                Label = "设置企业微信智能机器人 BotId",
+                Href = "#setup-ref-wecom-bot-id",
+                Reference = "OpenClaw:Channels:WeCom:BotIdRef = env:WECOM_BOT_ID"
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(ResolveSecretRefOrNull(wecom.BotSecretRef) ?? wecom.BotSecret))
+        {
+            missing.Add("WeCom BotSecret 或 BotSecretRef");
+            guidance.Add(new ChannelFixGuidance
+            {
+                Label = "设置企业微信智能机器人 BotSecret",
+                Href = "#setup-ref-wecom-bot-secret",
+                Reference = "OpenClaw:Channels:WeCom:BotSecretRef = env:WECOM_BOT_SECRET"
+            });
+        }
+
+        // REST API 凭证（可选，缺失时仅影响主动发送和媒体上传）
+        if (string.IsNullOrWhiteSpace(ResolveSecretRefOrNull(wecom.CorpIdRef) ?? wecom.CorpId))
+        {
+            warnings.Add("WeCom CorpId 未配置；主动发送消息和媒体上传功能将不可用。");
+        }
+
+        if (string.IsNullOrWhiteSpace(ResolveSecretRefOrNull(wecom.CorpSecretRef) ?? wecom.CorpSecret))
+        {
+            warnings.Add("WeCom CorpSecret 未配置；主动发送消息和媒体上传功能将不可用。");
+        }
+
+        if (wecom.RequireMentionInGroup && isNonLoopbackBind)
+        {
+            warnings.Add("企业微信群聊 @提及 过滤依赖于消息内容中的 @BotName 检测。");
+        }
+
+        return ChannelReadinessState.From("wecom", "WeCom", "official", missing, warnings, guidance);
     }
 
     private static string? ResolveSecretRefOrNull(string? value)

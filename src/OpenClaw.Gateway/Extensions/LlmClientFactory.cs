@@ -10,7 +10,7 @@ using OpenClaw.Core.Models;
 
 namespace OpenClaw.Gateway.Extensions;
 
-internal readonly record struct LlmClientTransportOptions(Uri? Endpoint, int HiddenRetryCount);
+internal readonly record struct LlmClientTransportOptions(Uri? Endpoint, int RetryCount, TimeSpan? NetworkTimeout);
 
 public static class LlmClientFactory
 {
@@ -101,7 +101,9 @@ public static class LlmClientFactory
                 {
                     ApiKey = config.ApiKey ?? "ollama",
                     Endpoint = config.Endpoint ?? "http://localhost:11434/v1",
-                    Model = config.Model
+                    Model = config.Model,
+                    TimeoutSeconds = config.TimeoutSeconds,
+                    RetryCount = config.RetryCount
                 })
                 .GetChatClient(config.Model)
                 .AsIChatClient(),
@@ -153,7 +155,9 @@ public static class LlmClientFactory
             {
                 ApiKey = config.ApiKey ?? "ollama",
                 Endpoint = config.Endpoint ?? "http://localhost:11434/v1",
-                Model = config.Model
+                Model = config.Model,
+                TimeoutSeconds = config.TimeoutSeconds,
+                RetryCount = config.RetryCount
             }, embeddingModel!),
             "gemini" or "google" => CreateGeminiEmbeddingClient(config, embeddingModel!),
             "openai-compatible" or "groq" or "together" or "lmstudio" =>
@@ -161,7 +165,9 @@ public static class LlmClientFactory
                 {
                     ApiKey = config.ApiKey,
                     Model = config.Model,
-                    Endpoint = config.Endpoint
+                    Endpoint = config.Endpoint,
+                    TimeoutSeconds = config.TimeoutSeconds,
+                    RetryCount = config.RetryCount
                 }, embeddingModel!),
             "anthropic-vertex" or "amazon-bedrock" => null,
             _ => null
@@ -205,7 +211,7 @@ public static class LlmClientFactory
     private static IEmbeddingGenerator<string, Embedding<float>> CreateOpenAiEmbeddingClient(
         LlmProviderConfig config, string embeddingModel)
     {
-        var transport = CreateTransportOptions(config.Endpoint);
+        var transport = CreateTransportOptions(config.Endpoint, config.TimeoutSeconds, config.RetryCount);
         var client = new OpenAI.OpenAIClient(
             new ApiKeyCredential(config.ApiKey ?? throw new InvalidOperationException("API key required for embeddings.")),
             CreateOpenAiClientOptions(transport));
@@ -217,7 +223,7 @@ public static class LlmClientFactory
         if (string.IsNullOrWhiteSpace(llm.ApiKey))
             throw new InvalidOperationException("MODEL_PROVIDER_KEY must be set for the OpenAI provider.");
 
-        var transport = CreateTransportOptions(llm.Endpoint);
+        var transport = CreateTransportOptions(llm.Endpoint, llm.TimeoutSeconds, llm.RetryCount);
         return new OpenAI.OpenAIClient(new ApiKeyCredential(llm.ApiKey), CreateOpenAiClientOptions(transport));
     }
 
@@ -228,7 +234,7 @@ public static class LlmClientFactory
         if (string.IsNullOrWhiteSpace(llm.Endpoint))
             throw new InvalidOperationException("MODEL_PROVIDER_ENDPOINT must be set for the Azure OpenAI provider (e.g. https://myresource.openai.azure.com/).");
 
-        var transport = CreateTransportOptions(llm.Endpoint);
+        var transport = CreateTransportOptions(llm.Endpoint, llm.TimeoutSeconds, llm.RetryCount);
         return new OpenAI.OpenAIClient(new ApiKeyCredential(llm.ApiKey), CreateOpenAiClientOptions(transport));
     }
 
@@ -252,22 +258,26 @@ public static class LlmClientFactory
         };
     }
 
-    internal static LlmClientTransportOptions CreateTransportOptions(string? endpoint)
+    internal static LlmClientTransportOptions CreateTransportOptions(string? endpoint, int timeoutSeconds = 0, int retryCount = 0)
         => new(
             string.IsNullOrWhiteSpace(endpoint)
                 ? null
                 : new Uri(endpoint, UriKind.Absolute),
-            HiddenRetryCount: 0);
+            RetryCount: Math.Max(0, retryCount),
+            NetworkTimeout: timeoutSeconds > 0 ? TimeSpan.FromSeconds(timeoutSeconds) : null);
 
     private static OpenAI.OpenAIClientOptions CreateOpenAiClientOptions(LlmClientTransportOptions transport)
     {
         var options = new OpenAI.OpenAIClientOptions
         {
-            RetryPolicy = new ClientRetryPolicy(transport.HiddenRetryCount)
+            RetryPolicy = new ClientRetryPolicy(transport.RetryCount)
         };
 
         if (transport.Endpoint is not null)
             options.Endpoint = transport.Endpoint;
+
+        if (transport.NetworkTimeout is { } networkTimeout)
+            options.NetworkTimeout = networkTimeout;
 
         return options;
     }

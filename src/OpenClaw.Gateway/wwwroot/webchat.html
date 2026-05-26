@@ -92,6 +92,24 @@
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
                 MCP
             </button>
+
+            <!-- Cron/Automation button -->
+            <button id="cron-panel-btn" class="nav-btn" title="定时任务管理">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                定时任务
+            </button>
+
+            <!-- Workspace File Manager button -->
+            <button id="wf-panel-btn" class="nav-btn" title="工作区文件管理">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                工作区文件
+            </button>
+
+            <!-- Digital Employee button -->
+            <button id="de-panel-btn" class="nav-btn" title="数字员工管理">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+                数字员工
+            </button>
         </div>
     </div>
 
@@ -113,7 +131,15 @@
                 <div class="ch-tabs">
                     <button class="ch-tab active" data-channel="feishu">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-                        飞书 (Feishu)
+                        飞书(Feishu)
+                    </button>
+                    <button class="ch-tab" data-channel="dingtalk">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h10v4H7z"/><path d="M5 7h14l-1 12H6z"/><path d="M9 11h6"/><path d="M10 15h4"/></svg>
+                        钉钉 (DingTalk)
+                    </button>
+                    <button class="ch-tab" data-channel="wecom">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="4"/><path d="M7 8h10"/><path d="M7 12h10"/><path d="M7 16h6"/></svg>
+                        企业微信 (WeCom)
                     </button>
                 </div>
 
@@ -122,8 +148,31 @@
                     <label class="mcp-label">App ID</label>
                     <input id="feishu-appid" class="mcp-input" type="text" placeholder="cli_xxxxxxxxxxxxxxxx" autocomplete="off">
 
-                    <label class="mcp-label">App Secret <span class="mcp-hint">(留空保持不变)</span></label>
-                    <input id="feishu-appsecret" class="mcp-input" type="password" placeholder="留空保持不变" autocomplete="new-password">
+                    <label class="mcp-label">App Secret <span class="mcp-hint">(直接值，优先于 Ref)</span></label>
+                    <input id="feishu-appsecret" class="mcp-input" type="password" placeholder="留空则使用 AppSecretRef" autocomplete="new-password">
+
+                    <label class="mcp-label">App Secret Ref <span class="mcp-hint">(env:VAR_NAME 或 raw:value)</span></label>
+                    <input id="feishu-appsecret-ref" class="mcp-input" type="text" placeholder="env:FEISHU_APP_SECRET" autocomplete="off">
+                </div>
+
+                <div id="ch-dingtalk-form" class="mcp-form-grid" style="display:none">
+                    <label class="mcp-label">App ID</label>
+                    <input id="dingtalk-appid" class="mcp-input" type="text" placeholder="dingxxxxxxxxxxxx" autocomplete="off">
+
+                    <label class="mcp-label">App Key（Client ID）</label>
+                    <input id="dingtalk-appkey" class="mcp-input" type="text" placeholder="dingxxxxxxxxxxxx" autocomplete="off">
+
+                    <label class="mcp-label">App Secret（Client Secret）</label>
+                    <input id="dingtalk-appsecret" class="mcp-input" type="password" placeholder="xxxxxxxxxxxxxxxx" autocomplete="new-password">
+                </div>
+
+                <!-- 企业微信 (WeCom) 配置表单 -->
+                <div id="ch-wecom-form" class="mcp-form-grid" style="display:none">
+                    <label class="mcp-label">Bot ID</label>
+                    <input id="wecom-botid" class="mcp-input" type="text" placeholder="aib-xxxxxxxxxxxx" autocomplete="off">
+
+                    <label class="mcp-label">Bot Secret</label>
+                    <input id="wecom-botsecret" class="mcp-input" type="password" placeholder="xxxxxxxxxxxxxxxx" autocomplete="new-password">
                 </div>
 
                 <div id="ch-form-error" class="mcp-form-error" style="display:none"></div>
@@ -220,6 +269,312 @@
         </div>
     </div>
 
+    <!-- Cron / Automation Management Modal -->
+    <div id="cron-overlay" class="mcp-overlay" role="dialog" aria-modal="true" aria-label="定时任务管理">
+        <div class="mcp-panel cron-panel">
+            <div class="mcp-panel-header">
+                <div class="mcp-panel-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    定时任务
+                </div>
+                <div style="display:flex;gap:6px;align-items:center">
+                    <button id="cron-refresh-btn" class="nav-btn" title="刷新列表">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3"/></svg>
+                        刷新
+                    </button>
+                    <button id="cron-add-btn" class="nav-btn primary" title="新建定时任务">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        新建
+                    </button>
+                    <button id="cron-close-btn" class="mcp-close-btn" title="关闭" aria-label="关闭定时任务面板">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                </div>
+            </div>
+
+            <div class="mcp-panel-body">
+                <!-- Job list -->
+                <div id="cron-job-list" class="mcp-server-list"></div>
+
+                <!-- Add/Edit form -->
+                <div id="cron-form-section" class="mcp-form-section" style="display:none">
+                    <div class="mcp-form-title" id="cron-form-title">新建定时任务</div>
+                    <div class="mcp-form-grid">
+                        <label class="mcp-label">名称</label>
+                        <input id="cron-f-name" class="mcp-input" type="text" placeholder="每日早报" autocomplete="off">
+
+                        <label class="mcp-label mcp-label-top">提示词</label>
+                        <textarea id="cron-f-prompt" class="mcp-input" rows="4" placeholder="请发送今日早报、天气和重要日程提醒…"></textarea>
+
+                        <label class="mcp-label">执行计划 <span class="mcp-hint">cron 表达式或 @daily/@hourly 等</span></label>
+                        <div class="cron-schedule-wrap">
+                            <div class="cron-freq-tabs">
+                                <button type="button" class="cron-freq-tab active" data-preset="daily">每天</button>
+                                <button type="button" class="cron-freq-tab" data-preset="interval">按间隔</button>
+                                <button type="button" class="cron-freq-tab" data-preset="custom">自定义</button>
+                            </div>
+                            <div id="cron-preset-daily" class="cron-preset-panel">
+                                <div class="cron-time-row">
+                                    <label class="mcp-label">时间</label>
+                                    <input id="cron-daily-time" type="time" class="mcp-input cron-time-input" value="09:00">
+                                    <label class="mcp-label" style="margin-left:12px">仅工作日</label>
+                                    <label class="mcp-toggle"><input id="cron-daily-weekday" type="checkbox"><span class="mcp-toggle-track"></span></label>
+                                </div>
+                            </div>
+                            <div id="cron-preset-interval" class="cron-preset-panel" style="display:none">
+                                <div class="cron-time-row">
+                                    <label class="mcp-label">每隔</label>
+                                    <input id="cron-interval-val" type="number" class="mcp-input" style="width:70px" value="1" min="1">
+                                    <select id="cron-interval-unit" class="mcp-input" style="width:80px">
+                                        <option value="min">分钟</option>
+                                        <option value="hour" selected>小时</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div id="cron-preset-custom" class="cron-preset-panel" style="display:none">
+                                <input id="cron-f-schedule-raw" class="mcp-input" type="text" placeholder="0 9 * * 1-5" autocomplete="off" style="width:100%">
+                                <div class="mcp-hint" style="margin-top:4px">5 字段 cron 表达式，或 @daily/@hourly/@weekly/@monthly</div>
+                            </div>
+                        </div>
+
+                        <label class="mcp-label">时区 <span class="mcp-hint">可选</span></label>
+                        <input id="cron-f-timezone" class="mcp-input" type="text" placeholder="Asia/Shanghai" autocomplete="off">
+
+                        <label class="mcp-label">模型 <span class="mcp-hint">留空使用默认</span></label>
+                        <input id="cron-f-model" class="mcp-input" type="text" placeholder="" autocomplete="off">
+
+                        <label class="mcp-label">推送渠道 <span class="mcp-hint">留空默认 cron（写文件）</span></label>
+                        <input id="cron-f-channel" class="mcp-input" type="text" placeholder="feishu / websocket / email…" autocomplete="off">
+
+                        <label class="mcp-label">推送对象 ID <span class="mcp-hint">留空使用当前用户</span></label>
+                        <input id="cron-f-recipient" class="mcp-input" type="text" placeholder="飞书 open_id: ou_xxx" autocomplete="off">
+
+                        <label class="mcp-label">启用</label>
+                        <label class="mcp-toggle">
+                            <input id="cron-f-enabled" type="checkbox" checked>
+                            <span class="mcp-toggle-track"></span>
+                        </label>
+                    </div>
+                    <div id="cron-form-error" class="mcp-form-error" style="display:none"></div>
+                    <div class="mcp-form-actions">
+                        <button id="cron-form-cancel-btn" class="nav-btn">取消</button>
+                        <button id="cron-form-save-btn" class="nav-btn primary">保存</button>
+                    </div>
+                </div>
+
+                <!-- History sub-panel (shown inline below a job card) -->
+                <div id="cron-history-section" style="display:none">
+                    <div class="mcp-form-title" id="cron-history-title">执行历史</div>
+                    <div id="cron-history-list"></div>
+                    <div class="mcp-form-actions">
+                        <button id="cron-session-view-btn" class="nav-btn" style="display:none">查看完整会话</button>
+                        <button id="cron-history-close-btn" class="nav-btn">关闭</button>
+                    </div>
+                </div>
+
+                <!-- Session full view sub-panel -->
+                <div id="cron-session-section" style="display:none">
+                    <div class="mcp-form-title" id="cron-session-title">完整会话记录</div>
+                    <div id="cron-session-list"></div>
+                    <div class="mcp-form-actions">
+                        <button id="cron-session-close-btn" class="nav-btn">返回历史</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="cron-panel-status" class="mcp-panel-status" style="display:none"></div>
+        </div>
+    </div>
+
+    <!-- Workspace File Manager Modal -->
+    <div id="wf-overlay" class="mcp-overlay" role="dialog" aria-modal="true" aria-label="工作区文件管理">
+        <div class="mcp-panel">
+            <div class="mcp-panel-header">
+                <div class="mcp-panel-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                    工作区文件管理
+                </div>
+                <button id="wf-close-btn" class="mcp-close-btn" title="关闭" aria-label="关闭工作区文件管理">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+
+            <div class="mcp-panel-body">
+                <!-- Tabs -->
+                <div class="ch-tabs">
+                    <button class="ch-tab active" id="wf-tab-upload" data-tab="upload">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        上传文件
+                    </button>
+                    <button class="ch-tab" id="wf-tab-download" data-tab="download">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        下载文件
+                    </button>
+                    <button class="ch-tab" id="wf-tab-browse" data-tab="browse">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                        浏览目录
+                    </button>
+                </div>
+
+                <!-- Tab: Upload -->
+                <div id="wf-panel-upload" class="de-tab-panel">
+                    <div class="mcp-hint" style="margin-bottom:12px">
+                        上传文件到工作区指定目录。上传 <code>.zip</code> 文件时自动解压到目标目录；其他格式直接写入目标目录。支持多选。单次最大 100 MB。
+                    </div>
+                    <div class="mcp-form-grid" style="margin-bottom:12px">
+                        <label class="mcp-label">目标目录 <span class="mcp-hint">（相对工作区根，留空 = 根目录）</span></label>
+                        <input id="wf-upload-dir" class="mcp-input" type="text" placeholder="例如：inputs/materials" autocomplete="off">
+                    </div>
+                    <div class="de-upload-zone" id="wf-upload-dropzone">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        <div class="de-upload-label">将文件拖拽到此处，或</div>
+                        <label class="nav-btn primary de-file-label" for="wf-upload-file-input">选择文件</label>
+                        <input type="file" id="wf-upload-file-input" multiple style="display:none">
+                        <div id="wf-upload-filenames" class="de-selected-file" style="display:none"></div>
+                    </div>
+                    <div class="mcp-form-actions" style="margin-top:12px">
+                        <button id="wf-upload-btn" class="nav-btn primary" disabled>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                            上传
+                        </button>
+                    </div>
+                    <div id="wf-upload-result" class="de-result-box" style="display:none"></div>
+                </div>
+
+                <!-- Tab: Download -->
+                <div id="wf-panel-download" class="de-tab-panel" style="display:none">
+                    <div class="mcp-hint" style="margin-bottom:12px">
+                        从工作区下载单个文件或整个目录。目录将自动打包为 <code>.zip</code>。路径相对工作区根，留空下载整个工作区根。
+                    </div>
+                    <div class="mcp-form-grid" style="margin-bottom:12px">
+                        <label class="mcp-label">路径 <span class="mcp-hint">（文件或目录，相对工作区根）</span></label>
+                        <input id="wf-download-path" class="mcp-input" type="text" placeholder="例如：outputs/result.json 或 outputs/" autocomplete="off">
+                    </div>
+                    <div class="mcp-form-actions">
+                        <button id="wf-download-btn" class="nav-btn primary">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            下载
+                        </button>
+                    </div>
+                    <div id="wf-download-result" class="de-result-box" style="display:none"></div>
+                </div>
+
+                <!-- Tab: Browse -->
+                <div id="wf-panel-browse" class="de-tab-panel" style="display:none">
+                    <div class="mcp-hint" style="margin-bottom:12px">
+                        浏览工作区目录结构。留空查看根目录。最大深度默认 6 层（0 = 不限，慎用）。
+                    </div>
+                    <div class="mcp-form-grid" style="margin-bottom:8px;grid-template-columns:1fr auto">
+                        <input id="wf-browse-path" class="mcp-input" type="text" placeholder="目录路径（留空=根目录）" autocomplete="off" style="grid-column:1">
+                        <input id="wf-browse-depth" class="mcp-input" type="number" min="0" max="20" value="6" title="最大深度（0=不限）" style="width:60px;grid-column:2;margin-left:6px">
+                    </div>
+                    <div class="mcp-form-actions" style="margin-bottom:10px">
+                        <button id="wf-browse-btn" class="nav-btn primary">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                            查询
+                        </button>
+                    </div>
+                    <div id="wf-browse-result" style="display:none;overflow:auto;max-height:360px;background:var(--bg2,#1e1e1e);border:1px solid var(--border,#333);border-radius:6px;padding:10px;font-size:12px;font-family:monospace;line-height:1.6"></div>
+                </div>
+            </div>
+
+            <div id="wf-panel-status" class="mcp-panel-status" style="display:none"></div>
+        </div>
+    </div>
+
+    <!-- Digital Employee Management Modal -->
+    <div id="de-overlay" class="mcp-overlay" role="dialog" aria-modal="true" aria-label="数字员工管理">
+        <div class="mcp-panel">
+            <div class="mcp-panel-header">
+                <div class="mcp-panel-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+                    数字员工管理
+                </div>
+                <button id="de-close-btn" class="mcp-close-btn" title="关闭" aria-label="关闭数字员工面板">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+
+            <div class="mcp-panel-body">
+                <!-- Tabs -->
+                <div class="ch-tabs">
+                    <button class="ch-tab active" id="de-tab-list" data-tab="list">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+                        技能列表
+                    </button>
+                    <button class="ch-tab" id="de-tab-skill-pkg" data-tab="skill-pkg">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                        上传技能
+                    </button>
+                    <button class="ch-tab" id="de-tab-pkg" data-tab="pkg">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+                        上传模板包
+                    </button>
+                </div>
+
+                <!-- Tab: skills list -->
+                <div id="de-panel-list" class="de-tab-panel">
+                    <div class="mcp-form-actions" style="justify-content:flex-start;margin-bottom:10px">
+                        <button id="de-refresh-btn" class="nav-btn" title="刷新技能列表">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                            刷新
+                        </button>
+                    </div>
+                    <div id="de-skill-list" class="de-skill-list">
+                        <div class="de-skill-loading mcp-hint">加载中…</div>
+                    </div>
+                </div>
+
+                <!-- Tab: upload skill ZIP -->
+                <div id="de-panel-skill-pkg" class="de-tab-panel" style="display:none">
+                    <div class="mcp-hint" style="margin-bottom:12px">
+                        上传包含 <code>SKILL.md</code>（带 <code>name:</code> frontmatter）的技能 ZIP 包，
+                        系统自动提取技能名并安装到工作区，上传后立即热重载。最大 10 MB。
+                    </div>
+                    <div class="de-upload-zone" id="de-skill-dropzone">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        <div class="de-upload-label">将技能 .zip 拖拽到此处，或</div>
+                        <label class="nav-btn primary de-file-label" for="de-skill-pkg-file-input">选择文件</label>
+                        <input type="file" id="de-skill-pkg-file-input" accept=".zip,application/zip" style="display:none">
+                        <div id="de-skill-pkg-filename" class="de-selected-file" style="display:none"></div>
+                    </div>
+                    <div class="mcp-form-actions" style="margin-top:12px">
+                        <button id="de-skill-pkg-upload-btn" class="nav-btn primary" disabled>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                            上传技能
+                        </button>
+                    </div>
+                    <div id="de-skill-pkg-result" class="de-result-box" style="display:none"></div>
+                </div>
+
+                <!-- Tab: upload full digital employee package ZIP -->
+                <div id="de-panel-pkg" class="de-tab-panel" style="display:none">
+                    <div class="mcp-hint" style="margin-bottom:12px">
+                        上传符合 NCrew 规范的数字员工模板压缩包（.zip），系统将自动提取
+                        配置文件（AGENTS.md / SOUL.md / IDENTITY.md / MEMORY.md）、技能包和本体切片到工作区。
+                        <br>最大 30 MB。技能立即热重载；配置文件重启后生效。
+                    </div>
+                    <div class="de-upload-zone" id="de-pkg-dropzone">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        <div class="de-upload-label">将 .zip 文件拖拽到此处，或</div>
+                        <label class="nav-btn primary de-file-label" for="de-pkg-file-input">选择文件</label>
+                        <input type="file" id="de-pkg-file-input" accept=".zip,application/zip" style="display:none">
+                        <div id="de-pkg-filename" class="de-selected-file" style="display:none"></div>
+                    </div>
+                    <div class="mcp-form-actions" style="margin-top:12px">
+                        <button id="de-pkg-upload-btn" class="nav-btn primary" disabled>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                            上传并安装
+                        </button>
+                    </div>
+                    <div id="de-pkg-result" class="de-result-box" style="display:none"></div>
+                </div>
+            </div>
+
+            <div id="de-panel-status" class="mcp-panel-status" style="display:none"></div>
+        </div>
+    </div>
+
     <div id="app-layout">
         <div id="sidebar">
             <div id="sidebar-header">
@@ -228,6 +583,10 @@
                     New Chat
                 </button>
                 <input id="session-search" type="text" placeholder="Search sessions…">
+                <button id="clear-sessions-btn" title="清除所有会话">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>
+                    清除所有会话
+                </button>
             </div>
             <div id="session-list">
                 <div id="sidebar-empty">Loading sessions…</div>
@@ -279,6 +638,19 @@
                 </div>
             </div>
         </div>
+
+        <aside id="artifact-panel" aria-label="Artifacts">
+            <div id="artifact-panel-header">
+                <div>
+                    <div id="artifact-panel-title">阶段产物</div>
+                    <div id="artifact-panel-subtitle">技能运行时输出的数据和文件</div>
+                </div>
+                <span id="artifact-count">0</span>
+            </div>
+            <div id="artifact-list">
+                <div id="artifact-empty-state">等待技能产物输出…</div>
+            </div>
+        </aside>
     </div>
 
     <!-- Scripts for Markdown parsing and Syntax Highlighting -->
