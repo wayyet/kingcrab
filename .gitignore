@@ -364,3 +364,4 @@ FodyWeavers.xsd
 
 src/OpenClaw.Gateway/memory
 .gstack/
+evaluation-expert-consumer/simulators/customer_realistic/decide.py
