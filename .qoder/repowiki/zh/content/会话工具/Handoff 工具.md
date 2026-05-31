@@ -347,13 +347,14 @@ graph LR
 
 | 维度 | 状态 | 说明 |
 | --- | --- | --- |
-| 主工具集（Gateway 默认 built-in） | ❌ **未默认注册** | 在 `RuntimeFactories.cs` 的 `CreateBuiltInTools` 列表（[L114-L160](file:///e:/gitee/kingcrab/src/OpenClaw.Gateway/Composition/RuntimeInitializationExtensions.RuntimeFactories.cs#L114-L160)）中找不到 `new HandoffTool(...)` |
+| 主工具集（Gateway 默认 built-in） | ⚠️ **开关默认关闭** | `RuntimeFactories.cs` 里通过 `if (config.Tooling.EnableHandoffTool) tools.Add(new HandoffTool(services.SessionMetadataStore, config.Handoff))` 条件注册，[ToolingConfig.EnableHandoffTool](file:///e:/gitee/kingcrab/src/OpenClaw.Core/Models/GatewayConfig.cs) 默认 `false` |
+| 启用方式 | ✅ | 在 `appsettings.json` 或环境变量中设 `Tooling:EnableHandoffTool=true`，同时配置 `Handoff` 节（参见 §4） |
 | 测试装载 | ✅ | [HandoffToolTests.cs#L289-L298](file:///e:/gitee/kingcrab/src/OpenClaw.Tests/HandoffToolTests.cs#L289-L298) 直接 `new HandoffTool(metadataStore, config)` |
 | 业务消费 | ✅ | `OpenClaw.Plugins.EmploymentCoachWorkflow` 的 `skill-generation` 期望从 metadata 读取 handoff 工单（参见其 [SKILL.md](file:///e:/gitee/kingcrab/src/OpenClaw.Plugins.EmploymentCoachWorkflow/skills/skill-generation/SKILL.md)） |
 
-**含义**：当前要让 LLM 可调用 `handoff` 工具，必须由插件/Plugin 启动时显式注册（构造时传入 `HandoffConfig` 或一组 `HandoffWorkflowOptions`）。源码已留出 4 个构造函数重载（[#L13-L49](file:///e:/gitee/kingcrab/src/OpenClaw.Gateway/Tools/HandoffTool.cs#L13-L49)）支持单 workflow 注入、批量注入、配置驱动注入三种姿态。
+**含义**：当前 HandoffTool 走「默认禁用」路线——必须显式设置 `ToolingConfig.EnableHandoffTool=true` 才会进入 Gateway built-in 工具集。另外插件/Plugin 也可在启动时显式构造同名工具（传入 `HandoffConfig` 或一组 `HandoffWorkflowOptions`）。源码留有 4 个构造函数重载（[#L13-L49](file:///e:/gitee/kingcrab/src/OpenClaw.Gateway/Tools/HandoffTool.cs#L13-L49)）支持单 workflow 注入、批量注入、配置驱动注入三种姿态。
 
-> 这是与 [Todo 工具](Todo%20%E5%B7%A5%E5%85%B7.md) 最关键的差异之一：todo 默认开启，handoff 是"按工作流插件激活"。
+> 这是与 [Todo 工具](Todo%20%E5%B7%A5%E5%85%B7.md) 类似的开关机制：两者均默认禁用，需在 `appsettings.json` 中分别启用 `Tooling:EnableTodoTool` / `Tooling:EnableHandoffTool`。
 
 ---
 
@@ -386,7 +387,7 @@ graph LR
 | 乐观并发（`expected_revision`） | ✅（patch / transition） |
 | `fingerprint` 去重（含跨条目冲突检测） | ✅ |
 | payload 深合并 | ✅ |
-| 主工具集默认注册 | ❌（仅插件/测试装载） |
+| 主工具集默认注册 | ⚠️ 由 `ToolingConfig.EnableHandoffTool` 开关控制（默认 false）；开启后走 `RuntimeFactories.CreateBuiltInTools` 条件注册分支 |
 | 跨会话查询 / 全局视图 | ❌（设计如此，会话隔离） |
 | 软删除（dismissed）vs 物理删除（remove）分离 | ✅ |
 | 输出格式 | JSON（`SessionHandoff{List,Mutation,Remove}Response`，源生成于 `CoreJsonContext`） |

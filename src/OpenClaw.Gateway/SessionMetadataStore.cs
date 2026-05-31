@@ -1,10 +1,11 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Models;
 
 namespace OpenClaw.Gateway;
 
-internal sealed class SessionMetadataStore
+internal sealed class SessionMetadataStore : ISessionMetadataStore
 {
     private const string DirectoryName = "admin";
     private const string FileName = "session-metadata.json";

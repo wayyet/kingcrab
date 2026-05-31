@@ -123,7 +123,6 @@ internal static partial class RuntimeInitializationExtensions
             new SessionsTool(services.SessionManager, services.Pipeline.InboundWriter),
             new SessionSearchTool(services.SessionSearchStore),
             new ProfileReadTool(services.UserProfileStore),
-            new TodoTool(services.SessionMetadataStore),
             new AutomationTool(services.AutomationService, services.Pipeline),
             new VisionAnalyzeTool(services.GeminiMultimodalService),
             new TextToSpeechTool(services.TextToSpeechService),
@@ -161,6 +160,12 @@ internal static partial class RuntimeInitializationExtensions
 
         if (browserAvailability.Registered)
             tools.Add(new BrowserTool(config.Tooling, services.RuntimeMetrics, browserAvailability.LocalExecutionSupported));
+
+        if (config.Tooling.EnableTodoTool)
+            tools.Add(new TodoTool(services.SessionMetadataStore));
+
+        if (config.Tooling.EnableHandoffTool)
+            tools.Add(new HandoffTool(services.SessionMetadataStore, config.Handoff));
 
         if (config.ExternalCli.Enabled)
             tools.Add(new ExternalCliTool(

@@ -30,7 +30,7 @@ graph LR
 | 工具实现 | [TodoTool.cs](file:///e:/gitee/kingcrab/src/OpenClaw.Gateway/Tools/TodoTool.cs) | 解析参数、CRUD、渲染输出 |
 | 数据模型 | [SessionTodoItem](file:///e:/gitee/kingcrab/src/OpenClaw.Core/Models/OperatorApiModels.cs#L600-L608) | 7 字段的 sealed class |
 | 持久化 | [SessionMetadataStore](file:///e:/gitee/kingcrab/src/OpenClaw.Gateway/SessionMetadataStore.cs) | 按 `Session.Id` 读写整段 metadata |
-| 注册接线 | [RuntimeInitializationExtensions.RuntimeFactories.cs#L126](file:///e:/gitee/kingcrab/src/OpenClaw.Gateway/Composition/RuntimeInitializationExtensions.RuntimeFactories.cs#L126) | `new TodoTool(services.SessionMetadataStore)` 加入 built-in tools |
+| 注册接线 | [RuntimeInitializationExtensions.RuntimeFactories.cs](file:///e:/gitee/kingcrab/src/OpenClaw.Gateway/Composition/RuntimeInitializationExtensions.RuntimeFactories.cs) | 通过 `config.Tooling.EnableTodoTool` 开关条件式 `tools.Add(new TodoTool(services.SessionMetadataStore))`，**默认 false**
 
 ---
 
@@ -152,7 +152,7 @@ todo_3c2d1e0f9a8b7 [done] 整理上周会议纪要
 | 状态 | 仅 `open`/`done` 二态（且 done 单向） | 多状态机（drafting/ready_to_dispatch/dispatched/dirty/confirmed/needs_review/dismissed） |
 | 并发 | 无版本号 | `revision` 乐观并发 + `fingerprint` 去重 |
 | 工作流 | 无 | 多 `workflow_id` 注册（`HandoffWorkflowRegistry`） |
-| 注册 | ✅ 默认 built-in 工具 | ⚠️ 当前主工具集**未默认注册**（详见 [Handoff 工具.md §10](Handoff%20%E5%B7%A5%E5%85%B7.md)） |
+| 注册 | ⚠️ 通过 `ToolingConfig.EnableTodoTool` 开关启用（默认 false） | ⚠️ 通过 `ToolingConfig.EnableHandoffTool` 开关启用（默认 false，详见 [Handoff 工具.md §10](Handoff%20%E5%B7%A5%E5%85%B7.md)） |
 | 引用方向 | 被 handoff 引用 | `SessionHandoffItem.RelatedTodos` 持 `todo_id` 数组 |
 
 典型协作模式：LLM 先 `todo add` 列出粗粒度待办，确认范围后用 `handoff upsert` 把可派发项升级为带状态机的工单，并把对应的 `todo_id` 写入 `related_todos` 维持双向引用。
@@ -163,7 +163,7 @@ todo_3c2d1e0f9a8b7 [done] 整理上周会议纪要
 
 | 维度 | 状态 |
 | --- | --- |
-| Tool 注册 | ✅ 默认加入 Gateway built-in 工具集 ([RuntimeFactories.cs#L126](file:///e:/gitee/kingcrab/src/OpenClaw.Gateway/Composition/RuntimeInitializationExtensions.RuntimeFactories.cs#L126)) |
+| Tool 注册 | ⚠️ 由 `ToolingConfig.EnableTodoTool` 开关控制（默认 false），开启后加入 Gateway built-in 工具集 ([RuntimeFactories.cs](file:///e:/gitee/kingcrab/src/OpenClaw.Gateway/Composition/RuntimeInitializationExtensions.RuntimeFactories.cs)) |
 | 测试覆盖 | ✅ [TodoToolTests.cs](file:///e:/gitee/kingcrab/src/OpenClaw.Tests/TodoToolTests.cs) |
 | 接口稳定性 | ✅ 7 字段模型 + 6 actions，跨版本未破坏 |
 | 输出格式 | 文本（非 JSON），与 handoff 的 JSON 输出形成对比 |

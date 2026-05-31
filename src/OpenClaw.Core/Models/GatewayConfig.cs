@@ -23,6 +23,7 @@ public sealed class GatewayConfig
     public HarnessConfig Harness { get; set; } = new();
     public ToolGovernanceConfig Governance { get; set; } = new();
     public PaymentConfig Payments { get; set; } = new();
+    public HandoffConfig Handoff { get; set; } = new();
     public ExternalCliOptions ExternalCli { get; set; } = new();
     public SandboxConfig Sandbox { get; set; } = new();
     public ExecutionConfig Execution { get; set; } = new();
@@ -447,6 +448,13 @@ public sealed class ToolingConfig
     public int ToolApprovalTimeoutSeconds { get; set; } = 300;
 
     public bool EnableBrowserTool { get; set; } = true;
+
+    /// <summary>Enable the <c>todo</c> tool for session-scoped task tracking. Default: false.</summary>
+    public bool EnableTodoTool { get; set; } = false;
+
+    /// <summary>Enable the <c>handoff</c> tool for transferring sessions to another agent. Default: false.</summary>
+    public bool EnableHandoffTool { get; set; } = false;
+
     public bool AllowBrowserEvaluate { get; set; } = true;
     public bool BrowserHeadless { get; set; } = true;
     public int BrowserTimeoutSeconds { get; set; } = 30;
