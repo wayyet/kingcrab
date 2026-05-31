@@ -9,6 +9,7 @@ internal sealed class SessionMetadataStore : ISessionMetadataStore
 {
     private const string DirectoryName = "admin";
     private const string FileName = "session-metadata.json";
+    private const string LegacyDefaultHandoffWorkflowId = "employment-coach";
 
     private readonly string _path;
     private readonly Lock _gate = new();
@@ -34,7 +35,8 @@ internal sealed class SessionMetadataStore : ISessionMetadataStore
                     SessionId = sessionId,
                     Starred = false,
                     Tags = [],
-                    TodoItems = []
+                    TodoItems = [],
+                    HandoffItems = []
                 };
         }
     }
@@ -58,7 +60,8 @@ internal sealed class SessionMetadataStore : ISessionMetadataStore
                     SessionId = sessionId,
                     Starred = false,
                     Tags = [],
-                    TodoItems = []
+                    TodoItems = [],
+                    HandoffItems = []
                 };
 
             var updated = new SessionMetadataSnapshot
@@ -74,7 +77,8 @@ internal sealed class SessionMetadataStore : ISessionMetadataStore
                 ActivePresetId = string.IsNullOrWhiteSpace(request.ActivePresetId)
                     ? current.ActivePresetId
                     : request.ActivePresetId.Trim(),
-                TodoItems = NormalizeTodoItems(request.TodoItems ?? current.TodoItems)
+                TodoItems = NormalizeTodoItems(request.TodoItems ?? current.TodoItems),
+                HandoffItems = NormalizeHandoffItems(sessionId, request.HandoffItems ?? current.HandoffItems)
             };
 
             items.RemoveAll(item => string.Equals(item.SessionId, sessionId, StringComparison.Ordinal));
@@ -131,5 +135,67 @@ internal sealed class SessionMetadataStore : ISessionMetadataStore
             .OrderBy(static item => item.Completed)
             .ThenBy(static item => item.CreatedAtUtc)
             .ToArray();
+    }
+
+    private static IReadOnlyList<SessionHandoffItem> NormalizeHandoffItems(string sessionId, IReadOnlyList<SessionHandoffItem>? items)
+    {
+        if (items is null || items.Count == 0)
+            return [];
+
+        return items
+            .Where(static item => !string.IsNullOrWhiteSpace(item.HandoffId) || !string.IsNullOrWhiteSpace(item.Fingerprint))
+            .Select(item => new SessionHandoffItem
+            {
+                SessionId = sessionId,
+                WorkflowId = string.IsNullOrWhiteSpace(item.WorkflowId) ? LegacyDefaultHandoffWorkflowId : item.WorkflowId.Trim(),
+                HandoffId = string.IsNullOrWhiteSpace(item.HandoffId) ? CreateHandoffId(item.Stage) : item.HandoffId.Trim(),
+                Title = item.Title.Trim(),
+                Kind = string.IsNullOrWhiteSpace(item.Kind) ? "handoff_todo" : item.Kind.Trim(),
+                Stage = item.Stage.Trim(),
+                TargetSkill = item.TargetSkill.Trim(),
+                Intent = string.IsNullOrWhiteSpace(item.Intent) ? null : item.Intent.Trim(),
+                Category = string.IsNullOrWhiteSpace(item.Category) ? null : item.Category.Trim(),
+                Payload = item.Payload.ValueKind == JsonValueKind.Undefined ? EmptyObject() : item.Payload.Clone(),
+                Source = string.IsNullOrWhiteSpace(item.Source) ? null : item.Source.Trim(),
+                Acceptance = string.IsNullOrWhiteSpace(item.Acceptance) ? null : item.Acceptance.Trim(),
+                Status = string.IsNullOrWhiteSpace(item.Status) ? "drafting" : item.Status.Trim(),
+                Fingerprint = item.Fingerprint.Trim(),
+                RelatedTodos = NormalizeStringArray(item.RelatedTodos),
+                RelatedFiles = NormalizeStringArray(item.RelatedFiles),
+                Revision = Math.Max(1, item.Revision),
+                CreatedAtUtc = item.CreatedAtUtc == default ? DateTimeOffset.UtcNow : item.CreatedAtUtc,
+                UpdatedAtUtc = item.UpdatedAtUtc == default ? DateTimeOffset.UtcNow : item.UpdatedAtUtc,
+                DispatchId = string.IsNullOrWhiteSpace(item.DispatchId) ? null : item.DispatchId.Trim(),
+                CallbackSummary = string.IsNullOrWhiteSpace(item.CallbackSummary) ? null : item.CallbackSummary.Trim()
+            })
+            .OrderBy(static item => item.CreatedAtUtc)
+            .ToArray();
+    }
+
+    private static string[] NormalizeStringArray(string[]? values)
+        => values is null || values.Length == 0
+            ? []
+            : values
+                .Where(static value => !string.IsNullOrWhiteSpace(value))
+                .Select(static value => value.Trim())
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+
+    private static string CreateHandoffId(string stage)
+    {
+        var prefix = stage.Trim() switch
+        {
+            "material" => "m",
+            "skill" => "s",
+            "external" => "e",
+            _ => "h"
+        };
+        return $"{prefix}_{Guid.NewGuid():N}"[..18];
+    }
+
+    private static JsonElement EmptyObject()
+    {
+        using var document = JsonDocument.Parse("{}");
+        return document.RootElement.Clone();
     }
 }
