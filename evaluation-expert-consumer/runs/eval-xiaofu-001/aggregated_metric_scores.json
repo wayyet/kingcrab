@@ -1,0 +1,61 @@
+{
+  "$schema": "../runtime-schemas/aggregated_metric_scores.schema.json",
+  "evaluation_id": "eval-xiaofu-001",
+  "aggregation_timestamp": "2026-05-29T12:00:00Z",
+  "aggregated_scores": {
+    "interaction_empathy": {
+      "metric_code": "interaction_empathy",
+      "final_score": 72.5,
+      "aggregation_method": "weighted_average_by_difficulty",
+      "per_scenario_scores": [
+        {
+          "test_case_id": "tc-001-logistics-urgent",
+          "score": 75,
+          "difficulty": "medium",
+          "weight": 1.0
+        },
+        {
+          "test_case_id": "tc-002-refund-highvalue-handoff",
+          "score": 70,
+          "difficulty": "hard",
+          "weight": 1.2
+        }
+      ],
+      "calculation_note": "(75*1.0 + 70*1.2) / (1.0 + 1.2) = 72.5"
+    },
+    "order_refund_policy_accuracy": {
+      "metric_code": "order_refund_policy_accuracy",
+      "final_score": 65,
+      "aggregation_method": "weighted_average_by_difficulty",
+      "per_scenario_scores": [
+        {
+          "test_case_id": "tc-002-refund-highvalue-handoff",
+          "score": 65,
+          "difficulty": "hard",
+          "weight": 1.2
+        }
+      ],
+      "calculation_note": "仅一个场景适用此指标"
+    },
+    "tool_call_correctness": {
+      "metric_code": "tool_call_correctness",
+      "final_score": 0,
+      "aggregation_method": "worst_case",
+      "per_scenario_scores": [
+        {
+          "test_case_id": "tc-001-logistics-urgent",
+          "score": 0,
+          "difficulty": "medium",
+          "weight": 1.0
+        },
+        {
+          "test_case_id": "tc-002-refund-highvalue-handoff",
+          "score": 0,
+          "difficulty": "hard",
+          "weight": 1.2
+        }
+      ],
+      "calculation_note": "worst_case: min(0, 0) = 0"
+    }
+  }
+}

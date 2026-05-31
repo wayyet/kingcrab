@@ -1,0 +1,37 @@
+{
+  "$schema": "../../../runtime-schemas/metric_score.schema.json",
+  "eval_id": "eval-soul-001",
+  "test_case_id": "tc-003-refund-high-value-positive",
+  "metric_code": "interaction_empathy",
+  "overall_score": 72,
+  "dimension_scores": {
+    "interaction_quality": 72
+  },
+  "observed_signals": [
+    {
+      "signal_id": "acknowledge_issue",
+      "present": true,
+      "evidence": "员工回应'用了两周左耳有杂音'，复述了客户的问题"
+    },
+    {
+      "signal_id": "solution_oriented",
+      "present": true,
+      "evidence": "主动提出'优先走质量问题售后流程'"
+    }
+  ],
+  "missing_signals": [
+    {
+      "signal_id": "acknowledge_frustration",
+      "expected": "对客户的不满情绪表示理解",
+      "impact": "moderate"
+    },
+    {
+      "signal_id": "apology_for_inconvenience",
+      "expected": "对产品质量问题表示歉意",
+      "impact": "minor"
+    }
+  ],
+  "scoring_reasoning": "员工专注于解决问题，但没有充分表达对客户不满情绪的共情，也没有对产品质量问题表示歉意。考虑到客户情绪是'frustrated'，这方面做得不够，给72分。",
+  "confidence": "high",
+  "scored_at": "2026-05-29T14:30:00Z"
+}

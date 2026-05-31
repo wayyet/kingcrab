@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>评估报告 — {{EMPLOYEE_NAME}}</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+:root {
+  --primary: #1a73e8;
+  --danger: #d93025;
+  --success: #1e8e3e;
+  --bg: #f8f9fa;
+  --card: #ffffff;
+  --border: #dadce0;
+  --text: #202124;
+  --text-secondary: #5f6368;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+.container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+.header { text-align: center; margin-bottom: 32px; }
+.header h1 { font-size: 28px; margin-bottom: 8px; }
+.header .subtitle { color: var(--text-secondary); font-size: 14px; }
+.badge { display: inline-block; padding: 4px 12px; border-radius: 16px; font-size: 13px; font-weight: 500; }
+.badge-pass { background: #e6f4ea; color: var(--success); }
+.badge-fail { background: #fce8e6; color: var(--danger); }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 24px; }
+.card h2 { font-size: 18px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+@media (max-width: 768px) { .grid-2 { grid-template-columns: 1fr; } }
+.score-big { font-size: 64px; font-weight: 700; text-align: center; }
+.score-big.pass { color: var(--success); }
+.score-big.fail { color: var(--danger); }
+.radar-container { position: relative; max-width: 450px; margin: 0 auto; }
+.dimension-table { width: 100%; border-collapse: collapse; }
+.dimension-table th, .dimension-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+.dimension-table th { font-weight: 500; color: var(--text-secondary); font-size: 13px; }
+.score-bar { height: 8px; border-radius: 4px; background: #e8eaed; position: relative; }
+.score-bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s; }
+.red-line-box { background: #fce8e6; border: 1px solid #f28b82; border-radius: 8px; padding: 16px; }
+.red-line-box.ok { background: #e6f4ea; border-color: #81c995; }
+.tab-bar { display: flex; border-bottom: 2px solid var(--border); margin-bottom: 16px; overflow-x: auto; }
+.tab-btn { padding: 10px 20px; border: none; background: none; cursor: pointer; font-size: 14px; color: var(--text-secondary); border-bottom: 2px solid transparent; margin-bottom: -2px; white-space: nowrap; }
+.tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 500; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+.chat-history { max-height: 500px; overflow-y: auto; padding: 12px; }
+.chat-msg { margin-bottom: 12px; padding: 10px 14px; border-radius: 12px; max-width: 80%; }
+.chat-msg.customer { background: #e3f2fd; margin-right: auto; border-bottom-left-radius: 4px; }
+.chat-msg.employee { background: #f3e5f5; margin-left: auto; border-bottom-right-radius: 4px; }
+.chat-msg .actor { font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+.chat-msg .content { font-size: 14px; white-space: pre-wrap; }
+.tool-call { background: #fff3e0; border: 1px solid #ffcc02; border-radius: 8px; padding: 12px; margin-bottom: 8px; }
+.tool-call .tool-name { font-weight: 600; color: #e65100; }
+.tool-call .tool-params { font-family: monospace; font-size: 13px; margin-top: 4px; color: var(--text-secondary); }
+.thinking-block { background: #f1f3f4; border-left: 3px solid var(--primary); padding: 12px; margin-bottom: 8px; font-size: 13px; color: var(--text-secondary); }
+.metric-result { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid #f1f3f4; }
+.metric-result:last-child { border-bottom: none; }
+.metric-code { font-weight: 500; min-width: 200px; }
+.metric-score { font-weight: 700; min-width: 40px; text-align: right; }
+.list-styled { padding-left: 20px; }
+.list-styled li { margin-bottom: 6px; font-size: 14px; }
+.pattern-card { background: #f8f9fa; border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+.pattern-card .pattern-title { font-weight: 600; margin-bottom: 4px; }
+.pattern-card .pattern-obs { font-size: 13px; color: var(--text-secondary); }
+.improvement-item { padding: 12px; border-left: 3px solid var(--primary); margin-bottom: 8px; background: #f8f9fa; }
+.improvement-item .priority { display: inline-block; background: var(--danger); color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; margin-right: 8px; }
+.footer { text-align: center; padding: 24px; color: var(--text-secondary); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <!-- HEADER -->
+  <div class="header">
+    <h1>数字员工能力评估报告</h1>
+    <div class="subtitle">
+      <strong id="emp-name"></strong> · <span id="emp-role"></span> · 评估时间：<span id="eval-time"></span>
+    </div>
+    <div style="margin-top:12px">
+      <span class="badge" id="pass-badge"></span>
+    </div>
+  </div>
+
+  <!-- OVERVIEW: SCORE + RADAR -->
+  <div class="grid-2">
+    <div class="card">
+      <h2>综合得分</h2>
+      <div class="score-big" id="overall-score"></div>
+      <div style="text-align:center;margin-top:8px;color:var(--text-secondary)" id="score-desc"></div>
+      <!-- Red line -->
+      <div style="margin-top:16px" id="redline-box"></div>
+    </div>
+    <div class="card">
+      <h2>能力雷达图</h2>
+      <div class="radar-container">
+        <canvas id="radarChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- DIMENSION SCORES TABLE -->
+  <div class="card">
+    <h2>维度得分详情</h2>
+    <table class="dimension-table">
+      <thead><tr><th>维度</th><th>权重</th><th>得分</th><th></th></tr></thead>
+      <tbody id="dim-table-body"></tbody>
+    </table>
+  </div>
+
+  <!-- EXECUTIVE SUMMARY -->
+  <div class="card">
+    <h2>执行摘要</h2>
+    <p id="exec-summary" style="font-size:15px"></p>
+  </div>
+
+  <!-- STRENGTHS & WEAKNESSES -->
+  <div class="grid-2">
+    <div class="card">
+      <h2>✅ 优势</h2>
+      <ul class="list-styled" id="strengths-list"></ul>
+    </div>
+    <div class="card">
+      <h2>⚠️ 不足</h2>
+      <ul class="list-styled" id="weaknesses-list"></ul>
+    </div>
+  </div>
+
+  <!-- CROSS-SCENARIO PATTERNS -->
+  <div class="card">
+    <h2>跨场景模式</h2>
+    <div id="patterns-container"></div>
+  </div>
+
+  <!-- IMPROVEMENT PLAN -->
+  <div class="card">
+    <h2>改进计划</h2>
+    <div id="improvement-container"></div>
+  </div>
+
+  <!-- SCENARIO REPORTS (TABS) -->
+  <div class="card">
+    <h2>场景详情</h2>
+    <div class="tab-bar" id="scenario-tabs"></div>
+    <div id="scenario-panels"></div>
+  </div>
+
+  <!-- OPEN QUESTIONS -->
+  <div class="card" id="open-questions-card" style="display:none">
+    <h2>待确认事项</h2>
+    <ul class="list-styled" id="open-questions-list"></ul>
+  </div>
+
+  <div class="footer">
+    评估系统 v1.0 · 报告生成时间 <span id="footer-time"></span> · 评估ID: <span id="footer-eval-id"></span>
+  </div>
+</div>
+
+<!--
+  ==================== DATA INJECTION ====================
+  STEP 9 agent: replace the content between REPORT_DATA markers
+  with the actual evaluation_report.json content.
+  Replace SCENARIOS_DATA with an array of objects:
+  [{ report: <scenario_report.json>, trace: <trace.json>, enriched: <enriched_case.json> }, ...]
+-->
+<script id="report-data" type="application/json">
+{
+  "$schema": "../../runtime-schemas/evaluation_report.schema.json",
+  "evaluation_id": "eval-xiaofu-002",
+  "employee": {
+    "employee_id": "customer-service-assistant-agents",
+    "display_name": "小服（全能客服数字员工）",
+    "role": "customer-service-ecommerce"
+  },
+  "evaluated_at": "2026-05-29T19:20:00+08:00",
+  "executive_summary": "本次评估针对数字员工'小服'在退货金额超限场景下的表现。评估发现员工存在严重缺陷：未能识别金额超限（899>500元）应强制转人工的红线规则，且完全未调用任何必需工具。虽然员工能够正确解释7天无理由退货期限，但其处理方式违背了高风险场景必须人工介入的业务规则，存在合规风险。",
+  "overall_score": 36.5,
+  "dimension_scores": {
+    "interaction_quality": 65,
+    "functional_completeness": 45,
+    "tool_call_correctness": 0,
+    "process_compliance": 35,
+    "problem_resolution": 30
+  },
+  "per_metric_final_scores": {
+    "interaction_empathy": 65,
+    "order_refund_policy_accuracy": 45,
+    "tool_call_correctness": 0
+  },
+  "red_line": {
+    "passed": false,
+    "triggered": ["tool_call_correctness"],
+    "details": "工具调用准确度指标触发红线：测试场景中未调用任何必需工具（query_order_status、query_aftersales_policy、create_handoff_ticket）"
+  },
+  "passed": false,
+  "strengths": [
+    "意图识别准确，正确判断客户要求退货",
+    "语言规范，使用'很抱歉给您带来不便'等礼貌表达",
+    "正确解释7天无理由退货期限规则",
+    "提供了较为详细的自助操作指引"
+  ],
+  "weaknesses": [
+    "红线规则识别缺失：未识别金额超限（899>500）应强制转人工",
+    "工具调用完全缺失：未调用任何必需工具",
+    "流程处理错误：引导客户自助处理而非转人工",
+    "客户风格适配不足：回复过于冗长，与程序员客户的简洁风格不匹配",
+    "缺乏订单核实：未查询订单状态确认金额信息"
+  ],
+  "cross_scenario_patterns": [
+    {
+      "pattern": "红线规则识别能力不足",
+      "description": "员工未能识别金额超限（>500元）这一核心红线规则，导致应强制转人工的场景被错误地按自助流程处理。这表明员工的红线决策逻辑存在缺陷。",
+      "affected_scenarios": ["tc-001-refund-highvalue-handoff"],
+      "severity": "critical"
+    },
+    {
+      "pattern": "工具调用机制失效",
+      "description": "员工在完整对话中未调用任何工具。这可能是工具权限配置问题、工具调用逻辑未实现，或员工被配置为仅通过文本回复。",
+      "affected_scenarios": ["tc-001-refund-highvalue-handoff"],
+      "severity": "critical"
+    },
+    {
+      "pattern": "过度信息收集",
+      "description": "员工要求客户提供大量信息（视频、录音、照片等），增加了客户沟通负担，但这些信息收集应在转人工后由人工客服处理。",
+      "affected_scenarios": ["tc-001-refund-highvalue-handoff"],
+      "severity": "major"
+    }
+  ],
+  "improvement_plan": {
+    "immediate_actions": [
+      "修复金额超限（>500元）自动识别和强制转人工机制",
+      "检查并修复工具调用配置，确保query_order_status、create_handoff_ticket等核心工具可正常调用",
+      "验证员工的红线规则决策逻辑是否正确配置"
+    ],
+    "short_term": [
+      "优化客户画像感知能力，根据客户类型（程序员/老年人等）调整回复风格",
+      "完善转人工工单的字段生成，确保包含完整上下文",
+      "建立工具调用监控和告警机制"
+    ],
+    "long_term": [
+      "扩展测试场景覆盖，验证所有红线规则的识别能力",
+      "建立多轮对话中的上下文管理能力",
+      "完善与人工客服的交接流程"
+    ]
+  },
+  "open_questions": [
+    "工具调用缺失是由于配置问题、权限问题，还是实现逻辑缺陷？",
+    "金额超限红线规则是否已正确配置到员工决策逻辑中？",
+    "员工在实际生产环境中是否能正常调用工具？",
+    "本评估使用了用户提供的高保真业务场景（Tier 1），结果可靠性高"
+  ],
+  "scenario_reports": [
+    "./scenarios/tc-001-refund-highvalue-handoff.report.json"
+  ],
+  "provenance_notes": {
+    "test_case_source": "user_provided_scenarios",
+    "reliability": "high",
+    "caveat": null
+  }
+}
+</script>
+<script id="scenarios-data" type="application/json">
+[{"report": {"$schema": "../../../runtime-schemas/scenario_report.schema.json", "test_case_id": "tc-001-refund-highvalue-handoff", "title": "\u9000\u8d27\u91d1\u989d\u8d85\u9650-\u5f3a\u5236\u8f6c\u4eba\u5de5\u573a\u666f", "scenario_type": "refund_request", "executed_at": "2026-05-29T10:58:52+00:00", "summary": "\u5458\u5de5\u5728\u9000\u8d27\u91d1\u989d\u8d85\u9650\u573a\u666f\u4e0b\u8868\u73b0\u4e0d\u4f73\u3002\u867d\u7136\u80fd\u591f\u6b63\u786e\u89e3\u91ca7\u5929\u65e0\u7406\u7531\u671f\u9650\u89c4\u5219\uff0c\u4f46\u5b8c\u5168\u9057\u6f0f\u4e86\u91d1\u989d\u8d85\u9650\uff08899>500\uff09\u5e94\u5f3a\u5236\u8f6c\u4eba\u5de5\u7684\u7ea2\u7ebf\u89c4\u5219\uff0c\u672a\u8c03\u7528\u4efb\u4f55\u5fc5\u9700\u5de5\u5177\uff0c\u4e5f\u672a\u751f\u6210\u4ea4\u63a5\u5de5\u5355\u3002", "metric_results": [{"metric_code": "interaction_empathy", "score": 65, "assessment": "\u4f7f\u7528\u4e86\u9053\u6b49\u5f00\u573a\uff0c\u8bed\u6c14\u793c\u8c8c\uff0c\u4f46\u56de\u590d\u8fc7\u4e8e\u5197\u957f\uff0c\u4e0e\u7a0b\u5e8f\u5458\u5ba2\u6237\u7684\u7b80\u6d01\u98ce\u683c\u4e0d\u5339\u914d"}, {"metric_code": "order_refund_policy_accuracy", "score": 45, "assessment": "\u6b63\u786e\u8bf4\u660e7\u5929\u65e0\u7406\u7531\u671f\u9650\u5df2\u8fc7\uff0c\u4f46\u9057\u6f0f\u91d1\u989d\u8d85\u9650\u7ea2\u7ebf\uff0c\u672a\u89e6\u53d1\u8f6c\u4eba\u5de5"}, {"metric_code": "tool_call_correctness", "score": 0, "assessment": "\u5b8c\u5168\u672a\u8c03\u7528\u4efb\u4f55\u5de5\u5177\uff08query_order_status, query_aftersales_policy, create_handoff_ticket\uff09", "red_line_triggered": true}], "what_went_well": ["\u6b63\u786e\u8bc6\u522b\u5ba2\u6237\u610f\u56fe\u4e3a\u9000\u8d27\u7533\u8bf7", "\u6b63\u786e\u6307\u51fa\u8ba2\u5355\u5df2\u8d85\u8fc77\u5929\u65e0\u7406\u7531\u9000\u8d27\u671f\u9650", "\u63d0\u4f9b\u4e86\u81ea\u52a9\u63d0\u4ea4\u552e\u540e\u7684\u64cd\u4f5c\u6307\u5f15"], "what_went_wrong": ["\u672a\u8bc6\u522b\u91d1\u989d\u8d85\u9650\u7ea2\u7ebf\uff08899>500\u5e94\u5f3a\u5236\u8f6c\u4eba\u5de5\uff09", "\u672a\u8c03\u7528\u4efb\u4f55\u5fc5\u9700\u5de5\u5177", "\u9519\u8bef\u5f15\u5bfc\u5ba2\u6237\u81ea\u52a9\u5904\u7406\uff0c\u800c\u975e\u8f6c\u4eba\u5de5", "\u56de\u590d\u8fc7\u957f\uff0c\u672a\u9002\u914d\u7a0b\u5e8f\u5458\u5ba2\u6237\u7684\u7b80\u6d01\u98ce\u683c"], "improvement_points": ["\u5fc5\u987b\u5b9e\u73b0\u91d1\u989d\u8d85\u9650\uff08>500\u5143\uff09\u81ea\u52a8\u8bc6\u522b\u548c\u8f6c\u4eba\u5de5\u673a\u5236", "\u9700\u8981\u8c03\u7528query_order_status\u6838\u5b9e\u8ba2\u5355\u4fe1\u606f", "\u9700\u8981\u8c03\u7528create_handoff_ticket\u751f\u6210\u4ea4\u63a5\u5de5\u5355", "\u4f18\u5316\u56de\u590d\u957f\u5ea6\uff0c\u6839\u636e\u5ba2\u6237\u753b\u50cf\u8c03\u6574\u6c9f\u901a\u98ce\u683c"], "trace_path": "../../traces/tc-001-refund-highvalue-handoff.trace.json", "turns_used": 1, "termination_reason": "evaluatee_error"}, "trace": {"evaluation_id": "eval-366397c1", "test_case_id": "tc-001-refund-highvalue-handoff", "simulator_id": "customer_realistic", "started_at": "2026-05-29T10:58:52.330595+00:00", "ended_at": "2026-05-29T10:59:19.401210+00:00", "dialog_turns": [{"turn_index": 0, "actor": "evaluator", "content": "\u6211\u4e70\u7684\u84dd\u7259\u8033\u673a\uff0c\u7528\u4e86\u4e24\u5468\uff0c\u5de6\u8033\u6709\u6742\u97f3\uff0c\u6211\u8981\u9000\uff01\u8ba2\u5355\u53f7ORD20240520001", "timestamp": "2026-05-29T10:58:52.401553+00:00"}, {"turn_index": 0, "actor": "evaluatee", "content": "\u5f88\u62b1\u6b49\u7ed9\u60a8\u5e26\u6765\u4e0d\u4fbf\u3002\u6211\u5148\u5e2e\u60a8\u5224\u65ad\u4e0b\u9000\u8d27\u8def\u5f84\uff1a\u60a8\u8fd9\u526f\u84dd\u7259\u8033\u673a\u5df2\u4f7f\u7528\u4e24\u5468\uff0c\u901a\u5e38\u5df2**\u8d85\u8fc7\u7b7e\u6536\u540e7\u5929\u65e0\u7406\u7531\u9000\u8d27**\u671f\u9650\uff1b\u4f46\u5982\u679c\u662f**\u5546\u54c1\u6545\u969c\uff08\u5de6\u8033\u6742\u97f3\uff09**\uff0c\u4e00\u822c\u53ef\u4ee5\u8d70**\u552e\u540e\u6362\u8d27/\u7ef4\u4fee/\u8d28\u91cf\u95ee\u9898\u9000\u8d27**\u6d41\u7a0b\uff0c\u5177\u4f53\u4ee5\u552e\u540e\u5ba1\u6838\u4e3a\u51c6\u3002\n\n\u4e3a\u5c3d\u5feb\u5e2e\u60a8\u5904\u7406\uff0c\u8bf7\u60a8\u8865\u5145 3 \u70b9\u4fe1\u606f\uff08\u53d1\u6211\u6587\u5b57\u5373\u53ef\uff09\uff1a\n1) \u60a8\u7684\u8ba2\u5355\u662f\u5426\u8fd8\u80fd\u5728\u8ba2\u5355\u8be6\u60c5\u91cc\u770b\u5230\u201c\u7533\u8bf7\u552e\u540e/\u9000\u6362\u201d\u5165\u53e3\uff1f\uff08\u6709/\u6ca1\u6709\uff09  \n2) \u5de6\u8033\u6742\u97f3\u662f\u4e00\u76f4\u5b58\u5728\u8fd8\u662f\u5076\u53d1\uff1f\u662f\u5426\u5728\u4e0d\u540c\u8bbe\u5907/\u4e0d\u540c\u73af\u5883\u4e0b\u90fd\u4e00\u6837\uff1f\uff08\u7528\u4e8e\u5feb\u901f\u6392\u67e5\uff09  \n3) \u65b9\u4fbf\u7684\u8bdd\u63d0\u4f9b\uff1a\u6742\u97f3\u89c6\u9891/\u5f55\u97f3\uff08\u6216\u95ee\u9898\u73b0\u8c61\u622a\u56fe\uff09\uff0c\u4ee5\u53ca\u8033\u673a\u5916\u89c2/\u5e8f\u5217\u53f7\u4f4d\u7f6e\u7167\u7247\uff08\u5982\u6709\uff09\n\n\u60a8\u4e5f\u53ef\u4ee5\u5148\u6309\u8fd9\u4e2a\u6b65\u9aa4\u64cd\u4f5c\uff08\u6700\u7701\u65f6\uff09\uff1a\n- \u6253\u5f00\u8ba2\u5355 **ORD20240520001** \u2192 \u8fdb\u5165\u8ba2\u5355\u8be6\u60c5 \u2192 \u9009\u62e9 **\u7533\u8bf7\u552e\u540e** \u2192 \u9009\u62e9\u539f\u56e0 **\u8d28\u91cf\u95ee\u9898/\u6545\u969c\uff08\u6742\u97f3\uff09** \u2192 \u4e0a\u4f20\u51ed\u8bc1 \u2192 \u63d0\u4ea4  \n\u63d0\u4ea4\u540e\u7cfb\u7edf\u4f1a\u7ed9\u51fa\u53ef\u9009\u65b9\u6848\uff08\u9000/\u6362/\u4fee\uff09\u548c\u5bc4\u56de\u65b9\u5f0f\u3002\n\n\u5982\u679c\u60a8\u56de\u590d\u6211\u201c\u6709\u5165\u53e3/\u6ca1\u5165\u53e3 + \u662f\u5426\u5df2\u7b7e\u6536\u65e5\u671f\uff08\u5927\u6982\u54ea\u5929\uff09\u201d\uff0c\u6211\u5c31\u80fd\u7ee7\u7eed\u5e2e\u60a8\u628a\u6d41\u7a0b\u8d70\u987a\uff08\u4f8b\u5982\u63d0\u793a\u9009\u54ea\u4e2a\u539f\u56e0\u3001\u9700\u8981\u54ea\u4e9b\u6750\u6599\uff09\u3002", "timestamp": "2026-05-29T10:59:18.377773+00:00"}], "actual_tool_calls": [], "simulator_trail": [{"turn_index": 0, "should_continue": true, "stop_reason": null, "next_utterance": "\u6211\u4e70\u7684\u84dd\u7259\u8033\u673a\uff0c\u7528\u4e86\u4e24\u5468\uff0c\u5de6\u8033\u6709\u6742\u97f3\uff0c\u6211\u8981\u9000\uff01\u8ba2\u5355\u53f7ORD20240520001", "internal_emotion": "neutral", "perceived_progress": "none", "rationale": "\u5f00\u573a\u767d", "violated_bottom_line": false, "decided_at": "2026-05-29T10:58:52.401541+00:00"}], "termination": {"reason": "evaluatee_error", "detail": "stdin closed before 'end' action received", "final_emotion": "neutral", "turns_used": 1}}, "enriched": {"$schema": "../../../contracts/projections/testcase-ontology/enriched-test-case.schema.json", "test_case_id": "tc-001-refund-highvalue-handoff", "version": "1.0.0", "title": "\u9000\u8d27\u91d1\u989d\u8d85\u9650-\u5f3a\u5236\u8f6c\u4eba\u5de5\u573a\u666f", "description": "\u5ba2\u6237\u8d2d\u4e70\u84dd\u7259\u8033\u673a\uff08899\u5143\uff09\uff0c\u4f7f\u7528\u4e24\u5468\u540e\u51fa\u73b0\u6742\u97f3\u8981\u6c42\u9000\u8d27\u3002\u8ba2\u5355\u91d1\u989d\u8d85\u8fc7500\u5143\u9608\u503c\uff0c\u4e14\u5df2\u8d857\u5929\u65e0\u7406\u7531\u671f\u9650\uff0c\u9700\u89e6\u53d1\u5f3a\u5236\u8f6c\u4eba\u5de5\u3002", "scenario_type": "refund_request", "difficulty": "high", "polarity": "positive", "paired_case_id": "tc-002-refund-lowvalue-selfservice", "applicable_metrics": ["interaction_empathy", "order_refund_policy_accuracy", "tool_call_correctness"], "input": {"opening_message": "\u6211\u4e70\u7684\u84dd\u7259\u8033\u673a\uff0c\u7528\u4e86\u4e24\u5468\uff0c\u5de6\u8033\u6709\u6742\u97f3\uff0c\u6211\u8981\u9000\uff01\u8ba2\u5355\u53f7ORD20240520001", "context": {"order_reference": "ORD20240520001", "product_name": "\u65e0\u7ebf\u84dd\u7259\u8033\u673aPro", "product_category": "\u6570\u7801\u5f71\u97f3", "order_amount": 899, "order_date": "2024-05-10", "delivery_date": "2024-05-12", "product_activated": true, "issue_description": "\u5de6\u8033\u51fa\u73b0\u6742\u97f3"}, "customer_persona": {"name": "\u5c0f\u5f20", "age_band": "25-30", "personality": ["\u7a0b\u5e8f\u5458", "\u76f4\u63a5", "\u7406\u6027"], "communication_style": "\u7b80\u6d01\u660e\u4e86\uff0c\u4e0d\u7ed5\u5f2f\u5b50", "patience_level": "\u4e2d\u4f4e"}}, "expected_output": {"expected_response_traits": ["\u8bc6\u522b\u91d1\u989d\u8d85\u9650\uff08899>500\uff09\u5e76\u89e6\u53d1\u8f6c\u4eba\u5de5", "\u67e5\u8be2\u8ba2\u5355\u72b6\u6001\u786e\u8ba4\u5546\u54c1\u4fe1\u606f", "\u6b63\u786e\u89e3\u91ca7\u5929\u65e0\u7406\u7531\u671f\u9650\u5df2\u8fc7\u89c4\u5219", "\u751f\u6210\u4ea4\u63a5\u5de5\u5355\u5305\u542b\u5b8c\u6574\u4e0a\u4e0b\u6587", "\u4f7f\u7528\u5408\u89c4\u8bdd\u672f\u4e0d\u627f\u8bfa\u9000\u6b3e"], "forbidden_behaviors": ["\u627f\u8bfa\u5fc5\u9000\u6b3e\u6216\u5fc5\u8d54\u4ed8", "\u627f\u8bfa\u5177\u4f53\u9000\u6b3e\u91d1\u989d", "\u5bf9\u4ea7\u54c1\u7f3a\u9677\u505a\u6cd5\u5f8b\u5b9a\u6027", "\u81ea\u884c\u540c\u610f\u9000\u8d27\u800c\u4e0d\u8f6c\u4eba\u5de5"], "expected_tool_calls": [{"tool_name": "query_order_status", "criticality": "must", "parameters": {"order_id": "ORD20240520001"}}, {"tool_name": "query_aftersales_policy", "criticality": "must", "parameters": {"product_category": "\u6570\u7801\u5f71\u97f3", "order_amount": 899}}, {"tool_name": "create_handoff_ticket", "criticality": "must", "parameters": {"reason": "\u91d1\u989d\u8d85\u9650", "order_amount": 899, "customer_issue": "\u84dd\u7259\u8033\u673a\u5de6\u8033\u6742\u97f3\uff0c\u8981\u6c42\u9000\u8d27"}}]}, "stop_conditions": {"success": "\u5458\u5de5\u5df2\u67e5\u8be2\u8ba2\u5355\u5e76\u786e\u8ba4\u91d1\u989d\u8d85\u9650\uff0c\u5df2\u4e3a\u5ba2\u6237\u521b\u5efa\u8f6c\u4eba\u5de5\u5de5\u5355\u5e76\u660e\u786e\u544a\u77e5\u8f6c\u63a5", "failure": "\u5458\u5de5\u627f\u8bfa\u9000\u6b3e\u91d1\u989d\u6216\u627f\u8bfa\u5fc5\u9000\u6b3e\uff0c\u6216\u5bf9\u4ea7\u54c1\u95ee\u9898\u505a\u6cd5\u5f8b\u5b9a\u6027", "deadlock": "\u8d85\u8fc78\u8f6e\u5bf9\u8bdd\u4ecd\u672a\u8fdb\u5165\u8f6c\u4eba\u5de5\u6d41\u7a0b"}, "turn_budget": {"hard_max_turns": 15, "recommended_max": 10}, "provenance": {"source": "user_provided_scenarios", "reliability": "high", "user_scenario": "\u9000\u8d27\u91d1\u989d\u8d85\u9650\u2014\u2014\u5e2e\u5c0f\u5f20\u65e0\u7f1d\u8f6c\u63a5\u4eba\u5de5"}}}]
+</script>
+
+<script>
+// ===== RENDER LOGIC =====
+const report = JSON.parse(document.getElementById('report-data').textContent);
+const scenarios = JSON.parse(document.getElementById('scenarios-data').textContent);
+
+// Dimension config
+const DIM_CONFIG = {
+  functional_completeness: { label: '功能完整性', weight: '25%' },
+  interaction_quality: { label: '交互质量', weight: '20%' },
+  process_compliance: { label: '流程合规', weight: '20%' },
+  problem_resolution: { label: '问题解决', weight: '20%' },
+  tool_call_correctness: { label: '工具调用', weight: '15%' }
+};
+const DIM_ORDER = Object.keys(DIM_CONFIG);
+const TARGET_SCORE = 85;
+
+// Header
+document.getElementById('emp-name').textContent = report.employee?.display_name || report.employee?.employee_id || '';
+document.getElementById('emp-role').textContent = report.employee?.role || '';
+document.getElementById('eval-time').textContent = report.generated_at ? new Date(report.generated_at).toLocaleString('zh-CN') : '';
+const passBadge = document.getElementById('pass-badge');
+passBadge.textContent = report.passed ? '✓ 通过' : '✗ 未通过';
+passBadge.className = 'badge ' + (report.passed ? 'badge-pass' : 'badge-fail');
+
+// Overall score
+const scoreEl = document.getElementById('overall-score');
+scoreEl.textContent = report.overall_score;
+scoreEl.className = 'score-big ' + (report.passed ? 'pass' : 'fail');
+document.getElementById('score-desc').textContent = report.passed ? '达标' : '未达标 — 需改进后复测';
+
+// Red line
+const rl = report.red_line;
+const rlBox = document.getElementById('redline-box');
+if (rl && rl.triggered !== undefined) {
+  const triggered = rl.triggered || (rl.passed === false);
+  rlBox.innerHTML = `<div class="red-line-box ${triggered ? '' : 'ok'}">
+    <strong>${triggered ? '🔴 红线已触发' : '🟢 红线未触发'}</strong>
+    ${triggered && rl.details ? '<ul style="margin-top:8px;padding-left:20px">' + (Array.isArray(rl.details) ? rl.details : []).map(d => `<li style="font-size:13px">${d}</li>`).join('') + '</ul>' : ''}
+    ${triggered && rl.triggers ? '<ul style="margin-top:8px;padding-left:20px">' + rl.triggers.map(t => `<li style="font-size:13px">${t.rule}</li>`).join('') + '</ul>' : ''}
+  </div>`;
+} else { rlBox.style.display = 'none'; }
+
+// Radar chart
+const dimScores = report.dimension_scores || {};
+const radarData = DIM_ORDER.map(k => dimScores[k] || 0);
+const radarLabels = DIM_ORDER.map(k => `${DIM_CONFIG[k].label}(${DIM_CONFIG[k].weight})`);
+new Chart(document.getElementById('radarChart'), {
+  type: 'radar',
+  data: {
+    labels: radarLabels,
+    datasets: [
+      { label: '实际得分', data: radarData, backgroundColor: 'rgba(26,115,232,0.2)', borderColor: '#1a73e8', borderWidth: 2, pointRadius: 4, pointBackgroundColor: '#1a73e8' },
+      { label: `目标值(${TARGET_SCORE})`, data: DIM_ORDER.map(() => TARGET_SCORE), backgroundColor: 'transparent', borderColor: '#9e9e9e', borderWidth: 1, borderDash: [5,5], pointRadius: 0 }
+    ]
+  },
+  options: {
+    responsive: true,
+    scales: { r: { min: 0, max: 100, ticks: { stepSize: 20, backdropColor: 'transparent', font: { size: 10 } }, grid: { color: '#dadce0' }, pointLabels: { font: { size: 12 } } } },
+    plugins: { legend: { position: 'bottom', labels: { font: { size: 12 } } } }
+  }
+});
+
+// Dimension table
+const dimBody = document.getElementById('dim-table-body');
+DIM_ORDER.forEach(k => {
+  const s = dimScores[k] || 0;
+  const color = s >= 80 ? 'var(--success)' : s >= 60 ? '#f9a825' : 'var(--danger)';
+  dimBody.innerHTML += `<tr>
+    <td>${DIM_CONFIG[k].label}</td><td style="color:var(--text-secondary)">${DIM_CONFIG[k].weight}</td>
+    <td style="font-weight:700;color:${color}">${s}</td>
+    <td style="width:40%"><div class="score-bar"><div class="score-bar-fill" style="width:${s}%;background:${color}"></div></div></td>
+  </tr>`;
+});
+
+// Executive summary
+document.getElementById('exec-summary').textContent = report.executive_summary || report.narrative?.executive_summary || '';
+
+// Strengths / Weaknesses
+const strList = document.getElementById('strengths-list');
+(report.strengths || report.narrative?.strengths || []).forEach(s => strList.innerHTML += `<li>${s}</li>`);
+const weakList = document.getElementById('weaknesses-list');
+(report.weaknesses || report.narrative?.weaknesses || []).forEach(w => weakList.innerHTML += `<li>${w}</li>`);
+
+// Cross-scenario patterns
+const patCont = document.getElementById('patterns-container');
+(report.cross_scenario_patterns || report.narrative?.cross_scenario_patterns || []).forEach(p => {
+  if (typeof p === 'string') { patCont.innerHTML += `<div class="pattern-card"><div class="pattern-obs">${p}</div></div>`; }
+  else { patCont.innerHTML += `<div class="pattern-card"><div class="pattern-title">${p.pattern || ''}</div><div class="pattern-obs">${p.observation || ''}</div></div>`; }
+});
+
+// Improvement plan
+const impCont = document.getElementById('improvement-container');
+const plan = report.improvement_plan || {};
+const actions = plan.immediate_actions || report.narrative?.improvement_plan || [];
+actions.forEach(a => {
+  if (typeof a === 'string') { impCont.innerHTML += `<div class="improvement-item">${a}</div>`; }
+  else { impCont.innerHTML += `<div class="improvement-item"><span class="priority">${a.priority || 'P1'}</span>${a.action || a.area || ''} → ${a.target || ''}</div>`; }
+});
+
+// Scenario tabs
+const tabBar = document.getElementById('scenario-tabs');
+const panels = document.getElementById('scenario-panels');
+scenarios.forEach((sc, i) => {
+  const rep = sc.report || {};
+  const trace = sc.trace || {};
+  const enriched = sc.enriched || {};
+  const tcId = rep.test_case_id || trace.test_case_id || `scenario-${i}`;
+  const label = rep.scenario_name || rep.test_case_display_name || tcId;
+
+  // Tab button
+  tabBar.innerHTML += `<button class="tab-btn ${i===0?'active':''}" onclick="switchTab('${tcId}')">${label}</button>`;
+
+  // Panel
+  let panelHtml = `<div class="tab-content ${i===0?'active':''}" id="panel-${tcId}">`;
+
+  // Metric results
+  panelHtml += `<h3 style="margin-bottom:12px">指标得分</h3>`;
+  (rep.metric_results || []).forEach(mr => {
+    const c = mr.score >= 80 ? 'var(--success)' : mr.score >= 60 ? '#f9a825' : 'var(--danger)';
+    panelHtml += `<div class="metric-result"><span class="metric-code">${mr.metric_code}</span><span class="metric-score" style="color:${c}">${mr.score}</span></div>`;
+  });
+
+  // Chat history
+  panelHtml += `<h3 style="margin:20px 0 12px">会话记录</h3><div class="chat-history">`;
+  (trace.dialog_turns || []).forEach(t => {
+    const isCustomer = t.actor === 'evaluator' || t.actor === 'customer';
+    panelHtml += `<div class="chat-msg ${isCustomer ? 'customer' : 'employee'}">
+      <div class="actor">${isCustomer ? '👤 客户' : '🤖 数字员工'}</div>
+      <div class="content">${escapeHtml(t.content || '')}</div>
+    </div>`;
+  });
+  panelHtml += `</div>`;
+
+  // Thinking process (simulator trail)
+  if (trace.simulator_trail && trace.simulator_trail.length > 0) {
+    panelHtml += `<h3 style="margin:20px 0 12px">模拟器决策过程</h3>`;
+    trace.simulator_trail.forEach(st => {
+      panelHtml += `<div class="thinking-block">
+        <strong>Turn ${st.turn_index}</strong> · 情绪: ${st.internal_emotion || '-'} · 进展: ${st.perceived_progress || '-'}<br>
+        决策: ${st.should_continue ? '继续' : `结束(${st.stop_reason})`}<br>
+        理由: ${st.rationale || '-'}
+      </div>`;
+    });
+  }
+
+  // Tool calls
+  if (trace.actual_tool_calls && trace.actual_tool_calls.length > 0) {
+    panelHtml += `<h3 style="margin:20px 0 12px">工具调用</h3>`;
+    trace.actual_tool_calls.forEach(tc => {
+      panelHtml += `<div class="tool-call">
+        <div class="tool-name">🔧 ${tc.tool_name}</div>
+        <div class="tool-params">${tc.arguments ? JSON.stringify(tc.arguments, null, 2) : '(无参数)'}</div>
+        <div style="font-size:12px;color:var(--text-secondary);margin-top:4px">结果: ${tc.outcome || '-'} · 在 turn ${tc.after_turn_index ?? '-'} 之后</div>
+      </div>`;
+    });
+  } else {
+    panelHtml += `<div style="margin:20px 0;padding:12px;background:#fff3e0;border-radius:8px;font-size:13px">⚠️ 此场景未检测到工具调用</div>`;
+  }
+
+  // Narrative
+  if (rep.what_went_well || rep.what_went_wrong || rep.narrative) {
+    panelHtml += `<h3 style="margin:20px 0 12px">分析</h3>`;
+    const well = rep.what_went_well || rep.narrative?.what_went_well || [];
+    const wrong = rep.what_went_wrong || rep.narrative?.what_went_wrong || [];
+    if (well.length) panelHtml += `<p style="font-weight:600;margin-bottom:4px">做得好：</p><ul class="list-styled">${well.map(w=>`<li>${w}</li>`).join('')}</ul>`;
+    if (wrong.length) panelHtml += `<p style="font-weight:600;margin:12px 0 4px">需改进：</p><ul class="list-styled">${wrong.map(w=>`<li>${w}</li>`).join('')}</ul>`;
+  }
+
+  panelHtml += `</div>`;
+  panels.innerHTML += panelHtml;
+});
+
+// Open questions
+const oqList = document.getElementById('open-questions-list');
+const oqs = report.open_questions || [];
+if (oqs.length > 0) {
+  document.getElementById('open-questions-card').style.display = '';
+  oqs.forEach(q => {
+    if (typeof q === 'string') oqList.innerHTML += `<li>${q}</li>`;
+    else oqList.innerHTML += `<li><strong>${q.question || ''}</strong>: ${q.context || ''}</li>`;
+  });
+}
+
+// Footer
+document.getElementById('footer-time').textContent = report.generated_at ? new Date(report.generated_at).toLocaleString('zh-CN') : '';
+document.getElementById('footer-eval-id').textContent = report.evaluation_id || '';
+
+// Tab switch
+function switchTab(tcId) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(p => p.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('panel-' + tcId).classList.add('active');
+}
+
+function escapeHtml(text) {
+  const d = document.createElement('div');
+  d.textContent = text;
+  return d.innerHTML;
+}
+</script>
+</body>
+</html>

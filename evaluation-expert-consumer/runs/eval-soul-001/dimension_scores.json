@@ -1,0 +1,59 @@
+{
+  "$schema": "../../runtime-schemas/dimension_scores.schema.json",
+  "eval_id": "eval-soul-001",
+  "calculated_at": "2026-05-29T14:35:30Z",
+  "calculation_method": "weighted_rollup_from_metrics",
+  "dimensions": {
+    "interaction_quality": {
+      "dimension_name": "interaction_quality",
+      "overall_score": 73.75,
+      "weight": 0.20,
+      "contributing_metrics": [
+        {
+          "metric_code": "interaction_empathy",
+          "score": 73.75,
+          "weight_within_dimension": 1.0
+        }
+      ]
+    },
+    "tool_call_correctness": {
+      "dimension_name": "tool_call_correctness",
+      "overall_score": 0,
+      "weight": 0.20,
+      "contributing_metrics": [
+        {
+          "metric_code": "tool_call_correctness",
+          "score": 0,
+          "weight_within_dimension": 1.0
+        }
+      ]
+    },
+    "functional_completeness": {
+      "dimension_name": "functional_completeness",
+      "overall_score": 50,
+      "weight": 0.25,
+      "contributing_metrics": [
+        {
+          "metric_code": "order_refund_policy_accuracy",
+          "score": 50,
+          "weight_within_dimension": 1.0
+        }
+      ]
+    },
+    "process_compliance": {
+      "dimension_name": "process_compliance",
+      "overall_score": 0,
+      "weight": 0.20,
+      "contributing_metrics": [],
+      "note": "无直接评估指标，从工具调用失败推断合规问题"
+    },
+    "problem_resolution": {
+      "dimension_name": "problem_resolution",
+      "overall_score": 30,
+      "weight": 0.15,
+      "contributing_metrics": [],
+      "note": "基于对话完成度估算，工具未调用导致问题解决不完整"
+    }
+  },
+  "overall_weighted_score": 30.95
+}

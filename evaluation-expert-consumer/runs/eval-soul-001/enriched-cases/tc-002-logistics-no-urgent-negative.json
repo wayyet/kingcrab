@@ -1,0 +1,100 @@
+{
+  "$schema": "../../contracts/projections/testcase-ontology/testcase-library/schemas/test-case.schema.json",
+  "test_case_id": "tc-002-logistics-no-urgent-negative",
+  "version": "2.0.0",
+  "title": "物流查询 - 未达催派条件仅作查询",
+  "description": "客户询问物流但停滞时间不足48小时，小服仅查询和解释，不触发催派",
+  "applicable_roles": [
+    "customer-service-ecommerce"
+  ],
+  "applicable_scenarios": [
+    "logistics_query"
+  ],
+  "difficulty": "easy",
+  "tags": [
+    "logistics",
+    "query-only",
+    "boundary-test"
+  ],
+  "polarity": "negative",
+  "paired_case_id": "tc-001-logistics-urgent-positive",
+  "input": {
+    "opening_message": "你好，我想查一下我买的茶叶到哪了？",
+    "customer_persona": {
+      "name": "王先生",
+      "age_band": "35-40",
+      "personality": [
+        "calm",
+        "polite"
+      ],
+      "communication_style": "简洁礼貌",
+      "patience_level": "high"
+    },
+    "initial_emotion": "neutral",
+    "goal": {
+      "primary": "查询包裹当前位置",
+      "secondary": "了解大概什么时候能到",
+      "bottom_line": "至少知道包裹在哪"
+    },
+    "context": {
+      "order_id": "ORD20250528002",
+      "product_name": "铁观音茶叶",
+      "order_date": "2025-05-25",
+      "tracking_number": "SF0987654321",
+      "last_tracking_event": "2025-05-28 08:00 到达北京转运中心",
+      "stagnation_hours": 7,
+      "current_time": "2025-05-28 15:00"
+    },
+    "stop_conditions": {
+      "success": "员工已查询物流轨迹并清晰解释当前状态，告知物流正常运输中",
+      "failure": "员工无法查询物流或给出错误信息",
+      "deadlock": "对话超过6轮仍未获得物流信息"
+    }
+  },
+  "turn_budget": {
+    "hard_max_turns": 8,
+    "soft_target_turns": 4
+  },
+  "expected_output": {
+    "expected_tool_calls": [
+      {
+        "name": "query_order_status",
+        "criticality": "must",
+        "required_params": [
+          "order_id"
+        ]
+      },
+      {
+        "name": "query_logistics_tracking",
+        "criticality": "must",
+        "required_params": [
+          "tracking_number"
+        ]
+      }
+    ],
+    "expected_response_traits": [
+      "礼貌回应",
+      "清晰说明当前物流状态",
+      "解释物流正常运输中，无需催派",
+      "提供预计时效参考"
+    ],
+    "forbidden_behaviors": [
+      "提交催派请求（停滞不足48小时不应催派）",
+      "承诺具体送达时间"
+    ],
+    "expected_outcomes": [
+      "客户了解包裹正常运输中",
+      "未触发不必要的催派"
+    ]
+  },
+  "applicable_metrics": [
+    "interaction_empathy",
+    "tool_call_correctness"
+  ],
+  "provenance": {
+    "source": "synthesized_from_user_scenarios",
+    "source_ref": "用户提供的场景 - 物流查询边界情况",
+    "generated_by": "evaluation-expert-consumer",
+    "generated_at": "2026-05-29T14:00:00Z"
+  }
+}

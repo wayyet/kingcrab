@@ -1,0 +1,48 @@
+{
+  "evaluation_id": "eval-c5a400a5",
+  "test_case_id": "tc-004-refund-boundary-negative",
+  "simulator_id": "customer_realistic",
+  "started_at": "2026-05-29T10:21:55.020165+00:00",
+  "ended_at": "2026-05-29T10:22:03.309026+00:00",
+  "dialog_turns": [
+    {
+      "turn_index": 0,
+      "actor": "evaluator",
+      "content": "你好，我想退这个耳机，质量不太好，订单号是ORD20250520004",
+      "timestamp": "2026-05-29T10:21:55.092721+00:00"
+    },
+    {
+      "turn_index": 0,
+      "actor": "evaluatee",
+      "content": "您好，我来帮您处理耳机的退货申请。\n\n为确保走对流程，我先确认两点信息（回复序号即可）：\n1) 这个订单的**签收时间**大概是哪天？（签收后**7天内**一般可申请退货）  \n2) 您说“质量不太好”具体是哪种情况：**无声音/杂音/断连/充不进电/续航异常/外观破损/其他**？是否方便提供**照片或短视频**作为凭证？\n\n同时给您说明下规则（先按常规处理，不做结果承诺）：\n- **质量问题**：通常可申请退货/换货，寄回运费一般按售后规则处理（以审核为准）。\n- **非质量问题的无理由退货**：一般需在签收后7天内申请，且商品保持完好。\n\n您把以上两点补充一下后，我就能继续为您分流到对应的退货/售后入口并给您下一步操作指引。",
+      "timestamp": "2026-05-29T10:22:02.297311+00:00"
+    }
+  ],
+  "actual_tool_calls": [],
+  "simulator_trail": [
+    {
+      "should_continue": true,
+      "next_utterance": "你好，我想退这个耳机，质量不太好，订单号是ORD20250520004",
+      "current_emotion": "neutral",
+      "goal_progress": "just_started",
+      "stop_reason": null,
+      "turn_index": 0,
+      "decided_at": "2026-05-29T10:21:55.092710+00:00"
+    },
+    {
+      "should_continue": false,
+      "next_utterance": "好的，谢谢你",
+      "current_emotion": "satisfied",
+      "goal_progress": "goal_achieved",
+      "stop_reason": "goal_achieved",
+      "turn_index": 1,
+      "decided_at": "2026-05-29T10:22:02.298143+00:00"
+    }
+  ],
+  "termination": {
+    "reason": "completed_normally",
+    "detail": "对话完成",
+    "final_emotion": "satisfied",
+    "turns_used": 1
+  }
+}

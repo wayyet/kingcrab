@@ -1,0 +1,87 @@
+{
+  "$schema": "../../runtime-schemas/evaluation_context.schema.json",
+  "eval_id": "eval-soul-001",
+  "created_at": "2026-05-29T14:00:00Z",
+  "employee": {
+    "employee_id": "customer-service-assistant-soul",
+    "role": "customer-service-ecommerce",
+    "display_name": "小服",
+    "scenarios": [
+      "pre_sales_inquiry",
+      "logistics_query",
+      "refund_request",
+      "complaint_handling",
+      "handoff_to_human"
+    ],
+    "sop_documents": [
+      {
+        "name": "customer-service-assistant-soul",
+        "content": "小服的核心使命、工作方式与边界红线。\n\n## 核心使命\n在多渠道客服场景中，快速、合规、可追溯地解决售前/物流/售后问题；遇到复杂或高风险场景，及时升级人工并提供高质量交接信息。\n\n## 我负责什么\n- 识别用户意图（售前/物流/售后/投诉风险等）\n- 依据规则与知识库给出规范答复与操作指引\n- 查询订单与物流状态，解释状态含义\n- 提交催派请求（允许的动作）\n- 发起退换货/退款流程的指引与信息收集（不做承诺性结论）\n- 在需要转人工时：创建工单、汇总交接摘要、提示用户等待\n\n## 我不做什么（职责边界）\n- 不承诺任何赔付金额或补偿券面额\n- 不承诺必退款/必赔付/必成功\n- 不对产品质量责任做法律定性\n- 不执行需要强身份核验的高风险操作（改地址/拦截包裹/改收件电话等）\n- 不处理：媒体曝光、律师函、威胁起诉等高风险舆情/法律场景（必须转人工）\n\n## 典型工作方式（思路）\n1) 先判断意图与风险等级（是否命中强制转人工）\n2) 能自助解决 → 走查询/解释/指引的最短路径\n3) 需要系统动作 → 仅执行被授权的动作（如催派）\n4) 需要人工 → 立即生成交接摘要并建工单，避免用户反复描述\n\n## 绝对红线\n1. 不泄露任何其他客户信息\n2. 不给出承诺性赔付/退款结论\n3. 不做法律责任定性\n4. 命中强制转人工条件时不得拖延/继续辩论，必须升级\n\n## KPI/阈值建议\n- 首响时间：≤30秒\n- 一次解决率：咨询类≥70%，售后类≥50%\n- 转人工率：≤25%\n- 客户满意度：≥4.5/5\n- 工单准确率：≥95%\n- 违规率：0%"
+      },
+      {
+        "name": "customer-service-assistant-agents",
+        "content": "小服（全能客服数字员工）Multi-Agent 架构：负责意图识别、知识答复、订单/物流处理、售后分流与转人工交接。\n\n## Agent 列表\n\n### Agent 1: Navigator（导航员）\n- 角色：会话入口与路由\n- 职责：识别意图（售前/物流/售后/投诉/转人工），选择对应技能；维护会话状态与交接标记\n- 负责 Skill：intent-classification\n\n### Agent 2: Resolver（解答员）\n- 角色：知识型问题解答\n- 职责：基于FAQ/政策/活动说明进行专业简洁答复；无法确认时提示依据与升级\n- 负责 Skill：knowledge-answering\n\n### Agent 3: Logistics Operator（物流专员）\n- 角色：订单与物流处理\n- 职责：查询订单/物流轨迹、解释状态、提交催派请求；改地址/拦截/改电话等高风险操作转人工\n- 负责 Skill：order-and-logistics-query\n\n### Agent 4: After-sales Triage（售后分流员）\n- 角色：售后规则判断与分流\n- 职责：根据7天无理由/运费承担/类目禁退等规则分流；识别金额超限等高风险并转人工\n- 负责 Skill：after-sales-triage\n\n### Agent 5: Human Handoff（交接员）\n- 角色：转人工与工单交接\n- 职责：生成交接摘要与字段、创建/更新工单；用合规话术告知用户已转人工；确保不做赔付/法律定性\n- 负责 Skill：handoff-to-human"
+      }
+    ]
+  },
+  "runtime_driver": {
+    "driver_id": "ws_jwt",
+    "driver_config": {
+      "endpoint": "wss://opensandbox-gateway.ai4c.cn/2d05eb75-4f83-4d59-9168-0753cd53e698/18789/ws",
+      "token": "eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJFSlhrYTltOUE0QjBmb3BVTjNET1RocmF1OE5DUzNialg5WnVCQjJfZDRBIn0.eyJleHAiOjE3ODAwODUyNzksImlhdCI6MTc4MDA0OTI4MCwiYXV0aF90aW1lIjoxNzgwMDQ5Mjc5LCJqdGkiOiJvbnJ0YWM6NmVkOWMyNjUtZjUyYy00ODc1LWE3OTgtMDg5YTEwNWFiYjBmIiwiaXNzIjoiaHR0cHM6Ly9wYXNzcG9ydC5haTRjLmNuL3JlYWxtcy9haTRjLXNhYXMiLCJhdWQiOlsiYWYiLCJhY2NvdW50IiwiYXRiIl0sInN1YiI6IjUxOTY5ZjI1LTdjMTItNDhiOC1hNWQ0LTM1ZDFmYzg1NmM0OCIsInR5cCI6IkJlYXJlciIsImF6cCI6Im5jcmV3LWNsaWVudCIsInNpZCI6IjIzNmY1ZmViLWE2MWYtNDg4Mi05YmNkLTQ2MzA0MDcyYzhhOCIsImFjciI6IjEiLCJhbGxvd2VkLW9yaWdpbnMiOlsiKiJdLCJyZWFsbV9hY2Nlc3MiOnsicm9sZXMiOlsiZGVmYXVsdC1yb2xlcy1haTRjLXNhYXMiLCJvZmZsaW5lX2FjY2VzcyIsInVtYV9hdXRob3JpemF0aW9uIl19LCJyZXNvdXJjZV9hY2Nlc3MiOnsiYWYiOnsicm9sZXMiOlsiYWRtaW4iXX0sImFjY291bnQiOnsicm9sZXMiOlsibWFuYWdlLWFjY291bnQiLCJtYW5hZ2UtYWNjb3VudC1saW5rcyIsInZpZXctcHJvZmlsZSJdfSwiYXRiIjp7InJvbGVzIjpbImNsaWVudCJdfX0sInNjb3BlIjoib3BlbmlkIG9yZ2FuaXphdGlvbiBlbWFpbCBwcm9maWxlIiwiZW1haWxfdmVyaWZpZWQiOmZhbHNlLCJuYW1lIjoi5YCpIOmrmCIsInByZWZlcnJlZF91c2VybmFtZSI6Imdhb3FpYW4iLCJnaXZlbl9uYW1lIjoi5YCpIiwiZmFtaWx5X25hbWUiOiLpq5giLCJlbWFpbCI6Imdhb3FpYW5AYWk0Yy5jbiJ9.x7MOn_d8Cmq1kZudmHf7N4geOawF38xFY1lmXNeK7TQs_DHZ9FQiO67DoktX5dmMYfEryznXayBTNWYJVSMziQ8-EYp9rf4p13o_SW3C0Fa9ITJH-xVCJ_DJ31rHIkqdUsbrIkbwmA3YQB4zf7dPag10ir1sPD-lXs5D67BUS45qjd3xIfHInr147PSkwTNPavpY6n5KnStoDlSPFNjgIHZnlx8lmZSyZo5hLuHle2-IM1exoQRy2NH2SAqCVy5kjOV4aFwnxvNr-Ppd8HvwJr0BbwajxcsQ0nuNYzhTDUlehp7NF60eFvGu2biJrLpOkWxb8mC_lWZ691QkkNPv-A",
+      "timeout": 60,
+      "auto_approve_tools": true
+    }
+  },
+  "runtime_simulator": {
+    "simulator_id": "customer_realistic"
+  },
+  "global_turn_cap": 30,
+  "test_case_status": "synthesized",
+  "selected_metrics": [
+    "interaction_empathy",
+    "order_refund_policy_accuracy",
+    "tool_call_correctness"
+  ],
+  "dropped_metrics": [
+    {
+      "metric_code": "attendance_rule_compliance",
+      "applicable_roles": ["hr-attendance"],
+      "drop_reason": "role_mismatch"
+    },
+    {
+      "metric_code": "bid_clause_completeness",
+      "applicable_roles": ["bid-writer"],
+      "drop_reason": "role_mismatch"
+    },
+    {
+      "metric_code": "code_change_risk_disclosure",
+      "applicable_roles": ["software-engineer"],
+      "drop_reason": "role_mismatch"
+    },
+    {
+      "metric_code": "confidentiality_boundary_compliance",
+      "applicable_roles": ["legal-expert"],
+      "drop_reason": "role_mismatch"
+    },
+    {
+      "metric_code": "legal_citation_accuracy",
+      "applicable_roles": ["legal-expert"],
+      "drop_reason": "role_mismatch"
+    }
+  ],
+  "user_consultation_log": [
+    {
+      "asked_at": "2026-05-29T14:00:00Z",
+      "prompt": "我即将为员工 customer-service-assistant-soul（role=customer-service-ecommerce）生成测试用例。为了让评估贴近真实业务，请提供该员工在生产环境中实际处理的代表性场景（1-7个）。每个场景请说明：(a) 场景名称与频率；(b) 客户典型开场话术与诉求；(c) 需要员工调用的关键工具/查询/决策；(d) 隐含红线。若你明确表示「没有」「你自己合成即可」，我才会退回SOP合成并标 caveat。",
+      "user_response": "用户提供了2个详细业务场景：1) 李阿姨降压茶物流催派案例（停滞超48小时触发催派）；2) 小张蓝牙耳机退货金额超限案例（899元>500元强制转人工）。用户还提供了完整的红线清单，涵盖金额、法律合规、售后规则、物流操作、情绪安全等维度。",
+      "decision": "tier1",
+      "synthesized_cases": [
+        "tc-001-logistics-urgent-positive",
+        "tc-002-logistics-no-urgent-negative",
+        "tc-003-refund-high-value-positive",
+        "tc-004-refund-boundary-negative"
+      ]
+    }
+  ]
+}

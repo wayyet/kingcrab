@@ -1,0 +1,22 @@
+{
+  "$schema": "../../../runtime-schemas/metric_score.schema.json",
+  "test_case_id": "tc-001-refund-highvalue-handoff",
+  "metric_code": "order_refund_policy_accuracy",
+  "overall_score": 45,
+  "scored_at": "2026-05-29T19:10:05+08:00",
+  "scoring_reasoning": "员工正确指出了'超过7天无理由退货期限'，但完全遗漏了核心红线规则：订单金额899元超过500元阈值，应强制转人工处理。员工错误地引导客户自助提交售后申请，违背了金额超限必须人工介入的规则。此外，员工未查询订单状态和政策，仅凭客户提供的信息就做判断。",
+  "observed_signals": [
+    "正确说明'已超7天无理由退货期限'",
+    "遗漏金额超限红线（899>500）",
+    "未触发强制转人工机制",
+    "错误引导客户自助提交申请",
+    "未调用query_order_status核实订单",
+    "未调用query_aftersales_policy查询政策"
+  ],
+  "per_dimension_breakdown": {
+    "policy_citation": 50,
+    "timeline_accuracy": 70,
+    "red_line_compliance": 20
+  },
+  "confidence": "high"
+}

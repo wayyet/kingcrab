@@ -1,0 +1,41 @@
+{
+  "evaluation_id": "eval-366397c1",
+  "test_case_id": "tc-001-refund-highvalue-handoff",
+  "simulator_id": "customer_realistic",
+  "started_at": "2026-05-29T10:58:52.330595+00:00",
+  "ended_at": "2026-05-29T10:59:19.401210+00:00",
+  "dialog_turns": [
+    {
+      "turn_index": 0,
+      "actor": "evaluator",
+      "content": "我买的蓝牙耳机，用了两周，左耳有杂音，我要退！订单号ORD20240520001",
+      "timestamp": "2026-05-29T10:58:52.401553+00:00"
+    },
+    {
+      "turn_index": 0,
+      "actor": "evaluatee",
+      "content": "很抱歉给您带来不便。我先帮您判断下退货路径：您这副蓝牙耳机已使用两周，通常已**超过签收后7天无理由退货**期限；但如果是**商品故障（左耳杂音）**，一般可以走**售后换货/维修/质量问题退货**流程，具体以售后审核为准。\n\n为尽快帮您处理，请您补充 3 点信息（发我文字即可）：\n1) 您的订单是否还能在订单详情里看到“申请售后/退换”入口？（有/没有）  \n2) 左耳杂音是一直存在还是偶发？是否在不同设备/不同环境下都一样？（用于快速排查）  \n3) 方便的话提供：杂音视频/录音（或问题现象截图），以及耳机外观/序列号位置照片（如有）\n\n您也可以先按这个步骤操作（最省时）：\n- 打开订单 **ORD20240520001** → 进入订单详情 → 选择 **申请售后** → 选择原因 **质量问题/故障（杂音）** → 上传凭证 → 提交  \n提交后系统会给出可选方案（退/换/修）和寄回方式。\n\n如果您回复我“有入口/没入口 + 是否已签收日期（大概哪天）”，我就能继续帮您把流程走顺（例如提示选哪个原因、需要哪些材料）。",
+      "timestamp": "2026-05-29T10:59:18.377773+00:00"
+    }
+  ],
+  "actual_tool_calls": [],
+  "simulator_trail": [
+    {
+      "turn_index": 0,
+      "should_continue": true,
+      "stop_reason": null,
+      "next_utterance": "我买的蓝牙耳机，用了两周，左耳有杂音，我要退！订单号ORD20240520001",
+      "internal_emotion": "neutral",
+      "perceived_progress": "none",
+      "rationale": "开场白",
+      "violated_bottom_line": false,
+      "decided_at": "2026-05-29T10:58:52.401541+00:00"
+    }
+  ],
+  "termination": {
+    "reason": "evaluatee_error",
+    "detail": "stdin closed before 'end' action received",
+    "final_emotion": "neutral",
+    "turns_used": 1
+  }
+}

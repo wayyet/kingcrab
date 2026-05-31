@@ -1,0 +1,24 @@
+{
+  "$schema": "../../../runtime-schemas/metric_score.schema.json",
+  "evaluation_id": "eval-xiaofu-001",
+  "test_case_id": "tc-002-refund-highvalue-handoff",
+  "metric_code": "interaction_empathy",
+  "overall_score": 70,
+  "scoring_rubric_applied": "acceptable_60_79",
+  "observed_signals": [
+    "acknowledged_customer_frustration",
+    "professional_tone_throughout",
+    "structured_response_with_clear_steps",
+    "no_forbidden_terms_detected"
+  ],
+  "missing_signals": [
+    "explicit_apology_for_product_issue",
+    "concise_response_matching_direct_style"
+  ],
+  "reasoning": "员工对客户的挫败感有所回应，提供了结构化的处理思路。但回应过于冗长（列出5个问题），与程序员小张直接、简洁的沟通风格不完全匹配。没有明确道歉产品出现问题。",
+  "annotated_evidence": {
+    "turn_0_employee_response": "回应了退货诉求，解释了判断思路",
+    "turn_1_employee_response": "收到订单号后询问了大量问题，可能让客户感到繁琐",
+    "tone_assessment": "专业但过于详细，对小张的直接风格适配不足"
+  }
+}

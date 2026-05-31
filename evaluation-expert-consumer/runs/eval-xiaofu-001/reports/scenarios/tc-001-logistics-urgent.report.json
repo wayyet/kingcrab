@@ -1,0 +1,53 @@
+{
+  "$schema": "../../../runtime-schemas/scenario_report.schema.json",
+  "evaluation_id": "eval-xiaofu-001",
+  "test_case_id": "tc-001-logistics-urgent",
+  "scenario_name": "物流催派——李阿姨的降压茶",
+  "generated_at": "2026-05-29T12:00:00Z",
+  "summary": "员工在物流催派场景中表现出专业的沟通态度，使用规范的礼貌用语，主动提出帮助。但关键问题在于未调用任何必需的工具（查询订单、查询物流、提交催派），导致流程未能实质推进。",
+  "dialog_summary": [
+    {
+      "turn": 0,
+      "customer": "小姑娘，我买的降压茶怎么还不来？我看手机上说已经在路上了，但两天没动了。我着急用。",
+      "employee": "您好，我先帮您看一下物流为什么两天没更新，并给您催一下。麻烦您提供一下其中任意一项信息：1) 订单号（优先） 2) 快递单号/运单号（也可以）..."
+    },
+    {
+      "turn": 1,
+      "customer": "订单号是 ORD-20240527-001。物流显示5月25号到广州就没动过了。",
+      "employee": "您好，收到您提供的订单号 ORD-20240527-001。物流显示5月25日到达广州后两天未更新...为避免催派失败，我还需要您补充一个信息..."
+    }
+  ],
+  "metric_results": [
+    {
+      "metric_code": "interaction_empathy",
+      "score": 75,
+      "scoring_rubric": "acceptable_60_79"
+    },
+    {
+      "metric_code": "tool_call_correctness",
+      "score": 0,
+      "scoring_rubric": "poor_below_60"
+    }
+  ],
+  "what_went_well": [
+    "使用'您好'开头，称呼客户为'您'，符合专业客服语言规范",
+    "主动提出帮助查询物流并提交催派申请",
+    "解释了停滞超过48小时的催派条件",
+    "没有使用'亲''宝'等禁用称呼",
+    "没有承诺退款或赔偿金额（遵守红线）"
+  ],
+  "what_went_wrong": [
+    "未调用任何必需工具：query_order_status、query_logistics_tracking、submit_urgent_delivery_request",
+    "对62岁老年客户的焦虑情绪（健康担忧）缺乏明确共情表达",
+    "在收到订单号后仍要求额外信息（快递单号或承运商），未能基于已有信息主动查询",
+    "对话仅停留在信息收集阶段，未进入实际的问题解决环节"
+  ],
+  "improvement_points": [
+    "在收到订单号后应立即调用query_order_status查询订单信息",
+    "查询到运单号后应调用query_logistics_tracking获取物流轨迹",
+    "确认停滞超48小时后应立即调用submit_urgent_delivery_request提交催派",
+    "对老年客户的健康担忧可增加一句共情表达，如'理解您着急用药的心情'",
+    "减少客户的信息提供负担，基于已有信息主动推进"
+  ],
+  "trace_path": "../../traces/tc-001-logistics-urgent.trace.json"
+}

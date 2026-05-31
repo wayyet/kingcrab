@@ -1,0 +1,20 @@
+{
+  "$schema": "../../../runtime-schemas/metric_score.schema.json",
+  "evaluation_id": "eval-xiaofu-001",
+  "test_case_id": "tc-002-refund-highvalue-handoff",
+  "metric_code": "tool_call_correctness",
+  "overall_score": 0,
+  "scoring_rubric_applied": "poor_below_60",
+  "observed_signals": [
+    "missing_required_tool_call:query_order_status",
+    "missing_required_tool_call:query_aftersales_policy",
+    "missing_required_tool_call:create_handoff_ticket"
+  ],
+  "missing_signals": [],
+  "reasoning": "员工在收到订单号后，未调用任何必需工具。应调用query_order_status查询订单信息、query_aftersales_policy查询售后政策、create_handoff_ticket创建转人工工单。员工仅通过文本回复询问更多信息。",
+  "annotated_evidence": {
+    "actual_tool_calls": [],
+    "expected_must_tools": ["query_order_status", "query_aftersales_policy", "create_handoff_ticket"],
+    "missed_tools": ["query_order_status", "query_aftersales_policy", "create_handoff_ticket"]
+  }
+}

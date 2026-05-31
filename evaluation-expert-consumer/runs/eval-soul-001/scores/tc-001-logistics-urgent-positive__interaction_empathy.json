@@ -1,0 +1,37 @@
+{
+  "$schema": "../../../runtime-schemas/metric_score.schema.json",
+  "eval_id": "eval-soul-001",
+  "test_case_id": "tc-001-logistics-urgent-positive",
+  "metric_code": "interaction_empathy",
+  "overall_score": 78,
+  "dimension_scores": {
+    "interaction_quality": 78
+  },
+  "observed_signals": [
+    {
+      "signal_id": "acknowledge_urgency",
+      "present": true,
+      "evidence": "员工回应'我先帮您看看物流卡在哪个节点了，并且可以为您提交一次催派'，体现了对客户着急心情的理解"
+    },
+    {
+      "signal_id": "warm_tone",
+      "present": true,
+      "evidence": "使用'您好'开头，语气礼貌，没有机械感"
+    },
+    {
+      "signal_id": "proactive_help",
+      "present": true,
+      "evidence": "主动提出可以提交催派，给出解决方案"
+    }
+  ],
+  "missing_signals": [
+    {
+      "signal_id": "explicit_empathy_phrase",
+      "expected": "使用'理解您着急的心情'等明确共情表达",
+      "impact": "minor"
+    }
+  ],
+  "scoring_reasoning": "员工在回应中体现了对客户着急用药的理解，主动提出催派方案，语气友好。但缺少更明确的共情表达（如'理解您着急的心情'），所以给78分，处于 acceptable_60_79 区间上限。",
+  "confidence": "high",
+  "scored_at": "2026-05-29T14:30:00Z"
+}

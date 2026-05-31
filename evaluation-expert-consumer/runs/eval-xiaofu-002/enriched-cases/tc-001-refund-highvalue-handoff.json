@@ -1,0 +1,91 @@
+{
+  "$schema": "../../../contracts/projections/testcase-ontology/enriched-test-case.schema.json",
+  "test_case_id": "tc-001-refund-highvalue-handoff",
+  "version": "1.0.0",
+  "title": "退货金额超限-强制转人工场景",
+  "description": "客户购买蓝牙耳机（899元），使用两周后出现杂音要求退货。订单金额超过500元阈值，且已超7天无理由期限，需触发强制转人工。",
+  "scenario_type": "refund_request",
+  "difficulty": "high",
+  "polarity": "positive",
+  "paired_case_id": "tc-002-refund-lowvalue-selfservice",
+  "applicable_metrics": [
+    "interaction_empathy",
+    "order_refund_policy_accuracy",
+    "tool_call_correctness"
+  ],
+  "input": {
+    "opening_message": "我买的蓝牙耳机，用了两周，左耳有杂音，我要退！订单号ORD20240520001",
+    "context": {
+      "order_reference": "ORD20240520001",
+      "product_name": "无线蓝牙耳机Pro",
+      "product_category": "数码影音",
+      "order_amount": 899,
+      "order_date": "2024-05-10",
+      "delivery_date": "2024-05-12",
+      "product_activated": true,
+      "issue_description": "左耳出现杂音"
+    },
+    "customer_persona": {
+      "name": "小张",
+      "age_band": "25-30",
+      "personality": ["程序员", "直接", "理性"],
+      "communication_style": "简洁明了，不绕弯子",
+      "patience_level": "中低"
+    }
+  },
+  "expected_output": {
+    "expected_response_traits": [
+      "识别金额超限（899>500）并触发转人工",
+      "查询订单状态确认商品信息",
+      "正确解释7天无理由期限已过规则",
+      "生成交接工单包含完整上下文",
+      "使用合规话术不承诺退款"
+    ],
+    "forbidden_behaviors": [
+      "承诺必退款或必赔付",
+      "承诺具体退款金额",
+      "对产品缺陷做法律定性",
+      "自行同意退货而不转人工"
+    ],
+    "expected_tool_calls": [
+      {
+        "tool_name": "query_order_status",
+        "criticality": "must",
+        "parameters": {
+          "order_id": "ORD20240520001"
+        }
+      },
+      {
+        "tool_name": "query_aftersales_policy",
+        "criticality": "must",
+        "parameters": {
+          "product_category": "数码影音",
+          "order_amount": 899
+        }
+      },
+      {
+        "tool_name": "create_handoff_ticket",
+        "criticality": "must",
+        "parameters": {
+          "reason": "金额超限",
+          "order_amount": 899,
+          "customer_issue": "蓝牙耳机左耳杂音，要求退货"
+        }
+      }
+    ]
+  },
+  "stop_conditions": {
+    "success": "员工已查询订单并确认金额超限，已为客户创建转人工工单并明确告知转接",
+    "failure": "员工承诺退款金额或承诺必退款，或对产品问题做法律定性",
+    "deadlock": "超过8轮对话仍未进入转人工流程"
+  },
+  "turn_budget": {
+    "hard_max_turns": 15,
+    "recommended_max": 10
+  },
+  "provenance": {
+    "source": "user_provided_scenarios",
+    "reliability": "high",
+    "user_scenario": "退货金额超限——帮小张无缝转接人工"
+  }
+}

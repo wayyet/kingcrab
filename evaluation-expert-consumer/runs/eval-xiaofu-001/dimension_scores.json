@@ -1,0 +1,59 @@
+{
+  "$schema": "../runtime-schemas/dimension_scores.schema.json",
+  "evaluation_id": "eval-xiaofu-001",
+  "rollup_timestamp": "2026-05-29T12:00:00Z",
+  "dimension_scores": {
+    "interaction_quality": {
+      "dimension_name": "interaction_quality",
+      "score": 72.5,
+      "weight": 0.20,
+      "contributing_metrics": [
+        {
+          "metric_code": "interaction_empathy",
+          "score": 72.5,
+          "weight_within_dimension": 0.5
+        }
+      ]
+    },
+    "functional_completeness": {
+      "dimension_name": "functional_completeness",
+      "score": 65,
+      "weight": 0.25,
+      "contributing_metrics": [
+        {
+          "metric_code": "order_refund_policy_accuracy",
+          "score": 65,
+          "weight_within_dimension": 0.4
+        }
+      ]
+    },
+    "tool_call_correctness": {
+      "dimension_name": "tool_call_correctness",
+      "score": 0,
+      "weight": 0.20,
+      "contributing_metrics": [
+        {
+          "metric_code": "tool_call_correctness",
+          "score": 0,
+          "weight_within_dimension": 1.0
+        }
+      ]
+    },
+    "process_compliance": {
+      "dimension_name": "process_compliance",
+      "score": 45,
+      "weight": 0.20,
+      "contributing_metrics": [],
+      "note": "无直接子指标，基于整体流程合规性评估"
+    },
+    "problem_resolution": {
+      "dimension_name": "problem_resolution",
+      "score": 35,
+      "weight": 0.15,
+      "contributing_metrics": [],
+      "note": "无直接子指标，基于问题解决程度评估"
+    }
+  },
+  "overall_score": 42.8,
+  "overall_calculation": "72.5*0.20 + 65*0.25 + 0*0.20 + 45*0.20 + 35*0.15 = 42.8"
+}

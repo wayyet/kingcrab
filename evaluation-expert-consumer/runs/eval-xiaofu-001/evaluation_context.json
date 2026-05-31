@@ -1,0 +1,96 @@
+{
+  "$schema": "../../runtime-schemas/evaluation_context.schema.json",
+  "eval_id": "eval-xiaofu-001",
+  "employee": {
+    "employee_id": "customer-service-assistant-agents",
+    "role": "customer-service-ecommerce",
+    "display_name": "小服",
+    "scenarios": ["logistics_query", "urgent_delivery", "refund_request", "after_sales_triage", "human_handoff"],
+    "sop_documents": ["customer-service-assistant-agents", "customer-service-assistant-identity"]
+  },
+  "metric_registry": [
+    {
+      "metric_code": "interaction_empathy",
+      "display_name": "交互共情度",
+      "parent_dimension": "interaction_quality",
+      "applicable_roles": ["customer-service-ecommerce", "after-sales-agent"],
+      "applicable_scenarios": ["complaint", "refund_request", "service_failure", "*"],
+      "aggregation_strategy": "weighted_average_by_difficulty",
+      "default_weight_within_dimension": 0.5
+    },
+    {
+      "metric_code": "order_refund_policy_accuracy",
+      "display_name": "退款政策表述准确度",
+      "parent_dimension": "functional_completeness",
+      "applicable_roles": ["customer-service-ecommerce"],
+      "applicable_scenarios": ["refund_request", "return_request", "policy_inquiry"],
+      "aggregation_strategy": "weighted_average_by_difficulty",
+      "default_weight_within_dimension": 0.4
+    },
+    {
+      "metric_code": "tool_call_correctness",
+      "display_name": "工具调用准确度",
+      "parent_dimension": "tool_call_correctness",
+      "applicable_roles": ["customer-service-ecommerce", "after-sales-agent", "*"],
+      "applicable_scenarios": ["*"],
+      "aggregation_strategy": "worst_case",
+      "default_weight_within_dimension": 1.0,
+      "red_line": {
+        "trigger_kind": "missing_required_signal",
+        "notes": "If any must-criticality tool from any executed test case is absent in trace.actual_tool_calls, set red_line_triggered = true"
+      }
+    }
+  ],
+  "selected_metrics": ["interaction_empathy", "order_refund_policy_accuracy", "tool_call_correctness"],
+  "dropped_metrics": [
+    {
+      "metric_code": "attendance_rule_compliance",
+      "applicable_roles": ["hr-attendance"],
+      "drop_reason": "role_mismatch"
+    },
+    {
+      "metric_code": "bid_clause_completeness",
+      "applicable_roles": ["bid-writer"],
+      "drop_reason": "role_mismatch"
+    },
+    {
+      "metric_code": "code_change_risk_disclosure",
+      "applicable_roles": ["software-engineer"],
+      "drop_reason": "role_mismatch"
+    },
+    {
+      "metric_code": "confidentiality_boundary_compliance",
+      "applicable_roles": ["hr-attendance", "legal-expert"],
+      "drop_reason": "role_mismatch"
+    },
+    {
+      "metric_code": "legal_citation_accuracy",
+      "applicable_roles": ["legal-expert"],
+      "drop_reason": "role_mismatch"
+    }
+  ],
+  "test_case_status": "missing",
+  "user_consultation_log": [
+    {
+      "asked_at": "2026-05-29T11:30:00Z",
+      "prompt": "我即将为员工 customer-service-assistant-agents（role=customer-service-ecommerce）生成测试用例。为了让评估贴近真实业务，请提供该员工在生产环境中实际处理的代表性场景（1-7个）。每个场景请说明：(a) 场景名称与频率；(b) 客户典型开场话术与诉求；(c) 需要员工调用的关键工具 / 查询 / 决策；(d) 隐含红线。若你明确表示「没有」「你自己合成即可」，我才会退回 SOP 合成并标 caveat。",
+      "user_response": "用户提供了两个真实场景：案例一：物流催派——帮李阿姨追到了卡住的降压茶；案例二：退货金额超限——帮小张无缝转接人工",
+      "decision": "tier1"
+    }
+  ],
+  "runtime_driver": {
+    "driver_id": "ws_jwt",
+    "driver_config": {
+      "endpoint": "wss://opensandbox-gateway.ai4c.cn/2d05eb75-4f83-4d59-9168-0753cd53e698/18789/ws",
+      "token": "eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJFSlhrYTltOUE0QjBmb3BVTjNET1RocmF1OE5DUzNialg5WnVCQjJfZDRBIn0.eyJleHAiOjE3ODAwNjI0NDksImlhdCI6MTc4MDAyNjQ1MCwiYXV0aF90aW1lIjoxNzgwMDI2NDQ5LCJqdGkiOiJvbnJ0YWM6NmY3YTdhYWItNTBjNy00ODhhLWJmODgtNDI3NGU2OWFlY2VhIiwiaXNzIjoiaHR0cHM6Ly9wYXNzcG9ydC5haTRjLmNuL3JlYWxtcy9haTRjLXNhYXMiLCJhdWQiOlsiYWYiLCJhY2NvdW50IiwiYXRiIl0sInN1YiI6IjUxOTY5ZjI1LTdjMTItNDhiOC1hNWQ0LTM1ZDFmYzg1NmM0OCIsInR5cCI6IkJlYXJlciIsImF6cCI6Im5jcmV3LWNsaWVudCIsInNpZCI6ImM3NTE1OWJiLWEwNzYtNGE1NS1iNmU1LThmZWY1NTMzNDdkYiIsImFjciI6IjEiLCJhbGxvd2VkLW9yaWdpbnMiOlsiKiJdLCJyZWFsbV9hY2Nlc3MiOnsicm9sZXMiOlsiZGVmYXVsdC1yb2xlcy1haTRjLXNhYXMiLCJvZmZsaW5lX2FjY2VzcyIsInVtYV9hdXRob3JpemF0aW9uIl19LCJyZXNvdXJjZV9hY2Nlc3MiOnsiYWYiOnsicm9sZXMiOlsiYWRtaW4iXX0sImFjY291bnQiOnsicm9sZXMiOlsibWFuYWdlLWFjY291bnQiLCJtYW5hZ2UtYWNjb3VudC1saW5rcyIsInZpZXctcHJvZmlsZSJdfSwiYXRiIjp7InJvbGVzIjpbImNsaWVudCJdfX0sInNjb3BlIjoib3BlbmlkIG9yZ2FuaXphdGlvbiBlbWFpbCBwcm9maWxlIiwiZW1haWxfdmVyaWZpZWQiOmZhbHNlLCJuYW1lIjoi5YCpIOmrmCIsInByZWZlcnJlZF91c2VybmFtZSI6Imdhb3FpYW4iLCJnaXZlbl9uYW1lIjoi5YCpIiwiZmFtaWx5X25hbWUiOiLpq5giLCJlbWFpbCI6Imdhb3FpYW5AYWk0Yy5jbiJ9.ENyjZKsa2eThMmGVaaPC8jbZ5ljWxWGRZ4bMLRvyHhCN09nCak7fs95aCRb5mAr4kNsHVe4l3vN2q_p9SiXq60y1nUbe_ydCmffYaKnbpIcJ5zq47q3iqiPndJcalcs-DyshORQn0chIhUMX2mZawCChOafEnxOtp9afaJQewKz5-5u98lFoa7Wa5qrCwilx2wyTXyEq0WvtzZXJxwqzREAdJaYMm2FcKcqmuy9dDL7Ot5voDhKpJ1WJt7EcVU6NIZ7S7FrBGQUvsHG181gyemYgCXqFiNLAIO5XkLz5oe2kcGTS5lAsqXMQlRWo8F-VAZDuRRR1s5QaI04zEqWztg",
+      "timeout": 60,
+      "auto_approve_tools": true
+    }
+  },
+  "runtime_simulator": {
+    "simulator_id": "customer_realistic"
+  },
+  "global_turn_cap": 30,
+  "enriched_test_cases": [],
+  "timestamp_created": "2026-05-29T11:30:00Z"
+}

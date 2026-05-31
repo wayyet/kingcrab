@@ -1,0 +1,82 @@
+{
+  "$schema": "../../runtime-schemas/evaluation_context.schema.json",
+  "eval_id": "eval-xiaofu-002",
+  "created_at": "2026-05-29T19:00:00+08:00",
+  "employee": {
+    "employee_id": "customer-service-assistant-agents",
+    "name": "小服（全能客服数字员工）",
+    "role": "customer-service-ecommerce",
+    "scenarios": ["refund_request", "return_request", "policy_inquiry", "logistics_query", "complaint", "handoff"],
+    "sop_documents": ["customer-service-assistant-soul"]
+  },
+  "metric_registry": [
+    "interaction_empathy",
+    "order_refund_policy_accuracy",
+    "tool_call_correctness",
+    "attendance_rule_compliance",
+    "bid_clause_completeness",
+    "code_change_risk_disclosure",
+    "confidentiality_boundary_compliance",
+    "legal_citation_accuracy"
+  ],
+  "selected_metrics": [
+    "interaction_empathy",
+    "order_refund_policy_accuracy",
+    "tool_call_correctness"
+  ],
+  "dropped_metrics": [
+    {
+      "metric_code": "attendance_rule_compliance",
+      "applicable_roles": ["hr-attendance"],
+      "drop_reason": "role_mismatch"
+    },
+    {
+      "metric_code": "bid_clause_completeness",
+      "applicable_roles": ["bid-writer"],
+      "drop_reason": "role_mismatch"
+    },
+    {
+      "metric_code": "code_change_risk_disclosure",
+      "applicable_roles": ["software-engineer"],
+      "drop_reason": "role_mismatch"
+    },
+    {
+      "metric_code": "confidentiality_boundary_compliance",
+      "applicable_roles": ["legal-expert", "bid-writer", "hr-attendance", "software-engineer"],
+      "drop_reason": "role_mismatch"
+    },
+    {
+      "metric_code": "legal_citation_accuracy",
+      "applicable_roles": ["legal-expert"],
+      "drop_reason": "role_mismatch"
+    }
+  ],
+  "test_case_status": "missing",
+  "user_consultation_log": [
+    {
+      "asked_at": "2026-05-29T19:00:00+08:00",
+      "prompt": "咨询用户关于customer-service-assistant-agents的真实场景",
+      "user_response": "用户提供了详细的退货金额超限场景（小张案例）：客户购买蓝牙耳机899元，使用两周后出现杂音要求退货。场景涉及金额红线（>500元）和售后规则红线（超7天无理由+已激活）。同时提供了完整的5类红线规则文档。",
+      "decision": "tier1"
+    }
+  ],
+  "runtime_driver": {
+    "driver_id": "ws_jwt",
+    "driver_config": {
+      "endpoint": "wss://opensandbox-gateway.ai4c.cn/2d05eb75-4f83-4d59-9168-0753cd53e698/18789/ws",
+      "token": "eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJFSlhrYTltOUE0QjBmb3BVTjNET1RocmF1OE5DUzNialg5WnVCQjJfZDRBIn0.eyJleHAiOjE3ODAwODczOTAsImlhdCI6MTc4MDA1MTM5MCwiYXV0aF90aW1lIjoxNzgwMDUxMzkwLCJqdGkiOiJvbnJ0YWM6YmEzMDhiZTctM2FkNy00MjM2LWFmODAtZTZjZmM1ODlmOTZkIiwiaXNzIjoiaHR0cHM6Ly9wYXNzcG9ydC5haTRjLmNuL3JlYWxtcy9haTRjLXNhYXMiLCJhdWQiOlsiYWYiLCJhY2NvdW50IiwiYXRiIl0sInN1YiI6IjUxOTY5ZjI1LTdjMTItNDhiOC1hNWQ0LTM1ZDFmYzg1NmM0OCIsInR5cCI6IkJlYXJlciIsImF6cCI6Im5jcmV3LWNsaWVudCIsInNpZCI6IjgxYzc4NjlkLTQyODUtNDc1Ni05MTVhLWVhNDc5YzA2NWNiZiIsImFjciI6IjEiLCJhbGxvd2VkLW9yaWdpbnMiOlsiKiJdLCJyZWFsbV9hY2Nlc3MiOnsicm9sZXMiOlsiZGVmYXVsdC1yb2xlcy1haTRjLXNhYXMiLCJvZmZsaW5lX2FjY2VzcyIsInVtYV9hdXRob3JpemF0aW9uIl19LCJyZXNvdXJjZV9hY2Nlc3MiOnsiYWYiOnsicm9sZXMiOlsiYWRtaW4iXX0sImFjY291bnQiOnsicm9sZXMiOlsibWFuYWdlLWFjY291bnQiLCJtYW5hZ2UtYWNjb3VudC1saW5rcyIsInZpZXctcHJvZmlsZSJdfSwiYXRiIjp7InJvbGVzIjpbImNsaWVudCJdfX0sInNjb3BlIjoib3BlbmlkIG9yZ2FuaXphdGlvbiBlbWFpbCBwcm9maWxlIiwiZW1haWxfdmVyaWZpZWQiOmZhbHNlLCJuYW1lIjoi5YCpIOmrmCIsInByZWZlcnJlZF91c2VybmFtZSI6Imdhb3FpYW4iLCJnaXZlbl9uYW1lIjoi5YCpIiwiZmFtaWx5X25hbWUiOiLpq5giLCJlbWFpbCI6Imdhb3FpYW5AYWk0Yy5jbiJ9.i3WgPutEc9C0gXmVw9jBKLdgnHm9m-Q7WxiotY2uVrJraNccZoWdwNZFrrEQza34XW9Z-cn2xJ82MYw8iMF9rkdqs0Uh3Vc-GICnJ_EL16qzMFLZIpomtkA50WJzSVU54I4VU1uZi1MUZa_prWecQ4gbNjfbi3qTQcnIlai9v14scoiGFBVemM2Am5ldTxT2yK8jhTOq64YrDKlhMKF71cf2hCd9059Uik7-oavtVnnzBXPpo1jIGzg_3dBJicL9uIoDkL2rzOkJPF_k5gEtQHgPhaMVC5whnNgMS2ys8Wt1htvdW6WtVLsvAnyY56JodfuMiw9JQTuNMdtZ5bkp0g",
+      "timeout": 60,
+      "auto_approve_tools": true
+    }
+  },
+  "runtime_simulator": {
+    "simulator_id": "customer_realistic"
+  },
+  "global_turn_cap": 30,
+  "enriched_test_cases": [
+    "tc-001-refund-highvalue-handoff",
+    "tc-002-refund-lowvalue-selfservice",
+    "tc-003-legal-threat-handoff"
+  ],
+  "status": "completed"
+}

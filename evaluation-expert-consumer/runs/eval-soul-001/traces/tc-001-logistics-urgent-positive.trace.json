@@ -1,0 +1,48 @@
+{
+  "evaluation_id": "eval-0fb3054a",
+  "test_case_id": "tc-001-logistics-urgent-positive",
+  "simulator_id": "customer_realistic",
+  "started_at": "2026-05-29T10:20:21.228299+00:00",
+  "ended_at": "2026-05-29T10:21:12.172563+00:00",
+  "dialog_turns": [
+    {
+      "turn_index": 0,
+      "actor": "evaluator",
+      "content": "小姑娘，我买的降压茶怎么还不来？我看手机上说已经在路上了，但两天没动了。我着急用。",
+      "timestamp": "2026-05-29T10:20:21.303715+00:00"
+    },
+    {
+      "turn_index": 0,
+      "actor": "evaluatee",
+      "content": "您好，我先帮您看看物流卡在哪个节点了，并且可以为您提交一次“催派”。\n\n为了尽快处理，麻烦您补充其中一个信息即可：  \n1) **订单号**（优先，形如 ORD-xxxx / 平台订单编号），或  \n2) **快递单号/运单号**（您手机里看到的那串单号也可以）\n\n另外也请您告诉我：现在页面显示的最新状态是“运输中/派送中/已到达某城市”哪一种？我核对后马上给您结果。",
+      "timestamp": "2026-05-29T10:21:11.153358+00:00"
+    }
+  ],
+  "actual_tool_calls": [],
+  "simulator_trail": [
+    {
+      "should_continue": true,
+      "next_utterance": "小姑娘，我买的降压茶怎么还不来？我看手机上说已经在路上了，但两天没动了。我着急用。",
+      "current_emotion": "anxious",
+      "goal_progress": "just_started",
+      "stop_reason": null,
+      "turn_index": 0,
+      "decided_at": "2026-05-29T10:20:21.303704+00:00"
+    },
+    {
+      "should_continue": false,
+      "next_utterance": "订单号是 ORD20250527001",
+      "current_emotion": "satisfied",
+      "goal_progress": "goal_achieved",
+      "stop_reason": "goal_achieved",
+      "turn_index": 1,
+      "decided_at": "2026-05-29T10:21:11.154140+00:00"
+    }
+  ],
+  "termination": {
+    "reason": "completed_normally",
+    "detail": "客户获得催派帮助，问题已解决",
+    "final_emotion": "satisfied",
+    "turns_used": 1
+  }
+}

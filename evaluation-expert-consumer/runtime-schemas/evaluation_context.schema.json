@@ -1,0 +1,192 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://openclaw.io/evaluation-expert-consumer/runtime-schemas/evaluation_context.schema.json",
+  "title": "EvaluationContext",
+  "description": "Runtime aggregate produced before LOOP(STEP 3, STEP 4). Materialized once per evaluation run; immutable thereafter. Persisted at ./runs/<eval_id>/evaluation_context.json. Never written back into contract files.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "evaluation_id",
+    "created_at",
+    "employee",
+    "selected_metrics",
+    "enriched_test_cases",
+    "fan_out_plan",
+    "paths",
+    "runtime_driver",
+    "runtime_simulator"
+  ],
+  "properties": {
+    "evaluation_id": {
+      "type": "string",
+      "description": "Stable identifier for this evaluation run (UUID or timestamped slug).",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "employee": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["employee_id", "role", "scenarios"],
+      "properties": {
+        "employee_id": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "minLength": 1 },
+        "scenarios": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "sop_documents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["uri"],
+            "properties": {
+              "uri": { "type": "string", "minLength": 1 },
+              "title": { "type": "string" },
+              "version": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "selected_metrics": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Subset of MetricRegistry chosen for this evaluation. Each entry is a snapshot reference, not the full metric body, to keep the context lean.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["metric_code", "version", "parent_dimension", "source_path"],
+        "properties": {
+          "metric_code": { "type": "string", "minLength": 1 },
+          "version": { "type": "string", "minLength": 1 },
+          "parent_dimension": {
+            "type": "string",
+            "enum": [
+              "functional_completeness",
+              "interaction_quality",
+              "process_compliance",
+              "problem_resolution",
+              "tool_call_correctness"
+            ]
+          },
+          "source_path": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "enriched_test_cases": {
+      "type": "array",
+      "minItems": 1,
+      "description": "References to enriched test cases (id only) to keep the context compact. Full bodies live in their own files.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["test_case_id", "source_path", "applicable_metrics"],
+        "properties": {
+          "test_case_id": { "type": "string", "minLength": 1 },
+          "source_path": { "type": "string", "minLength": 1 },
+          "applicable_metrics": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "is_synthesized": { "type": "boolean", "default": false }
+        }
+      }
+    },
+    "fan_out_plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pairs", "total"],
+      "description": "Cartesian product of (test_case_id, metric_code) that STEP 4 must execute.",
+      "properties": {
+        "total": { "type": "integer", "minimum": 1 },
+        "pairs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["test_case_id", "metric_code"],
+            "properties": {
+              "test_case_id": { "type": "string", "minLength": 1 },
+              "metric_code": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metrics_dir", "test_cases_dir", "run_dir", "drivers_dir", "simulators_dir"],
+      "properties": {
+        "metrics_dir": { "type": "string", "minLength": 1 },
+        "test_cases_dir": { "type": "string", "minLength": 1 },
+        "run_dir": { "type": "string", "minLength": 1 },
+        "drivers_dir": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Directory containing one subdirectory per runtime driver. Default './runtime-drivers/'. Overridable via EVALUATION_DRIVERS_DIR."
+        },
+        "simulators_dir": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Directory containing one subdirectory per user simulator. Default './simulators/'. Overridable via EVALUATION_SIMULATORS_DIR."
+        },
+        "synthesized_cases_dir": { "type": "string" }
+      }
+    },
+    "runtime_driver": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["driver_id", "driver_config"],
+      "description": "Selects which runtime driver under paths.drivers_dir/<driver_id>/ STEP 3 invokes, and supplies the protocol-specific configuration that the driver's manifest config_schema validates. STEP 3 MUST validate driver_config against the chosen driver's driver.json#/config_schema BEFORE invoking the entry.",
+      "properties": {
+        "driver_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "MUST equal an existing subdirectory name under paths.drivers_dir. STEP 3 fails fast if not found."
+        },
+        "driver_config": {
+          "type": "object",
+          "description": "Protocol-specific configuration. Validated against the selected driver's driver.json#/config_schema, NOT here.",
+          "additionalProperties": true
+        }
+      }
+    },
+    "runtime_simulator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["simulator_id"],
+      "description": "Selects which simulator role profile under paths.simulators_dir/<simulator_id>/ the host evaluation-expert agent loads when impersonating the customer in STEP 3. The simulator is NOT a subprocess and does NOT call any external LLM — the host agent's own LLM brain consumes the simulator's system_prompt template. There is no `simulator_config` field by design: model / temperature / api_key choices belong to the host agent's runtime, not to this contract.",
+      "properties": {
+        "simulator_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "MUST equal an existing subdirectory name under paths.simulators_dir. STEP 3 fails fast if not found."
+        },
+        "prompt_overrides": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Optional per-run overrides for prompt-template variables (e.g. tighten {{effective_max_turns}} or inject extra context). Treated as advisory hints by the host agent; never used to swap in a different LLM provider."
+        }
+      }
+    },
+    "global_turn_cap": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 200,
+      "default": 30,
+      "description": "Fallback hard upper bound on customer-employee exchanges per scenario, used when a test case does not specify turn_budget.hard_max_turns. STEP 3 chooses the smaller of (test_case.turn_budget.hard_max_turns, global_turn_cap) to enforce."
+    },
+    "open_questions": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

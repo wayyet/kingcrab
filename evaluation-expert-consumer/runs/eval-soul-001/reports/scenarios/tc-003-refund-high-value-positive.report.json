@@ -1,0 +1,56 @@
+{
+  "$schema": "../../../../runtime-schemas/scenario_report.schema.json",
+  "eval_id": "eval-soul-001",
+  "test_case_id": "tc-003-refund-high-value-positive",
+  "test_case_title": "退货申请 - 金额超限触发强制转人工",
+  "report_generated_at": "2026-05-29T14:37:00Z",
+  "metric_results": [
+    {
+      "metric_code": "interaction_empathy",
+      "score": 72,
+      "weight": 0.33
+    },
+    {
+      "metric_code": "tool_call_correctness",
+      "score": 0,
+      "weight": 0.33
+    },
+    {
+      "metric_code": "order_refund_policy_accuracy",
+      "score": 45,
+      "weight": 0.34
+    }
+  ],
+  "scenario_summary": "小张的蓝牙耳机899元退货申请，员工识别了质量问题但未识别金额超限（>500元）必须转人工的规则，也未调用任何工具。",
+  "what_went_well": [
+    "正确复述客户问题'用了两周左耳有杂音'",
+    "识别为质量类问题，建议走质量问题售后流程",
+    "主动引导客户提供订单号"
+  ],
+  "what_went_wrong": [
+    "严重红线：金额899元超过500元阈值，必须转人工，但员工未识别此规则",
+    "未调用任何工具（query_order_status, query_after_sales_policy, create_handoff_ticket）",
+    "未说明超过7天无理由期限的限制",
+    "对客户的不满情绪（frustrated）缺乏共情回应"
+  ],
+  "improvement_points": [
+    "首要：金额超过500元必须立即转人工，创建工单",
+    "收到订单号后立即查询订单详情和售后政策",
+    "明确告知客户'金额较大需人工确认'的转人工原因",
+    "对产品质量问题表示适当歉意"
+  ],
+  "dialog_highlights": [
+    {
+      "turn": 0,
+      "actor": "customer",
+      "summary": "小张直接要求退货，表达不满"
+    },
+    {
+      "turn": 0,
+      "actor": "employee",
+      "summary": "员工识别质量问题，建议走质量售后，但未提及金额超限和转人工"
+    }
+  ],
+  "trace_reference": "../../traces/tc-003-refund-high-value-positive.trace.json",
+  "enriched_case_reference": "../../enriched-cases/tc-003-refund-high-value-positive.json"
+}

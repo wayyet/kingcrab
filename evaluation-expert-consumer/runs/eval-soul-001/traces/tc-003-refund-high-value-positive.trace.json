@@ -1,0 +1,48 @@
+{
+  "evaluation_id": "eval-69f8d0a6",
+  "test_case_id": "tc-003-refund-high-value-positive",
+  "simulator_id": "customer_realistic",
+  "started_at": "2026-05-29T10:21:48.436151+00:00",
+  "ended_at": "2026-05-29T10:21:54.912728+00:00",
+  "dialog_turns": [
+    {
+      "turn_index": 0,
+      "actor": "evaluator",
+      "content": "我买的蓝牙耳机，用了两周，左耳有杂音，我要退！订单号我发你。",
+      "timestamp": "2026-05-29T10:21:48.549188+00:00"
+    },
+    {
+      "turn_index": 0,
+      "actor": "evaluatee",
+      "content": "好的，我先帮您走售后退货/退款的判断与指引。您这边“用了两周左耳有杂音”属于质量类问题的可能性较高，一般建议优先走**质量问题售后（退/换/修）**流程处理。\n\n请您先把**订单号**发我（只需订单号即可）。同时为了更快处理，也请您补充 3 点信息（能提供就提供）：\n1) 是否已签收、签收日期大概是哪天（用于判断是否在签收后7天内）  \n2) 杂音情况：一直有/偶发？在安静环境也有吗？是否换过设备/重置配对测试过？  \n3) 是否方便提供一段**杂音视频/录音**或商品外观照片（用于售后审核）\n\n我收到订单号后，会帮您确认：是否还能直接申请退货、需要走换货/维修、以及运费由哪方承担的规则说明，并给您下一步操作路径。",
+      "timestamp": "2026-05-29T10:21:53.897064+00:00"
+    }
+  ],
+  "actual_tool_calls": [],
+  "simulator_trail": [
+    {
+      "should_continue": true,
+      "next_utterance": "我买的蓝牙耳机，用了两周，左耳有杂音，我要退！订单号我发你。",
+      "current_emotion": "frustrated",
+      "goal_progress": "just_started",
+      "stop_reason": null,
+      "turn_index": 0,
+      "decided_at": "2026-05-29T10:21:48.549173+00:00"
+    },
+    {
+      "should_continue": false,
+      "next_utterance": "好的，谢谢你",
+      "current_emotion": "satisfied",
+      "goal_progress": "goal_achieved",
+      "stop_reason": "goal_achieved",
+      "turn_index": 1,
+      "decided_at": "2026-05-29T10:21:53.898213+00:00"
+    }
+  ],
+  "termination": {
+    "reason": "completed_normally",
+    "detail": "对话完成",
+    "final_emotion": "satisfied",
+    "turns_used": 1
+  }
+}

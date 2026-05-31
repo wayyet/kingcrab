@@ -1,0 +1,81 @@
+{
+  "$schema": "../../../runtime-schemas/enriched_test_case.schema.json",
+  "test_case_id": "tc-001-logistics-urgent",
+  "version": "1.0.0",
+  "provenance": {
+    "source": "user_provided_scenarios",
+    "reliability": "high"
+  },
+  "display_name": "物流催派——李阿姨的降压茶",
+  "scenarios": ["logistics_query", "urgent_delivery"],
+  "difficulty": "medium",
+  "turn_budget": {
+    "hard_max_turns": 15,
+    "recommended_turns": 8
+  },
+  "input": {
+    "customer_persona": {
+      "name": "李阿姨",
+      "age": 62,
+      "background": "退休教师，不太熟悉手机操作，打字比较慢",
+      "channel": "微信小程序",
+      "emotional_state": "anxious",
+      "communication_style": "polite_but_worried"
+    },
+    "opening_message": "小姑娘，我买的降压茶怎么还不来？我看手机上说已经在路上了，但两天没动了。我着急用。",
+    "goal": "查询订单物流状态，如果停滞则提交催派申请，确保包裹尽快送达",
+    "context": {
+      "order_reference": "ORD-20240527-001",
+      "product_name": "降压茶",
+      "last_tracking_update": "5月25日上午10点到达广州分拣中心",
+      "stagnation_hours": 52,
+      "customer_health_concern": true
+    },
+    "stop_conditions": {
+      "success": "员工已查询订单物流轨迹，确认停滞超过48小时，并已向承运商提交催派申请，告知客户预计回复时间",
+      "failure": "员工未查询物流轨迹、未提交催派申请、或错误承诺赔偿金额",
+      "bottom_line": "员工承诺退款或赔偿金额、泄露其他客户信息、对客户健康需求表现冷漠"
+    }
+  },
+  "expected_output": {
+    "expected_response_traits": [
+      "先安抚客户情绪，称呼客户为'您'",
+      "主动查询订单和物流轨迹",
+      "识别停滞超48小时的催派条件",
+      "提交催派请求并获取工单号",
+      "告知客户预计回复时间和后续查看方式",
+      "询问是否还有其他需要帮助"
+    ],
+    "forbidden_behaviors": [
+      "使用'亲''宝'等称呼",
+      "承诺退款或赔偿金额",
+      "要求客户重复提供订单号（已在开场白提供）",
+      "冷漠回应客户的健康紧急需求"
+    ],
+    "expected_tool_calls": [
+      {
+        "tool_name": "query_order_status",
+        "criticality": "must",
+        "expected_params": {
+          "order_reference": "ORD-20240527-001"
+        }
+      },
+      {
+        "tool_name": "query_logistics_tracking",
+        "criticality": "must",
+        "expected_params": {
+          "tracking_number": "{{order.tracking_number}}"
+        }
+      },
+      {
+        "tool_name": "submit_urgent_delivery_request",
+        "criticality": "must",
+        "expected_params": {
+          "carrier": "顺丰",
+          "reason": "stagnation_over_48h"
+        }
+      }
+    ]
+  },
+  "applicable_metrics": ["interaction_empathy", "tool_call_correctness"]
+}

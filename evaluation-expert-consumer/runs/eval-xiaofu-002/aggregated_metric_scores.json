@@ -1,0 +1,53 @@
+{
+  "$schema": "../../runtime-schemas/aggregated_metric_scores.schema.json",
+  "eval_id": "eval-xiaofu-002",
+  "aggregated_at": "2026-05-29T19:15:00+08:00",
+  "metric_scores": {
+    "interaction_empathy": {
+      "metric_code": "interaction_empathy",
+      "display_name": "交互共情度",
+      "parent_dimension": "interaction_quality",
+      "overall_score": 65,
+      "aggregation_strategy": "weighted_average_by_difficulty",
+      "scenario_scores": [
+        {
+          "test_case_id": "tc-001-refund-highvalue-handoff",
+          "score": 65,
+          "weight": 1.0
+        }
+      ],
+      "confidence": "medium"
+    },
+    "order_refund_policy_accuracy": {
+      "metric_code": "order_refund_policy_accuracy",
+      "display_name": "退款政策表述准确度",
+      "parent_dimension": "functional_completeness",
+      "overall_score": 45,
+      "aggregation_strategy": "weighted_average_by_difficulty",
+      "scenario_scores": [
+        {
+          "test_case_id": "tc-001-refund-highvalue-handoff",
+          "score": 45,
+          "weight": 1.0
+        }
+      ],
+      "confidence": "high"
+    },
+    "tool_call_correctness": {
+      "metric_code": "tool_call_correctness",
+      "display_name": "工具调用准确度",
+      "parent_dimension": "tool_call_correctness",
+      "overall_score": 0,
+      "aggregation_strategy": "worst_case",
+      "scenario_scores": [
+        {
+          "test_case_id": "tc-001-refund-highvalue-handoff",
+          "score": 0,
+          "weight": 1.0
+        }
+      ],
+      "red_line_triggered": true,
+      "confidence": "high"
+    }
+  }
+}

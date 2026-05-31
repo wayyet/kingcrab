@@ -1,0 +1,94 @@
+{
+  "$schema": "../../runtime-schemas/evaluation_report.schema.json",
+  "evaluation_id": "eval-xiaofu-001",
+  "employee": {
+    "employee_id": "customer-service-assistant-agents",
+    "display_name": "小服",
+    "role": "customer-service-ecommerce"
+  },
+  "evaluated_at": "2026-05-29T12:00:00Z",
+  "executive_summary": "本次评估针对数字员工'小服'（客服数字员工）在两个真实业务场景下的表现进行了全面测试。评估发现员工在语言规范和专业态度方面表现良好，但在工具调用能力方面存在严重缺陷，导致两次测试均未能完成核心业务流程。",
+  "overall_score": 42.8,
+  "dimension_scores": {
+    "interaction_quality": 72.5,
+    "functional_completeness": 65,
+    "tool_call_correctness": 0,
+    "process_compliance": 45,
+    "problem_resolution": 35
+  },
+  "per_metric_final_scores": {
+    "interaction_empathy": 72.5,
+    "order_refund_policy_accuracy": 65,
+    "tool_call_correctness": 0
+  },
+  "red_line": {
+    "passed": false,
+    "triggered": ["tool_call_correctness"],
+    "details": "工具调用准确度指标触发红线：两个测试场景均未调用任何必需工具（query_order_status、query_logistics_tracking、submit_urgent_delivery_request、query_aftersales_policy、create_handoff_ticket）"
+  },
+  "passed": false,
+  "strengths": [
+    "语言规范：使用'您好'开头，称呼客户为'您'，未使用'亲''宝'等禁用称呼",
+    "合规意识：未承诺退款金额或赔偿，提及'以系统审核为准'",
+    "专业态度：主动提出帮助，解释政策和流程",
+    "知识储备：正确区分7天无理由退货和质量问题通道"
+  ],
+  "weaknesses": [
+    "工具调用完全缺失：两次测试均未调用任何必需工具",
+    "流程推进能力弱：对话停留在信息收集阶段，未进入实际执行",
+    "转人工机制失效：未识别金额超限(899>500)触发转人工",
+    "场景适配不足：对程序员客户的回应过于冗长，与直接简洁风格不匹配"
+  ],
+  "cross_scenario_patterns": [
+    {
+      "pattern": "工具调用缺失",
+      "description": "两个场景中员工均未调用任何工具，仅通过文本回复询问更多信息。这表明员工可能配置错误、工具权限问题，或工具调用逻辑未正确实现。",
+      "affected_scenarios": ["tc-001-logistics-urgent", "tc-002-refund-highvalue-handoff"],
+      "severity": "critical"
+    },
+    {
+      "pattern": "过度信息收集",
+      "description": "员工在收到订单号后仍要求额外信息（快递单号/承运商、详细问题描述等），增加了客户的沟通负担，未能基于已有信息主动推进。",
+      "affected_scenarios": ["tc-001-logistics-urgent", "tc-002-refund-highvalue-handoff"],
+      "severity": "major"
+    },
+    {
+      "pattern": "客户风格适配不足",
+      "description": "对62岁老年客户的健康担忧缺乏共情，对程序员客户的回应过于详细。",
+      "affected_scenarios": ["tc-001-logistics-urgent", "tc-002-refund-highvalue-handoff"],
+      "severity": "minor"
+    }
+  ],
+  "improvement_plan": {
+    "immediate_actions": [
+      "检查员工工具调用配置，确保工具权限和连接正常",
+      "修复工具调用逻辑，确保收到关键信息后自动触发工具调用",
+      "测试 query_order_status、query_logistics_tracking、submit_urgent_delivery_request 等核心工具"
+    ],
+    "short_term": [
+      "优化信息收集逻辑，减少不必要的客户输入",
+      "实现金额超限自动识别和转人工工单生成",
+      "增加客户画像感知，根据年龄/背景调整回应风格"
+    ],
+    "long_term": [
+      "建立工具调用成功率监控指标",
+      "完善场景覆盖，增加更多真实业务场景测试",
+      "优化多轮对话中的上下文管理和流程推进能力"
+    ]
+  },
+  "open_questions": [
+    "工具调用缺失是由于配置问题、权限问题，还是实现逻辑缺陷？",
+    "员工在实际生产环境中是否能正常调用工具？",
+    "转人工阈值（500元）是否已配置到员工决策逻辑中？",
+    "评估过程中使用了用户提供的高保真业务场景（Tier 1），结果可靠性高"
+  ],
+  "scenario_reports": [
+    "./scenarios/tc-001-logistics-urgent.report.json",
+    "./scenarios/tc-002-refund-highvalue-handoff.report.json"
+  ],
+  "provenance_notes": {
+    "test_case_source": "user_provided_scenarios",
+    "reliability": "high",
+    "caveat": null
+  }
+}

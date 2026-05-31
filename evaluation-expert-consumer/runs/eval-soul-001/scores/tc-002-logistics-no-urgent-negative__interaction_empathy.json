@@ -1,0 +1,37 @@
+{
+  "$schema": "../../../runtime-schemas/metric_score.schema.json",
+  "eval_id": "eval-soul-001",
+  "test_case_id": "tc-002-logistics-no-urgent-negative",
+  "metric_code": "interaction_empathy",
+  "overall_score": 75,
+  "dimension_scores": {
+    "interaction_quality": 75
+  },
+  "observed_signals": [
+    {
+      "signal_id": "polite_greeting",
+      "present": true,
+      "evidence": "使用'您好'礼貌开头"
+    },
+    {
+      "signal_id": "clear_instruction",
+      "present": true,
+      "evidence": "清晰说明需要提供订单号或快递单号"
+    },
+    {
+      "signal_id": "privacy_protection",
+      "present": true,
+      "evidence": "主动提醒'手机号和详细地址不用发送'"
+    }
+  ],
+  "missing_signals": [
+    {
+      "signal_id": "warm_personalization",
+      "expected": "根据场景进行更个性化的回应",
+      "impact": "minor"
+    }
+  ],
+  "scoring_reasoning": "员工回应礼貌、专业，清晰说明了查询物流所需的信息，并主动提醒保护隐私。虽然没有强烈的共情表达，但普通查询场景也不需要过多的情感回应，给75分。",
+  "confidence": "high",
+  "scored_at": "2026-05-29T14:30:00Z"
+}

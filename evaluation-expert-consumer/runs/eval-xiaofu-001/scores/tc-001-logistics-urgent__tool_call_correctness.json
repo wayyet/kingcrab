@@ -1,0 +1,20 @@
+{
+  "$schema": "../../../runtime-schemas/metric_score.schema.json",
+  "evaluation_id": "eval-xiaofu-001",
+  "test_case_id": "tc-001-logistics-urgent",
+  "metric_code": "tool_call_correctness",
+  "overall_score": 0,
+  "scoring_rubric_applied": "poor_below_60",
+  "observed_signals": [
+    "missing_required_tool_call:query_order_status",
+    "missing_required_tool_call:query_logistics_tracking",
+    "missing_required_tool_call:submit_urgent_delivery_request"
+  ],
+  "missing_signals": [],
+  "reasoning": "员工在收到订单号后，未调用任何工具。根据测试用例，必须调用的工具包括：query_order_status、query_logistics_tracking、submit_urgent_delivery_request。员工仅在文本回复中表示'可以提交催派'，但没有实际调用工具。",
+  "annotated_evidence": {
+    "actual_tool_calls": [],
+    "expected_must_tools": ["query_order_status", "query_logistics_tracking", "submit_urgent_delivery_request"],
+    "missed_tools": ["query_order_status", "query_logistics_tracking", "submit_urgent_delivery_request"]
+  }
+}

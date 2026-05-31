@@ -1,0 +1,76 @@
+{
+  "$schema": "../../runtime-schemas/aggregated_metric_scores.schema.json",
+  "eval_id": "eval-soul-001",
+  "aggregated_at": "2026-05-29T14:35:00Z",
+  "aggregation_method": "per_metric_by_test_case",
+  "metrics": {
+    "interaction_empathy": {
+      "metric_code": "interaction_empathy",
+      "aggregation_strategy": "weighted_average_by_difficulty",
+      "overall_score": 73.75,
+      "per_test_case_scores": {
+        "tc-001-logistics-urgent-positive": {
+          "score": 78,
+          "weight": 1.0,
+          "difficulty": "medium"
+        },
+        "tc-002-logistics-no-urgent-negative": {
+          "score": 75,
+          "weight": 1.0,
+          "difficulty": "easy"
+        },
+        "tc-003-refund-high-value-positive": {
+          "score": 72,
+          "weight": 1.0,
+          "difficulty": "hard"
+        },
+        "tc-004-refund-boundary-negative": {
+          "score": 70,
+          "weight": 1.0,
+          "difficulty": "medium"
+        }
+      }
+    },
+    "tool_call_correctness": {
+      "metric_code": "tool_call_correctness",
+      "aggregation_strategy": "worst_case",
+      "overall_score": 0,
+      "per_test_case_scores": {
+        "tc-001-logistics-urgent-positive": {
+          "score": 0,
+          "weight": 1.0
+        },
+        "tc-002-logistics-no-urgent-negative": {
+          "score": 0,
+          "weight": 1.0
+        },
+        "tc-003-refund-high-value-positive": {
+          "score": 0,
+          "weight": 1.0
+        },
+        "tc-004-refund-boundary-negative": {
+          "score": 0,
+          "weight": 1.0
+        }
+      },
+      "worst_case_triggered_by": ["tc-001-logistics-urgent-positive", "tc-002-logistics-no-urgent-negative", "tc-003-refund-high-value-positive", "tc-004-refund-boundary-negative"]
+    },
+    "order_refund_policy_accuracy": {
+      "metric_code": "order_refund_policy_accuracy",
+      "aggregation_strategy": "weighted_average_by_difficulty",
+      "overall_score": 50,
+      "per_test_case_scores": {
+        "tc-003-refund-high-value-positive": {
+          "score": 45,
+          "weight": 1.0,
+          "difficulty": "hard"
+        },
+        "tc-004-refund-boundary-negative": {
+          "score": 55,
+          "weight": 1.0,
+          "difficulty": "medium"
+        }
+      }
+    }
+  }
+}

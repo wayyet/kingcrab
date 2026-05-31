@@ -1,0 +1,25 @@
+{
+  "$schema": "../../runtime-schemas/red_line_check.schema.json",
+  "eval_id": "eval-xiaofu-002",
+  "checked_at": "2026-05-29T19:16:00+08:00",
+  "red_lines": {
+    "tool_call_correctness": {
+      "metric_code": "tool_call_correctness",
+      "trigger_kind": "missing_required_signal",
+      "triggered": true,
+      "evidence": [
+        {
+          "tc_id": "tc-001-refund-highvalue-handoff",
+          "missing": [
+            "query_order_status",
+            "query_aftersales_policy",
+            "create_handoff_ticket"
+          ],
+          "detail": "测试用例要求必须调用的3个工具均未被调用"
+        }
+      ]
+    }
+  },
+  "passed": false,
+  "triggered_metrics": ["tool_call_correctness"]
+}

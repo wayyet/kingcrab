@@ -1,0 +1,59 @@
+{
+  "$schema": "../../../runtime-schemas/scenario_report.schema.json",
+  "evaluation_id": "eval-xiaofu-001",
+  "test_case_id": "tc-002-refund-highvalue-handoff",
+  "scenario_name": "退货金额超限——小张的蓝牙耳机转人工",
+  "generated_at": "2026-05-29T12:00:00Z",
+  "summary": "员工在退货售后场景中正确识别了质量问题通道，解释了7天无理由政策限制，没有承诺一定能退款。但同样未调用任何必需工具，未识别金额超限(899>500)需要转人工，且回应过于冗长，与程序员客户直接简洁的风格不完全匹配。",
+  "dialog_summary": [
+    {
+      "turn": 0,
+      "customer": "我买的蓝牙耳机，用了两周，左耳有杂音，我要退！订单号我发你。",
+      "employee": "好的，我先帮您判断是否能退/换并告诉您怎么操作。为避免信息错漏，麻烦您把订单号发我一下。同时想再确认2点..."
+    },
+    {
+      "turn": 1,
+      "customer": "订单号 ORD20240510002",
+      "employee": "好的，我已收到订单号 ORD20240510002。我这边先按'使用两周左耳杂音'的情况给您走售后质量问题方向处理...为尽快帮您把申请提交正确，麻烦您补充以下信息..."
+    }
+  ],
+  "metric_results": [
+    {
+      "metric_code": "interaction_empathy",
+      "score": 70,
+      "scoring_rubric": "acceptable_60_79"
+    },
+    {
+      "metric_code": "order_refund_policy_accuracy",
+      "score": 65,
+      "scoring_rubric": "acceptable_60_79"
+    },
+    {
+      "metric_code": "tool_call_correctness",
+      "score": 0,
+      "scoring_rubric": "poor_below_60"
+    }
+  ],
+  "what_went_well": [
+    "正确区分了7天无理由退货和使用两周后的质量问题通道",
+    "没有承诺一定能退款，符合'不做赔付承诺'的红线",
+    "提及'以系统审核为准'，避免过度承诺",
+    "主动询问产品问题细节（杂音情况、外观状况等）",
+    "询问客户倾向（退货退款还是换货/维修）"
+  ],
+  "what_went_wrong": [
+    "未调用任何必需工具：query_order_status、query_aftersales_policy、create_handoff_ticket",
+    "未识别订单金额899元超过500元阈值，需要强制转人工",
+    "回应过于冗长（列出5个问题），与程序员直接简洁的风格不匹配",
+    "未能在收到订单号后立即查询订单信息和售后政策",
+    "没有生成转人工工单，人工客服无法获取上下文"
+  ],
+  "improvement_points": [
+    "收到订单号后立即调用query_order_status查询订单金额和类目",
+    "识别金额>500元后应立即调用create_handoff_ticket创建转人工工单",
+    "调用query_aftersales_policy查询数码影音类目售后规则",
+    "对程序员客户应使用更简洁的回应，减少问题数量",
+    "转人工时应提供完整上下文：订单号、金额、问题描述、已核实信息"
+  ],
+  "trace_path": "../../traces/tc-002-refund-highvalue-handoff.trace.json"
+}

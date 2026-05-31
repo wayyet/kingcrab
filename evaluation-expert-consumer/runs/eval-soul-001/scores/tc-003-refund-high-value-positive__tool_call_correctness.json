@@ -1,0 +1,43 @@
+{
+  "$schema": "../../../runtime-schemas/metric_score.schema.json",
+  "eval_id": "eval-soul-001",
+  "test_case_id": "tc-003-refund-high-value-positive",
+  "metric_code": "tool_call_correctness",
+  "overall_score": 0,
+  "dimension_scores": {
+    "tool_call_correctness": 0
+  },
+  "observed_signals": [
+    {
+      "signal_id": "query_order_status",
+      "present": false,
+      "evidence": "员工要求客户提供订单号，但未查询"
+    },
+    {
+      "signal_id": "query_after_sales_policy",
+      "present": false,
+      "evidence": "没有查询售后规则"
+    },
+    {
+      "signal_id": "create_handoff_ticket",
+      "present": false,
+      "evidence": "没有创建转人工工单"
+    }
+  ],
+  "missing_signals": [
+    {
+      "signal_id": "must_tools_invoked",
+      "expected": "query_order_status, query_after_sales_policy, create_handoff_ticket",
+      "impact": "critical"
+    }
+  ],
+  "scoring_reasoning": "员工引导客户走售后流程，但没有实际调用任何工具。特别是金额超限场景必须转人工并创建工单，这一点完全没有执行，得0分。",
+  "confidence": "high",
+  "red_line_observations": [
+    {
+      "observation_type": "missing_required_tool_call",
+      "detail": "必须调用的工具 query_order_status, query_after_sales_policy, create_handoff_ticket 都未在 trace 中出现"
+    }
+  ],
+  "scored_at": "2026-05-29T14:30:00Z"
+}

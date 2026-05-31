@@ -1,0 +1,58 @@
+{
+  "$schema": "../../runtime-schemas/dimension_scores.schema.json",
+  "eval_id": "eval-xiaofu-002",
+  "computed_at": "2026-05-29T19:15:30+08:00",
+  "dimension_scores": {
+    "interaction_quality": {
+      "dimension_name": "interaction_quality",
+      "display_name": "交互质量",
+      "weight": 0.20,
+      "overall_score": 65,
+      "sub_metrics": {
+        "interaction_empathy": {
+          "score": 65,
+          "weight": 0.5
+        }
+      }
+    },
+    "functional_completeness": {
+      "dimension_name": "functional_completeness",
+      "display_name": "功能完整性",
+      "weight": 0.25,
+      "overall_score": 45,
+      "sub_metrics": {
+        "order_refund_policy_accuracy": {
+          "score": 45,
+          "weight": 0.4
+        }
+      }
+    },
+    "tool_call_correctness": {
+      "dimension_name": "tool_call_correctness",
+      "display_name": "工具调用正确性",
+      "weight": 0.20,
+      "overall_score": 0,
+      "sub_metrics": {
+        "tool_call_correctness": {
+          "score": 0,
+          "weight": 1.0
+        }
+      }
+    },
+    "process_compliance": {
+      "dimension_name": "process_compliance",
+      "display_name": "流程合规性",
+      "weight": 0.20,
+      "overall_score": 35,
+      "sub_metrics": {}
+    },
+    "problem_resolution": {
+      "dimension_name": "problem_resolution",
+      "display_name": "问题解决能力",
+      "weight": 0.15,
+      "overall_score": 30,
+      "sub_metrics": {}
+    }
+  },
+  "overall_score": 36.5
+}

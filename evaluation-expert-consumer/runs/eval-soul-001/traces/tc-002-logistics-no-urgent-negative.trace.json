@@ -1,0 +1,48 @@
+{
+  "evaluation_id": "eval-0821c300",
+  "test_case_id": "tc-002-logistics-no-urgent-negative",
+  "simulator_id": "customer_realistic",
+  "started_at": "2026-05-29T10:21:42.744010+00:00",
+  "ended_at": "2026-05-29T10:21:48.321809+00:00",
+  "dialog_turns": [
+    {
+      "turn_index": 0,
+      "actor": "evaluator",
+      "content": "你好，我想查一下我买的茶叶到哪了？",
+      "timestamp": "2026-05-29T10:21:42.855879+00:00"
+    },
+    {
+      "turn_index": 0,
+      "actor": "evaluatee",
+      "content": "您好，我可以帮您查询物流进度。请您先提供一下 **订单号（ORD-开头或平台订单编号）**，或者直接发我 **快递单号** 也可以。\n\n为保护您的隐私，**手机号和详细地址不用发送**。收到订单号/运单号后，我就帮您查到最新物流节点并解释当前状态。",
+      "timestamp": "2026-05-29T10:21:47.267597+00:00"
+    }
+  ],
+  "actual_tool_calls": [],
+  "simulator_trail": [
+    {
+      "should_continue": true,
+      "next_utterance": "你好，我想查一下我买的茶叶到哪了？",
+      "current_emotion": "neutral",
+      "goal_progress": "just_started",
+      "stop_reason": null,
+      "turn_index": 0,
+      "decided_at": "2026-05-29T10:21:42.855865+00:00"
+    },
+    {
+      "should_continue": false,
+      "next_utterance": "好的，谢谢你",
+      "current_emotion": "satisfied",
+      "goal_progress": "goal_achieved",
+      "stop_reason": "goal_achieved",
+      "turn_index": 1,
+      "decided_at": "2026-05-29T10:21:47.268155+00:00"
+    }
+  ],
+  "termination": {
+    "reason": "completed_normally",
+    "detail": "对话完成",
+    "final_emotion": "satisfied",
+    "turns_used": 1
+  }
+}

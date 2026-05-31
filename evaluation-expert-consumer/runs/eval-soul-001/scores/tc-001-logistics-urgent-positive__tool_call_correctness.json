@@ -1,0 +1,43 @@
+{
+  "$schema": "../../../runtime-schemas/metric_score.schema.json",
+  "eval_id": "eval-soul-001",
+  "test_case_id": "tc-001-logistics-urgent-positive",
+  "metric_code": "tool_call_correctness",
+  "overall_score": 0,
+  "dimension_scores": {
+    "tool_call_correctness": 0
+  },
+  "observed_signals": [
+    {
+      "signal_id": "query_order_status",
+      "present": false,
+      "evidence": "员工询问客户订单号，但未在对话中实际调用查询工具"
+    },
+    {
+      "signal_id": "query_logistics_tracking",
+      "present": false,
+      "evidence": "没有查询物流轨迹的动作"
+    },
+    {
+      "signal_id": "submit_urgent_delivery_request",
+      "present": false,
+      "evidence": "没有提交催派请求"
+    }
+  ],
+  "missing_signals": [
+    {
+      "signal_id": "must_tools_invoked",
+      "expected": "query_order_status, query_logistics_tracking, submit_urgent_delivery_request",
+      "impact": "critical"
+    }
+  ],
+  "scoring_reasoning": "虽然员工表达了帮助意愿并解释了催派流程，但在对话中没有实际调用任何工具。根据 must-criticality 要求，必须调用的工具（查询订单、查询物流、提交催派）都未被调用，因此得0分。",
+  "confidence": "high",
+  "red_line_observations": [
+    {
+      "observation_type": "missing_required_tool_call",
+      "detail": "必须调用的工具 query_order_status, query_logistics_tracking, submit_urgent_delivery_request 都未在 trace 中出现"
+    }
+  ],
+  "scored_at": "2026-05-29T14:30:00Z"
+}

@@ -1,0 +1,32 @@
+{
+  "$schema": "../../../runtime-schemas/metric_score.schema.json",
+  "eval_id": "eval-soul-001",
+  "test_case_id": "tc-004-refund-boundary-negative",
+  "metric_code": "interaction_empathy",
+  "overall_score": 70,
+  "dimension_scores": {
+    "interaction_quality": 70
+  },
+  "observed_signals": [
+    {
+      "signal_id": "polite_greeting",
+      "present": true,
+      "evidence": "使用'您好'礼貌开头"
+    },
+    {
+      "signal_id": "proactive_clarification",
+      "present": true,
+      "evidence": "主动确认签收时间和质量问题细节"
+    }
+  ],
+  "missing_signals": [
+    {
+      "signal_id": "acknowledge_dissatisfaction",
+      "expected": "对质量不好表示理解或歉意",
+      "impact": "moderate"
+    }
+  ],
+  "scoring_reasoning": "员工回应专业，主动确认关键信息（签收时间、质量问题），但没有对产品质量问题表示歉意或理解客户的不满，给70分。",
+  "confidence": "high",
+  "scored_at": "2026-05-29T14:30:00Z"
+}
