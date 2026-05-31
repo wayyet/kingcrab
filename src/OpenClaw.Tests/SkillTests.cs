@@ -509,6 +509,114 @@ public class SkillLoaderTests
     }
 
     [Fact]
+    public void ParseSkillFile_WithContracts_PopulatesArtifactAndProjectionDiscoveryAndKeepsResources()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"openclaw-skill-contracts-{Guid.NewGuid():N}");
+        var referencesDir = Path.Combine(tempDir, "references");
+        var contractsDir = Path.Combine(tempDir, "contracts");
+        var projectionRoot = Path.Combine(contractsDir, "projections", "producer-one");
+        Directory.CreateDirectory(referencesDir);
+        Directory.CreateDirectory(projectionRoot);
+
+        try
+        {
+            File.WriteAllText(Path.Combine(tempDir, "SKILL.md"), """
+                ---
+                name: contract-skill
+                description: Has kingcrab contracts
+                ---
+                Body.
+                """);
+            File.WriteAllText(Path.Combine(referencesDir, "lookup.md"), "ref content");
+            File.WriteAllText(Path.Combine(contractsDir, "artifacts.json"), """
+                {
+                  "schemaVersion": 2,
+                  "stages": [
+                    {
+                      "name": "design",
+                      "label": "Design",
+                      "artifacts": [
+                        { "type": "requirements", "label": "Requirements", "terminal": true }
+                      ]
+                    }
+                  ]
+                }
+                """);
+            File.WriteAllText(Path.Combine(projectionRoot, "contract-index.json"), """
+                {
+                  "producer_skill": "producer-one",
+                  "producer_priority": 42,
+                  "default_selection_policy": {
+                    "prefer_ready_only": true,
+                    "block_on_open_questions": true,
+                    "fallback_order_by_target_view": ["prompt-constraint"]
+                  },
+                  "topic_scoring": {
+                    "clarify_when_score_gap_below": 3,
+                    "score_dimensions": [{ "dimension": "primary_intent_match", "score": 5 }],
+                    "topics": [{ "domain_slug": "skill-loading", "primary_intent_signals": ["skill loading"] }]
+                  },
+                  "target_view_scoring": {
+                    "prefer_explicit_user_artifact_requests": true,
+                    "views": [{ "target_view": "prompt-constraint", "strong_signals": ["prompt policy"] }],
+                    "within_topic_overrides": [
+                      {
+                        "domain_slug": "skill-loading",
+                        "bonuses": [{ "target_view": "prompt-constraint", "when_request_signals": ["prompt"], "score": 2 }]
+                      }
+                    ]
+                  },
+                  "topics": [
+                    {
+                      "domain_slug": "skill-loading",
+                      "default_target_view": "prompt-constraint",
+                      "views": [
+                        { "target_view": "prompt-constraint", "status": "READY", "path": "skill-loading/prompt.projection.json" }
+                      ]
+                    }
+                  ]
+                }
+                """);
+
+            var skill = SkillLoader.ParseSkillFile(
+                Path.Combine(tempDir, "SKILL.md"),
+                tempDir,
+                SkillSource.Workspace);
+
+            Assert.NotNull(skill);
+            Assert.Single(skill!.Resources);
+            Assert.NotNull(skill.ArtifactContract);
+            Assert.Equal(2, skill.ArtifactContract!.SchemaVersion);
+            var stage = Assert.Single(skill.ArtifactContract.Stages);
+            Assert.Equal("design", stage.Name);
+            Assert.Equal("requirements", Assert.Single(stage.Artifacts).Type);
+
+            var contract = Assert.Single(skill.ProjectionContracts);
+            Assert.Equal("producer-one", contract.ProducerName);
+            Assert.Equal(42, contract.ProducerPriority);
+            Assert.Equal(Path.GetFullPath(projectionRoot), Path.GetFullPath(contract.RootPath));
+            Assert.True(contract.Index.DefaultSelectionPolicy.PreferReadyOnly);
+            Assert.True(contract.Index.DefaultSelectionPolicy.BlockOnOpenQuestions);
+            Assert.Equal(["prompt-constraint"], contract.Index.DefaultSelectionPolicy.FallbackOrderByTargetView);
+            Assert.Equal("skill-loading", Assert.Single(contract.Index.Topics).DomainSlug);
+            Assert.Equal("prompt-constraint", Assert.Single(Assert.Single(contract.Index.Topics).Views).TargetView);
+            Assert.Equal("skill-loading", Assert.Single(contract.Index.TopicScoring!.Topics).DomainSlug);
+            Assert.Equal("prompt-constraint", Assert.Single(contract.Index.TargetViewScoring!.Views).TargetView);
+            Assert.Equal("prompt-constraint", Assert.Single(Assert.Single(contract.Index.TargetViewScoring.WithinTopicOverrides).Bonuses).TargetView);
+
+            Assert.NotNull(skill.ProjectionDiscovery);
+            Assert.Equal("bound", skill.ProjectionDiscovery!.Status);
+            Assert.Equal(1, skill.ProjectionDiscovery.IndexCount);
+            Assert.Equal(1, skill.ProjectionDiscovery.BoundCount);
+            Assert.Equal([Path.Combine(projectionRoot, "contract-index.json")], skill.ProjectionDiscovery.IndexPaths);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
     public void ParseSkillContent_NoResourceDirs_ReturnsEmptyResources()
     {
         var content = """
