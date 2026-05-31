@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openclaw.dev/schemas/digital-employee-manifest.schema.json",
+  "title": "Digital Employee Manifest",
+  "description": "OpenClaw 数字员工模板包（NCrew 兼容）的元数据描述。当前后端仅读取 name 字段（用于响应回显与审计日志），其余字段保留供 NCrew 上游打包器、CI 校验与 IDE/Wiki 工具使用。additionalProperties: true 是有意保留的，允许上游自由扩展私有字段。",
+  "type": "object",
+  "required": ["name"],
+  "additionalProperties": true,
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "包名。后端会读出来回显并写入审计日志（action=digital_employee_upload, target=<name>）。建议使用 ASCII 字母数字 + 短横/下划线，便于跨系统传递。",
+      "examples": ["hr-coach", "sales-assistant-zh"]
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$",
+      "description": "语义化版本号（SemVer 2.0.0）。当前后端不解析，仅用于人工/CI 识别。",
+      "examples": ["1.0.0", "0.3.1", "1.0.0-rc.1", "2.1.0+build.20260101"]
+    },
+    "author": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "作者或组织标识，可包含邮箱（RFC 5322 风格）或团队名。当前后端不解析。",
+      "examples": ["OpenClaw Team <devs@openclaw.dev>", "内部 HR 平台组"]
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 2048,
+      "description": "包功能/适用场景的一句话简述（建议 ≤ 200 字）。当前后端不解析，仅用于 UI/Wiki 展示。"
+    }
+  }
+}

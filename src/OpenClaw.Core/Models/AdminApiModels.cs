@@ -3,6 +3,25 @@ namespace OpenClaw.Core.Models;
 public sealed class AuthSessionRequest
 {
     public bool Remember { get; init; }
+    public string? Username { get; init; }
+    public string? Password { get; init; }
+    public string? AccountToken { get; init; }
+}
+
+public sealed class OperatorTokenExchangeRequest
+{
+    public string? Username { get; init; }
+    public string? Password { get; init; }
+    public string? Label { get; init; }
+    public DateTimeOffset? ExpiresAtUtc { get; init; }
+}
+
+public sealed class OperatorTokenExchangeResponse
+{
+    public string AuthMode { get; init; } = OrganizationAuthModeNames.AccountToken;
+    public OperatorAccountSummary? Account { get; init; }
+    public OperatorAccountTokenSummary? TokenInfo { get; init; }
+    public string Token { get; init; } = "";
 }
 
 public sealed class AuthSessionResponse
@@ -11,6 +30,20 @@ public sealed class AuthSessionResponse
     public string? CsrfToken { get; init; }
     public DateTimeOffset? ExpiresAtUtc { get; init; }
     public bool Persistent { get; init; }
+    public string Role { get; init; } = OperatorRoleNames.Viewer;
+    public string? AccountId { get; init; }
+    public string? Username { get; init; }
+    public string? DisplayName { get; init; }
+    public bool IsBootstrapAdmin { get; init; }
+    public bool PublicBind { get; init; }
+    public string[] AllowedAuthModes { get; init; } = [];
+    public string EffectiveToolSurface { get; init; } = "web";
+    public string EffectiveToolPresetId { get; init; } = "web";
+    public string? EffectiveToolPresetDescription { get; init; }
+    public bool BrowserToolRegistered { get; init; }
+    public bool BrowserExecutionBackendConfigured { get; init; }
+    public string BrowserCapabilityReason { get; init; } = "";
+    public string[] CapabilitySummary { get; init; } = [];
 }
 
 public sealed class ApprovalListResponse
@@ -24,6 +57,8 @@ public sealed class ApprovalHistoryQuery
     public string? ChannelId { get; init; }
     public string? SenderId { get; init; }
     public string? ToolName { get; init; }
+    public DateTimeOffset? FromUtc { get; init; }
+    public DateTimeOffset? ToUtc { get; init; }
 }
 
 public sealed class ApprovalHistoryEntry
@@ -42,6 +77,8 @@ public sealed class ApprovalHistoryEntry
     public DateTimeOffset? DecisionAtUtc { get; init; }
     public string? ActorChannelId { get; init; }
     public string? ActorSenderId { get; init; }
+    public string? ActorRole { get; init; }
+    public string? ActorDisplayName { get; init; }
     public string? DecisionSource { get; init; }
     public bool? Approved { get; init; }
 }
@@ -153,6 +190,8 @@ public sealed class AdminSummaryResponse
     public required AdminSummaryRetention Retention { get; init; }
     public required AdminSummaryPlugins Plugins { get; init; }
     public required AdminSummaryUsage Usage { get; init; }
+    public required OperatorDashboardSnapshot Dashboard { get; init; }
+    public ReliabilitySnapshot Reliability { get; init; } = new();
 }
 
 public sealed class AdminSummaryAuth
@@ -234,37 +273,6 @@ public sealed class BranchRestoreResponse
     public required string SessionId { get; init; }
     public required string BranchId { get; init; }
     public int TurnCount { get; init; }
-}
-
-public sealed class SkillInstallRequest
-{
-    public required string Name { get; init; }
-    /// <summary>Full SKILL.md content including YAML frontmatter.</summary>
-    public required string Content { get; init; }
-}
-
-public sealed class SkillInfoDto
-{
-    public required string Name { get; init; }
-    public string? Description { get; init; }
-    public string? Emoji { get; init; }
-    /// <summary>bundled | managed | workspace | extra | plugin</summary>
-    public required string Source { get; init; }
-    public bool IsUserInstalled { get; init; }
-    public OpenClaw.Core.Skills.SkillArtifactContract? ArtifactContract { get; init; }
-}
-
-public sealed class SkillsDetailResponse
-{
-    public IReadOnlyList<SkillInfoDto> Skills { get; init; } = [];
-}
-
-public sealed class SkillMutationResponse
-{
-    public bool Success { get; init; }
-    public string? Error { get; init; }
-    public int TotalLoaded { get; init; }
-    public IReadOnlyList<string> LoadedNames { get; init; } = [];
 }
 
 public sealed class DigitalEmployeeUploadResponse

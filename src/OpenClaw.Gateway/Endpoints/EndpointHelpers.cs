@@ -13,17 +13,32 @@ internal static class EndpointHelpers
         bool IsAuthorized,
         string AuthMode,
         bool UsedBrowserSession,
-        BrowserSessionTicket? BrowserSession);
+        BrowserSessionTicket? BrowserSession,
+        string Role,
+        string? AccountId,
+        string? Username,
+        string? DisplayName,
+        bool IsBootstrapAdmin)
+    {
+        public OperatorIdentitySnapshot ToIdentity()
+            => new()
+            {
+                AuthMode = AuthMode,
+                Role = Role,
+                AccountId = AccountId,
+                Username = Username,
+                DisplayName = DisplayName,
+                IsBootstrapAdmin = IsBootstrapAdmin
+            };
+    }
 
     public static bool IsAuthorizedRequest(HttpContext ctx, GatewayConfig config, bool isNonLoopbackBind)
     {
-        // Skip auth for loopback unless the operator explicitly requires it.
-        if (!isNonLoopbackBind && !config.Security.AlwaysRequireAuth)
+        if (!isNonLoopbackBind)
             return true;
 
-        // OIDC mode: UseAuthentication() middleware has already validated the JWT.
-        if (!string.IsNullOrEmpty(config.Security.OidcAuthority))
-            return ctx.User.Identity?.IsAuthenticated == true;
+        if (string.IsNullOrWhiteSpace(config.AuthToken))
+            return false;
 
         var token = GatewaySecurity.GetToken(ctx, config.Security.AllowQueryStringToken);
         return GatewaySecurity.IsTokenValid(token, config.AuthToken);
@@ -35,59 +50,84 @@ internal static class EndpointHelpers
         BrowserSessionAuthService browserSessions,
         bool requireCsrf)
     {
-        var useOidc = !string.IsNullOrEmpty(startup.Config.Security.OidcAuthority);
+        var organizationPolicy = ctx.RequestServices.GetService<OrganizationPolicyService>();
+        var operatorAccounts = ctx.RequestServices.GetService<OperatorAccountService>();
+        var policy = organizationPolicy?.GetSnapshot() ?? new OrganizationPolicySnapshot();
 
-        // Loopback bypass: skip auth only when neither AlwaysRequireAuth nor OIDC is active.
-        if (!startup.IsNonLoopbackBind
-            && !startup.Config.Security.AlwaysRequireAuth
-            && !useOidc)
+        if (!startup.IsNonLoopbackBind)
         {
             return new OperatorAuthorizationResult(
                 true,
                 "loopback-open",
                 UsedBrowserSession: false,
-                BrowserSession: null);
+                BrowserSession: null,
+                Role: OperatorRoleNames.Admin,
+                AccountId: null,
+                Username: null,
+                DisplayName: "Loopback operator",
+                IsBootstrapAdmin: false);
         }
 
-        // OIDC mode: UseAuthentication() has already validated the JWT and populated ctx.User.
-        if (useOidc && ctx.User.Identity?.IsAuthenticated == true)
+        var token = GatewaySecurity.GetToken(ctx, startup.Config.Security.AllowQueryStringToken);
+        if (policy.BootstrapTokenEnabled &&
+            IsAllowedAuthMode(policy, OrganizationAuthModeNames.BootstrapToken) &&
+            !string.IsNullOrWhiteSpace(startup.Config.AuthToken) &&
+            GatewaySecurity.IsTokenValid(token, startup.Config.AuthToken))
         {
             return new OperatorAuthorizationResult(
                 true,
-                "oidc-jwt",
+                "bearer",
                 UsedBrowserSession: false,
-                BrowserSession: null);
+                BrowserSession: null,
+                Role: OperatorRoleNames.Admin,
+                AccountId: null,
+                Username: null,
+                DisplayName: "Bootstrap admin",
+                IsBootstrapAdmin: true);
         }
 
-        // Browser session (admin Web UI cookie).
-        if (browserSessions.TryAuthorize(ctx, requireCsrf, out var ticket))
+        if (IsAllowedAuthMode(policy, OrganizationAuthModeNames.AccountToken) &&
+            !string.IsNullOrWhiteSpace(token) &&
+            operatorAccounts is not null &&
+            operatorAccounts.TryAuthenticateToken(token, out var accountIdentity))
+        {
+            return new OperatorAuthorizationResult(
+                true,
+                OrganizationAuthModeNames.AccountToken,
+                UsedBrowserSession: false,
+                BrowserSession: null,
+                Role: accountIdentity!.Role,
+                AccountId: accountIdentity.AccountId,
+                Username: accountIdentity.Username,
+                DisplayName: accountIdentity.DisplayName,
+                IsBootstrapAdmin: false);
+        }
+
+        if (IsAllowedAuthMode(policy, OrganizationAuthModeNames.BrowserSession) &&
+            browserSessions.TryAuthorize(ctx, requireCsrf, out var ticket))
         {
             return new OperatorAuthorizationResult(
                 true,
                 "browser-session",
                 UsedBrowserSession: true,
-                BrowserSession: ticket);
-        }
-
-        // Static token fallback (only when OIDC is not configured).
-        if (!useOidc)
-        {
-            var token = GatewaySecurity.GetToken(ctx, startup.Config.Security.AllowQueryStringToken);
-            if (GatewaySecurity.IsTokenValid(token, startup.Config.AuthToken!))
-            {
-                return new OperatorAuthorizationResult(
-                    true,
-                    "bearer",
-                    UsedBrowserSession: false,
-                    BrowserSession: null);
-            }
+                BrowserSession: ticket,
+                Role: ticket!.Role,
+                AccountId: ticket.AccountId,
+                Username: ticket.Username,
+                DisplayName: ticket.DisplayName,
+                IsBootstrapAdmin: ticket.IsBootstrapAdmin);
         }
 
         return new OperatorAuthorizationResult(
             false,
             "unauthorized",
             UsedBrowserSession: false,
-            BrowserSession: null);
+            BrowserSession: null,
+            Role: OperatorRoleNames.Viewer,
+            AccountId: null,
+            Username: null,
+            DisplayName: null,
+            IsBootstrapAdmin: false);
     }
 
     public static bool TrySetMaxRequestBodySize(HttpContext ctx, long maxBytes)
@@ -124,9 +164,13 @@ internal static class EndpointHelpers
 
     public static string GetOperatorActorId(HttpContext ctx, OperatorAuthorizationResult auth)
     {
+        if (!string.IsNullOrWhiteSpace(auth.AccountId))
+            return $"account:{auth.AccountId}";
+
         return auth.AuthMode switch
         {
             "browser-session" when auth.BrowserSession is not null => $"browser:{auth.BrowserSession.SessionId}",
+            OrganizationAuthModeNames.AccountToken => $"account-token:{GetRemoteIpKey(ctx)}",
             "bearer" => $"bearer:{GetRemoteIpKey(ctx)}",
             "loopback-open" => "loopback",
             _ => $"operator:{GetRemoteIpKey(ctx)}"
@@ -141,6 +185,12 @@ internal static class EndpointHelpers
         out string? blockedByPolicyId)
     {
         blockedByPolicyId = null;
+        if (!string.IsNullOrWhiteSpace(auth.AccountId))
+        {
+            if (!operations.ActorRateLimits.TryConsume("operator_account", auth.AccountId, endpointScope, out blockedByPolicyId))
+                return false;
+        }
+
         if (auth.UsedBrowserSession && auth.BrowserSession is not null)
         {
             if (!operations.ActorRateLimits.TryConsume("browser_session", auth.BrowserSession.SessionId, endpointScope, out blockedByPolicyId))
@@ -148,6 +198,112 @@ internal static class EndpointHelpers
         }
 
         return operations.ActorRateLimits.TryConsume("ip", GetRemoteIpKey(ctx), endpointScope, out blockedByPolicyId);
+    }
+
+    public static (OperatorAuthorizationResult? Authorization, IResult? Failure) AuthorizeOperatorEndpoint(
+        HttpContext ctx,
+        GatewayStartupContext startup,
+        BrowserSessionAuthService browserSessions,
+        RuntimeOperationsState operations,
+        bool requireCsrf,
+        string endpointScope)
+    {
+        var auth = AuthorizeOperatorRequest(ctx, startup, browserSessions, requireCsrf);
+        if (!auth.IsAuthorized)
+            return (null, Results.Unauthorized());
+
+        if (!IsRoleAllowed(auth.Role, endpointScope, out var requiredRole))
+        {
+            return (null, Results.Json(
+                new OperationStatusResponse
+                {
+                    Success = false,
+                    Error = $"Endpoint '{endpointScope}' requires role '{requiredRole}'."
+                },
+                CoreJsonContext.Default.OperationStatusResponse,
+                statusCode: StatusCodes.Status403Forbidden));
+        }
+
+        if (!TryConsumeOperatorRateLimit(ctx, operations, auth, endpointScope, out var blockedByPolicyId))
+        {
+            return (null, Results.Json(
+                new OperationStatusResponse
+                {
+                    Success = false,
+                    Error = $"Rate limit exceeded by policy '{blockedByPolicyId}'."
+                },
+                CoreJsonContext.Default.OperationStatusResponse,
+                statusCode: StatusCodes.Status429TooManyRequests));
+        }
+
+        return (auth, null);
+    }
+
+    public static bool IsRoleAllowed(string grantedRole, string endpointScope, out string requiredRole)
+    {
+        requiredRole = GetRequiredRole(endpointScope);
+        return OperatorRoleNames.CanAccess(grantedRole, requiredRole);
+    }
+
+    private static bool IsAllowedAuthMode(OrganizationPolicySnapshot policy, string authMode)
+        => policy.AllowedAuthModes.Any(mode => string.Equals(mode, authMode, StringComparison.OrdinalIgnoreCase));
+
+    private static string GetRequiredRole(string endpointScope)
+    {
+        if (string.IsNullOrWhiteSpace(endpointScope))
+            return OperatorRoleNames.Viewer;
+
+        var scope = endpointScope.Trim().ToLowerInvariant();
+
+        if (scope.StartsWith("admin.operator-accounts", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.organization-policy", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.settings.mutate", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.setup.mutate", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.accounts.", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.backends", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.provider-policies", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.providers.reset", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.plugins.mutate", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.skills", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.rate-limits.mutate", StringComparison.Ordinal) ||
+            scope.StartsWith("integration.accounts", StringComparison.Ordinal))
+        {
+            return OperatorRoleNames.Admin;
+        }
+
+        if (scope.StartsWith("admin.memory.mutate", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.memory.retention.sweep", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.agent-bundle.mutate", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.profiles.mutate", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.learning.mutate", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.harness.mutate", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.governance.mutate", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.webhooks.mutate", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.automations.mutate", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.automations.run", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.automations.migrate", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.pulse.mutate", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.pulse.run", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.pulse.status", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.pulse.events", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.session.promote", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.branch.restore", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.session.metadata", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.control", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.approvals", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.approval-policies.mutate", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.heartbeat.mutate", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.channels.auth.mutate", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.channels.auth.restart", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.models.evaluate", StringComparison.Ordinal) ||
+            scope.StartsWith("admin.external-cli", StringComparison.Ordinal) ||
+            scope.StartsWith("contract.mutate", StringComparison.Ordinal) ||
+            scope.StartsWith("integration.mutate", StringComparison.Ordinal))
+        {
+            return OperatorRoleNames.Operator;
+        }
+
+        return OperatorRoleNames.Viewer;
     }
 
     public static async Task<(bool Success, string Text)> TryReadBodyTextAsync(HttpContext ctx, long maxBytes, CancellationToken ct)
@@ -186,6 +342,10 @@ internal static class EndpointHelpers
                 AllowedFrom = config.Channels.Sms.Twilio.AllowedFromNumbers,
                 AllowedTo = config.Channels.Sms.Twilio.AllowedToNumbers
             },
+            "teams" => new ChannelAllowlistFile { AllowedFrom = config.Channels.Teams.AllowedFromIds },
+            "slack" => new ChannelAllowlistFile { AllowedFrom = config.Channels.Slack.AllowedFromUserIds },
+            "discord" => new ChannelAllowlistFile { AllowedFrom = config.Channels.Discord.AllowedFromUserIds },
+            "signal" => new ChannelAllowlistFile { AllowedFrom = config.Channels.Signal.AllowedFromNumbers },
             _ => new ChannelAllowlistFile()
         };
     }

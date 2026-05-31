@@ -1,7 +1,6 @@
 using System.Globalization;
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using OpenClaw.Core.Models;
+using OpenClaw.Core.Setup;
 
 namespace OpenClaw.Cli;
 
@@ -10,8 +9,6 @@ internal static class Program
     private const string DefaultBaseUrl = "http://127.0.0.1:18789";
     private const string EnvBaseUrl = "OPENCLAW_BASE_URL";
     private const string EnvAuthToken = "OPENCLAW_AUTH_TOKEN";
-    private const string DefaultSetupConfigPath = "~/.openclaw/config/openclaw.settings.json";
-
     public static async Task<int> Main(string[] args)
     {
         if (args.Length == 0 || args[0] is "-h" or "--help" or "help")
@@ -27,19 +24,34 @@ internal static class Program
         {
             return command switch
             {
+                "start" => await StartAsync(rest),
                 "run" => await RunAsync(rest),
                 "chat" => await ChatAsync(rest),
                 "live" => await LiveAsync(rest),
                 "tui" => await TuiAsync(rest),
+                "insights" => await InsightsAsync(rest),
                 "setup" => await SetupAsync(rest),
+                "upgrade" => await UpgradeAsync(rest),
+                "maintenance" => await MaintenanceAsync(rest),
+                "payment" => await PaymentCommands.RunAsync(rest),
+                "external" => await ExternalCliCommands.RunAsync(rest),
+                "memory" => await MemoryCommands.RunAsync(rest),
+                "test" => await TestingCommands.RunAsync(rest),
+                "harness" => await HarnessCommands.RunAsync(rest),
+                "regression" => await HarnessCommands.RunRegressionAliasAsync(rest, Console.Out, Console.Error),
+                "init" => InitCommand.Run(rest),
                 "migrate" => await MigrateAsync(rest),
+                "pulse" => await PulseAsync(rest),
                 "heartbeat" => await HeartbeatAsync(rest),
                 "models" => await ModelsAsync(rest),
                 "eval" => await EvalAsync(rest),
                 "accounts" => await AccountsAsync(rest),
                 "backends" => await BackendsAsync(rest),
                 "admin" => await AdminAsync(rest),
+                "compatibility" or "compat" => CompatibilityCommands.Run(rest),
                 "plugins" => await PluginCommands.RunAsync(rest),
+                "skill" => await SkillKitCommands.RunAsync(rest),
+                "skills" => await SkillCommands.RunAsync(rest),
                 "clawhub" => await ClawHubCommand.RunAsync(rest),
                 "version" or "--version" or "-v" => PrintVersion(),
                 _ => UnknownCommand(command)
@@ -77,18 +89,36 @@ internal static class Program
             openclaw — OpenClaw.NET CLI
 
             Usage:
+              openclaw start [options]
               openclaw run [options] <prompt>
               openclaw chat [options]
               openclaw live [options]
               openclaw tui [options]
+              openclaw insights [options]
               openclaw setup [options]
+              openclaw setup <launch|service|status|verify|channel|provider|tailscale> [options]
+              openclaw upgrade <check|rollback> [options]
+              openclaw init [options]
               openclaw migrate [options]
-              openclaw heartbeat <wizard|preview|status> [options]
-              openclaw models <list|doctor> [options]
+              openclaw migrate <legacy|upstream> [options]
+              openclaw pulse <status|run|enable|disable|events|doctor> [options]
+              openclaw heartbeat <wizard|preview|status|run> [options]
+              openclaw models <list|doctor|presets> [options]
+              openclaw maintenance <scan|fix> [options]
+              openclaw payment <setup|funding list|virtual-card issue|execute|status> [options]
+              openclaw external <list|status|commands|preview|execute> [options]
+              openclaw memory fractal <status|search|open|export|recent|handoff create|validate|index refresh> [options]
+              openclaw test <init|run|report|gates> [options]
+              openclaw harness <test|regression|map|state> [options]
+              openclaw regression test [options]
               openclaw eval <run|compare> [options]
               openclaw accounts <list|add|remove|probe> [options]
               openclaw backends <list|probe|run|session send> [options]
-              openclaw admin <posture|incident export|approvals simulate> [options]
+              openclaw admin <posture|incident export|trajectory export|approvals simulate> [options]
+              openclaw compatibility <catalog> [options]
+              openclaw plugins <install|remove|list|search> [options]
+              openclaw skill <new|critique|generate|validate|run|package|list> [options]
+              openclaw skills <inspect|install|list> [options]
               openclaw clawhub [wrapper options] [--] <clawhub args...>
 
             Common options:
@@ -100,6 +130,7 @@ internal static class Program
 
             run options:
               --file <path>      Attach file contents (repeatable)
+              --image <path|url> Attach image input (repeatable)
               --no-stream        Disable SSE streaming
               --temperature <n>  Temperature (optional)
               --max-tokens <n>   Max tokens (optional)
@@ -108,19 +139,53 @@ internal static class Program
               /help, /exit, /reset
               /system <text>
               /model <model>
+              /image <path|url> [prompt]
 
             Examples:
+              openclaw start
+              openclaw start --with-companion --open-browser
+              openclaw start --non-interactive --profile local --workspace ./workspace --provider openai --model gpt-4o --api-key env:MODEL_PROVIDER_KEY
+              openclaw start --non-interactive --profile local --workspace ./workspace --provider ollama --model llama3.2 --model-preset ollama-general
               openclaw run "summarize this README" --file ./README.md
               OPENCLAW_AUTH_TOKEN=... openclaw run "summarize this README" --file ./README.md
               cat error.log | openclaw run "what went wrong?"
               openclaw chat --system "Be concise."
               openclaw live --model gemini-2.0-flash-live-001 --system "Be concise."
               openclaw tui
-              openclaw setup --workspace ./workspace
+              openclaw insights
+              openclaw setup
+              openclaw setup tailscale serve
+              openclaw setup provider aperture --config ~/.openclaw/config/openclaw.settings.json --endpoint https://YOUR_APERTURE_ENDPOINT --model YOUR_APERTURE_MODEL_ROUTE --auth-mode bearer --env-var OPENCLAW_APERTURE_TOKEN
+              openclaw upgrade check
+              openclaw upgrade check --config ~/.openclaw/config/openclaw.settings.json --offline
+              openclaw upgrade rollback --config ~/.openclaw/config/openclaw.settings.json --offline
+              openclaw setup --non-interactive --profile local --workspace ./workspace --provider openai --model gpt-4o --api-key env:MODEL_PROVIDER_KEY
+              openclaw setup --non-interactive --profile local --workspace ./workspace --provider ollama --model llama3.2 --model-preset ollama-general
+              openclaw setup provider aperture --endpoint https://YOUR_APERTURE_ENDPOINT --model YOUR_APERTURE_MODEL_ROUTE --auth-mode tailnet-identity
+              openclaw setup verify --config ~/.openclaw/config/openclaw.settings.json
+              openclaw setup launch --config ~/.openclaw/config/openclaw.settings.json --with-companion --open-browser
+              openclaw setup service --config ~/.openclaw/config/openclaw.settings.json --platform all
+              openclaw setup status --config ~/.openclaw/config/openclaw.settings.json
+              openclaw init --preset public
               openclaw migrate --apply
+              openclaw migrate upstream --source ./upstream-agent --target-config ~/.openclaw/config/openclaw.settings.json --report ./migration-report.json
               openclaw heartbeat status
+              openclaw pulse status
+              openclaw pulse run --text "Check for urgent follow-ups"
+              openclaw external list
+              openclaw memory fractal status
+              openclaw memory fractal search "context bloat"
+              openclaw test run
+              openclaw test gates
+              openclaw harness test
+              openclaw harness test --category security --strict
+              openclaw harness map
+              openclaw harness state list
               openclaw models list
+              openclaw models presets
               openclaw models doctor
+              openclaw maintenance scan
+              openclaw maintenance fix --dry-run
               openclaw eval run --profile gemma4-prod
               openclaw eval compare --profiles gemma4-prod,frontier-tools
               openclaw accounts list
@@ -131,6 +196,15 @@ internal static class Program
               openclaw admin posture
               openclaw admin approvals simulate --tool shell --args "{\"command\":\"pwd\"}"
               openclaw admin incident export
+              openclaw compatibility catalog --status compatible
+              openclaw skill new "Community Research Insight Extractor" --category research
+              openclaw skill validate community.research_insight
+              openclaw skill run community.research_insight --input transcript.md --dry-run
+
+            Gateway direct-start fallback:
+              dotnet run --project src/OpenClaw.Gateway -c Release -- --quickstart
+              # Uses a minimal local loopback profile, prompts for missing provider inputs,
+              # retries in-process on common startup failures, and can save the working setup.
 
             Plugin management:
               openclaw plugins install <package-name>    Install from npm/ClawHub
@@ -138,6 +212,19 @@ internal static class Program
               openclaw plugins remove <plugin-name>       Remove a plugin
               openclaw plugins list                       List installed plugins
               openclaw plugins search <query>             Search npm for plugins
+
+            Skill management:
+              openclaw skill new "Community Research Insight Extractor" --category research
+              openclaw skill validate community.research_insight
+              openclaw skill package community.research_insight
+              openclaw skills inspect ./my-skill          Inspect a local skill package
+              openclaw skills install ./my-skill --dry-run
+              openclaw skills install ./my-skill --managed
+              openclaw skills list --managed
+
+            Compatibility catalog:
+              openclaw compatibility catalog              List pinned upstream compatibility scenarios
+              openclaw compat catalog --json             Emit catalog JSON
 
             ClawHub wrapper:
               # Forward --help to ClawHub itself:
@@ -159,10 +246,32 @@ internal static class Program
               openclaw heartbeat status [--url <url>] [--token <token>]
               openclaw heartbeat preview [--url <url>] [--token <token>]
               openclaw heartbeat wizard [--url <url>] [--token <token>]
+              openclaw heartbeat run --text <text> [--mode now|next-heartbeat] [--url <url>] [--token <token>]
 
             Notes:
-              - The heartbeat commands talk to the gateway admin API.
+              - Wizard/preview/status manage the legacy cron-backed heartbeat wizard.
+              - Run is an alias for Runtime Pulse manual wake.
               - Prefer OPENCLAW_BASE_URL / OPENCLAW_AUTH_TOKEN over command-line tokens.
+            """);
+    }
+
+    private static void PrintPulseHelp()
+    {
+        Console.WriteLine(
+            """
+            openclaw pulse
+
+            Usage:
+              openclaw pulse status [--url <url>] [--token <token>]
+              openclaw pulse run [--text <text>] [--mode now|next-heartbeat] [--url <url>] [--token <token>]
+              openclaw pulse enable [--url <url>] [--token <token>]
+              openclaw pulse disable [--url <url>] [--token <token>]
+              openclaw pulse events [--limit <n>] [--url <url>] [--token <token>]
+              openclaw pulse doctor [--url <url>] [--token <token>]
+
+            Notes:
+              - Runtime Pulse is a scheduled heartbeat turn, not cron automation.
+              - OK replies are suppressed by default; alerts remain operator-visible.
             """);
     }
 
@@ -175,6 +284,7 @@ internal static class Program
             Usage:
               openclaw admin posture [--url <url>] [--token <token>]
               openclaw admin incident export [--approval-limit <n>] [--event-limit <n>] [--url <url>] [--token <token>]
+              openclaw admin trajectory export [--session <id>] [--from <iso8601>] [--to <iso8601>] [--anonymize] [--output <path>] [--url <url>] [--token <token>]
               openclaw admin approvals simulate --tool <tool> [--args <json>] [--autonomy <mode>] [--require-approval <true|false>] [--approval-tool <tool>]... [--url <url>] [--token <token>]
             """);
     }
@@ -188,6 +298,24 @@ internal static class Program
             Usage:
               openclaw models list [--url <url>] [--token <token>]
               openclaw models doctor [--url <url>] [--token <token>]
+              openclaw models presets
+              openclaw models packages
+              openclaw models status [package] [--models-root <path>]
+              openclaw models install <package> --accept-license [--path <model>] [--mmproj-path <gguf>] [--draft-path <model>] [--download-url <url>] [--token <hf-token>] [--models-root <path>] [--no-optional-files]
+              openclaw models verify <package> [--models-root <path>]
+              openclaw models remove <package> [--models-root <path>]
+            """);
+    }
+
+    private static void PrintMaintenanceHelp()
+    {
+        Console.WriteLine(
+            """
+            openclaw maintenance
+
+            Usage:
+              openclaw maintenance scan [--config <path>] [--json]
+              openclaw maintenance fix [--config <path>] [--dry-run] [--json] [--apply <all|retention|metadata|artifacts>]
             """);
     }
 
@@ -239,14 +367,51 @@ internal static class Program
             openclaw setup
 
             Usage:
-              openclaw setup [--config <path>] [--workspace <path>] [--provider <id>] [--model <id>] [--api-key <secret-or-envref>]
+              openclaw setup [--profile <local|public|tailscale-serve>] [--non-interactive]
+                              [--config <path>] [--workspace <path>] [--provider <id>] [--model <id>] [--model-preset <id>] [--api-key <secret-or-envref>]
                               [--bind <address>] [--port <n>] [--auth-token <token>]
                               [--docker-image <image>] [--opensandbox-endpoint <url>] [--ssh-host <host>] [--ssh-user <user>] [--ssh-key <path>]
+              openclaw setup launch [--config <path>] [--with-companion] [--open-browser] [--skip-verify] [--offline] [--require-provider]
+              openclaw setup service [--config <path>] [--platform <linux|macos|all>]
+              openclaw setup status [--config <path>]
+              openclaw setup verify [--config <path>] [--offline] [--require-provider] [--json]
+              openclaw setup channel <telegram|slack|discord|teams|whatsapp> [--config <path>] [--non-interactive] [...]
+              openclaw setup tailscale serve [--config <path>] [--local-url <url>] [--non-interactive]
 
             Notes:
-              - Writes an external JSON config file for the gateway.
-              - Validates workspace and optional execution backend prerequisites.
-              - Prints the exact gateway launch command using the generated config.
+              - Prefer 'openclaw start' for the one-command local path.
+              - Bare 'openclaw setup' launches a guided onboarding flow.
+              - 'openclaw setup launch' starts the gateway in the current repo checkout, runs verification, and streams logs until Ctrl-C.
+              - Use --with-companion to start Companion too.
+              - If you start the gateway directly and hit local startup friction, use: dotnet run --project src/OpenClaw.Gateway -c Release -- --quickstart
+              - 'openclaw setup service' writes systemd/launchd/Caddy deployment artifacts next to the config.
+              - 'openclaw setup status' summarizes bind/auth posture and deploy artifact presence.
+              - 'openclaw setup verify' runs the first-run verification checks without launching the gateway.
+              - 'openclaw setup channel ...' updates an existing external config with channel-specific settings.
+              - 'openclaw setup tailscale serve' prints private tailnet Serve instructions without enabling public bind or changing providers.
+              - Use --non-interactive for automation or CI.
+              - Writes an external JSON config file plus an adjacent env example.
+              - Prints gateway, companion, doctor, and admin posture commands.
+            """);
+    }
+
+    private static void PrintUpgradeHelp()
+    {
+        Console.WriteLine(
+            """
+            openclaw upgrade
+
+            Usage:
+              openclaw upgrade check [--config <path>] [--offline]
+              openclaw upgrade rollback [--config <path>] [--offline] [--require-provider]
+
+            Notes:
+              - Runs preflight checks before an upgrade.
+              - Combines setup verification, provider readiness, plugin compatibility,
+                skill compatibility, and migration-risk heuristics into one report.
+              - Captures a last-known-good config/env/deploy snapshot when preflight succeeds.
+              - 'rollback' restores the saved snapshot and reruns setup verification.
+              - Returns a non-zero exit code when blocking issues are found.
             """);
     }
 
@@ -258,10 +423,13 @@ internal static class Program
 
             Usage:
               openclaw migrate [--apply] [--url <url>] [--token <token>]
+              openclaw migrate legacy [--apply] [--url <url>] [--token <token>]
+              openclaw migrate upstream --source <path> --target-config <path> [--apply] [--report <path>]
 
             Notes:
-              - Without --apply, this previews legacy cron/heartbeat migrations.
-              - With --apply, canonical automation definitions are written through the admin API.
+              - Bare 'openclaw migrate' remains the legacy automation migration alias.
+              - 'openclaw migrate upstream' performs upstream config + skill + plugin-manifest migration.
+              - Upstream dry-run is the default; apply mode writes translated config, managed skills, and a plugin review plan.
             """);
     }
 
@@ -277,6 +445,21 @@ internal static class Program
             Notes:
               - Launches the Spectre.Console terminal UI for runtime status, sessions, search,
                 automations, profiles, learning proposals, approvals, direct chat, and live sessions.
+            """);
+    }
+
+    private static void PrintInsightsHelp()
+    {
+        Console.WriteLine(
+            """
+            openclaw insights
+
+            Usage:
+              openclaw insights [--from <iso8601>] [--to <iso8601>] [--json] [--url <url>] [--token <token>]
+
+            Notes:
+              - Summarizes provider usage, estimated token spend, tool frequency, and session counts.
+              - Provider and tool usage are live runtime counters; session counts use the requested range.
             """);
     }
 
@@ -328,7 +511,7 @@ internal static class Program
             return 2;
         }
 
-        var userContent = BuildUserContent(prompt, parsed.Files);
+        var userContent = BuildUserContent(prompt, parsed.Files, parsed.Images);
         var messages = BuildMessages(system, userContent, priorConversation: null);
 
         using var client = new OpenClawHttpClient(baseUrl, token);
@@ -392,15 +575,22 @@ internal static class Program
             if (line.Length == 0)
                 continue;
 
-            if (line.StartsWith('/'))
+            var userContent = line.StartsWith("/image ", StringComparison.OrdinalIgnoreCase)
+                ? BuildImageCommandContent(line)
+                : line;
+
+            if (userContent is null)
+                continue;
+
+            if (line.StartsWith('/') && !line.StartsWith("/image ", StringComparison.OrdinalIgnoreCase))
             {
                 if (HandleSlashCommand(line, conversation, ref system, ref model))
                     break;
                 continue;
             }
 
-            conversation.Add(new OpenAiMessage { Role = "user", Content = line });
-            var messages = BuildMessages(system, line, conversation);
+            conversation.Add(new OpenAiMessage { Role = "user", Content = userContent });
+            var messages = BuildMessages(system, userContent, conversation);
 
             var request = new OpenAiChatCompletionRequest
             {
@@ -471,6 +661,32 @@ internal static class Program
         }
     }
 
+    private static async Task<int> InsightsAsync(string[] args)
+    {
+        var parsed = CliArgs.Parse(args);
+        if (parsed.ShowHelp)
+        {
+            PrintInsightsHelp();
+            return 0;
+        }
+
+        var baseUrl = parsed.GetOption("--url") ?? Environment.GetEnvironmentVariable(EnvBaseUrl) ?? DefaultBaseUrl;
+        var token = ResolveAuthToken(parsed, Console.Error);
+        var fromUtc = ParseDateTimeOffset(parsed.GetOption("--from"));
+        var toUtc = ParseDateTimeOffset(parsed.GetOption("--to"));
+
+        using var client = new OpenClawHttpClient(baseUrl, token);
+        var insights = await client.GetOperatorInsightsAsync(fromUtc, toUtc, CancellationToken.None);
+        if (parsed.HasFlag("--json"))
+        {
+            Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(insights, CoreJsonContext.Default.OperatorInsightsResponse));
+            return 0;
+        }
+
+        WriteInsights(insights);
+        return 0;
+    }
+
     private static async Task<int> SetupAsync(string[] args)
     {
         var parsed = CliArgs.Parse(args);
@@ -480,109 +696,35 @@ internal static class Program
             return 0;
         }
 
-        var configPath = ExpandPath(parsed.GetOption("--config") ?? DefaultSetupConfigPath);
-        var workspace = Path.GetFullPath(ExpandPath(parsed.GetOption("--workspace") ?? Path.Combine(Directory.GetCurrentDirectory(), "workspace")));
-        Directory.CreateDirectory(workspace);
+        return await SetupCommand.RunAsync(args, Console.In, Console.Out, Console.Error, Directory.GetCurrentDirectory(), canPrompt: !Console.IsInputRedirected);
+    }
 
-        var config = new GatewayConfig
+    private static async Task<int> StartAsync(string[] args)
+    {
+        var parsed = CliArgs.Parse(args);
+        if (parsed.ShowHelp)
         {
-            BindAddress = parsed.GetOption("--bind") ?? "127.0.0.1",
-            Port = ParseInt(parsed.GetOption("--port")) ?? 18789,
-            AuthToken = parsed.GetOption("--auth-token")
-                ?? Environment.GetEnvironmentVariable(EnvAuthToken)
-                ?? $"oc_{Guid.NewGuid():N}",
-            Llm = new LlmProviderConfig
-            {
-                Provider = parsed.GetOption("--provider") ?? "openai",
-                Model = parsed.GetOption("--model") ?? new GatewayConfig().Llm.Model,
-                ApiKey = parsed.GetOption("--api-key") ?? "env:MODEL_PROVIDER_KEY"
-            },
-            Tooling = new ToolingConfig
-            {
-                WorkspaceRoot = workspace
-            }
-        };
-
-        var warnings = new List<string>();
-        if (parsed.GetOption("--docker-image") is { Length: > 0 } dockerImage)
-        {
-            config.Execution.Profiles["docker"] = new ExecutionBackendProfileConfig
-            {
-                Type = ExecutionBackendType.Docker,
-                Image = dockerImage,
-                WorkingDirectory = workspace
-            };
-            config.Execution.Tools["shell"] = new ExecutionToolRouteConfig { Backend = "docker", FallbackBackend = "local", RequireWorkspace = true };
-            warnings.AddRange(CheckCommandAvailability("docker", "--version", "Docker backend requested but docker was not found on PATH."));
+            StartCommand.WriteHelp(Console.Out);
+            return 0;
         }
 
-        if (parsed.GetOption("--opensandbox-endpoint") is { Length: > 0 } openSandboxEndpoint)
-        {
-            if (!Uri.TryCreate(openSandboxEndpoint, UriKind.Absolute, out _))
-                throw new ArgumentException($"Invalid OpenSandbox endpoint: {openSandboxEndpoint}");
-
-            config.Sandbox.Provider = SandboxProviderNames.OpenSandbox;
-            config.Sandbox.Endpoint = openSandboxEndpoint;
-            config.Execution.Profiles["opensandbox"] = new ExecutionBackendProfileConfig
-            {
-                Type = ExecutionBackendType.OpenSandbox,
-                Endpoint = openSandboxEndpoint
-            };
-        }
-
-        if (parsed.GetOption("--ssh-host") is { Length: > 0 } sshHost)
-        {
-            var sshUser = parsed.GetOption("--ssh-user");
-            if (string.IsNullOrWhiteSpace(sshUser))
-                throw new ArgumentException("--ssh-user is required when --ssh-host is set.");
-
-            config.Execution.Profiles["ssh"] = new ExecutionBackendProfileConfig
-            {
-                Type = ExecutionBackendType.Ssh,
-                Host = sshHost,
-                Username = sshUser,
-                PrivateKeyPath = parsed.GetOption("--ssh-key"),
-                WorkingDirectory = workspace
-            };
-            warnings.AddRange(CheckCommandAvailability("ssh", "-V", "SSH backend requested but ssh was not found on PATH."));
-        }
-
-        var openClawNode = JsonNode.Parse(JsonSerializer.Serialize(config, CoreJsonContext.Default.GatewayConfig))
-            ?? throw new InvalidOperationException("Failed to serialize gateway config.");
-        var root = new JsonObject
-        {
-            ["OpenClaw"] = openClawNode
-        };
-
-        var directory = Path.GetDirectoryName(configPath);
-        if (!string.IsNullOrWhiteSpace(directory))
-            Directory.CreateDirectory(directory);
-
-        await File.WriteAllTextAsync(
-            configPath,
-            root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }),
-            CancellationToken.None);
-
-        Console.WriteLine($"Wrote config: {configPath}");
-        Console.WriteLine($"Workspace: {workspace}");
-        Console.WriteLine($"Provider/model: {config.Llm.Provider}/{config.Llm.Model}");
-        Console.WriteLine($"Auth token: {config.AuthToken}");
-        if (warnings.Count > 0)
-        {
-            Console.WriteLine();
-            Console.WriteLine("Validation warnings:");
-            foreach (var warning in warnings)
-                Console.WriteLine($"- {warning}");
-        }
-
-        Console.WriteLine();
-        Console.WriteLine("Launch:");
-        Console.WriteLine($"dotnet run --project src/OpenClaw.Gateway -- --config {QuoteIfNeeded(configPath)}");
-        return 0;
+        return await StartCommand.RunAsync(
+            args,
+            Console.In,
+            Console.Out,
+            Console.Error,
+            Directory.GetCurrentDirectory(),
+            canPrompt: !Console.IsInputRedirected);
     }
 
     private static async Task<int> MigrateAsync(string[] args)
     {
+        if (args.Length > 0 && string.Equals(args[0], "upstream", StringComparison.OrdinalIgnoreCase))
+            return await UpstreamMigrationCommand.RunAsync(args[1..], Console.Out, Console.Error, Directory.GetCurrentDirectory());
+
+        if (args.Length > 0 && string.Equals(args[0], "legacy", StringComparison.OrdinalIgnoreCase))
+            args = args[1..];
+
         var parsed = CliArgs.Parse(args);
         if (parsed.ShowHelp)
         {
@@ -604,6 +746,28 @@ internal static class Program
         foreach (var item in migrated.Items)
             Console.WriteLine($"- {item.Id} | {item.Name} | {item.Schedule} | enabled={item.Enabled.ToString().ToLowerInvariant()} draft={item.IsDraft.ToString().ToLowerInvariant()}");
         return 0;
+    }
+
+    private static async Task<int> UpgradeAsync(string[] args)
+    {
+        if (args.Length == 0 || args[0] is "-h" or "--help" or "help")
+        {
+            PrintUpgradeHelp();
+            return 0;
+        }
+
+        return await UpgradeCommands.RunAsync(args, Console.Out, Console.Error, Directory.GetCurrentDirectory());
+    }
+
+    private static async Task<int> MaintenanceAsync(string[] args)
+    {
+        if (args.Length == 0 || args[0] is "-h" or "--help" or "help")
+        {
+            PrintMaintenanceHelp();
+            return 0;
+        }
+
+        return await MaintenanceCommands.RunAsync(args, Console.Out, Console.Error);
     }
 
     private static async Task<int> HeartbeatAsync(string[] args)
@@ -631,7 +795,40 @@ internal static class Program
             "status" => await HeartbeatStatusAsync(client),
             "preview" => await HeartbeatPreviewAsync(client),
             "wizard" => await HeartbeatWizardAsync(client),
+            "run" => await PulseRunAsync(client, parsed),
             _ => throw new ArgumentException($"Unknown heartbeat command: {subcommand}")
+        };
+    }
+
+    private static async Task<int> PulseAsync(string[] args)
+    {
+        if (args.Length == 0 || args[0] is "-h" or "--help" or "help")
+        {
+            PrintPulseHelp();
+            return 0;
+        }
+
+        var subcommand = args[0].Trim().ToLowerInvariant();
+        var parsed = CliArgs.Parse(args.Skip(1).ToArray());
+        if (parsed.ShowHelp)
+        {
+            PrintPulseHelp();
+            return 0;
+        }
+
+        var baseUrl = parsed.GetOption("--url") ?? Environment.GetEnvironmentVariable(EnvBaseUrl) ?? DefaultBaseUrl;
+        var token = ResolveAuthToken(parsed, Console.Error);
+
+        using var client = new OpenClawHttpClient(baseUrl, token);
+        return subcommand switch
+        {
+            "status" => await PulseStatusAsync(client),
+            "run" => await PulseRunAsync(client, parsed),
+            "enable" => await PulseEnableAsync(client),
+            "disable" => await PulseDisableAsync(client),
+            "events" => await PulseEventsAsync(client, parsed),
+            "doctor" => await PulseDoctorAsync(client),
+            _ => throw new ArgumentException($"Unknown pulse command: {subcommand}")
         };
     }
 
@@ -665,6 +862,31 @@ internal static class Program
             using var client = new OpenClawHttpClient(baseUrl, token);
             var bundle = await client.ExportIncidentBundleAsync(approvalLimit, eventLimit, CancellationToken.None);
             Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(bundle, CoreJsonContext.Default.IncidentBundleResponse));
+            return 0;
+        }
+
+        if (group == "trajectory" && args.Length > 1 && string.Equals(args[1], "export", StringComparison.OrdinalIgnoreCase))
+        {
+            var parsed = CliArgs.Parse(args.Skip(2).ToArray());
+            var baseUrl = parsed.GetOption("--url") ?? Environment.GetEnvironmentVariable(EnvBaseUrl) ?? DefaultBaseUrl;
+            var token = ResolveAuthToken(parsed, Console.Error);
+            var fromUtc = ParseDateTimeOffset(parsed.GetOption("--from"));
+            var toUtc = ParseDateTimeOffset(parsed.GetOption("--to"));
+            var sessionId = parsed.GetOption("--session");
+            var anonymize = parsed.HasFlag("--anonymize");
+            using var client = new OpenClawHttpClient(baseUrl, token);
+            var jsonl = await client.ExportTrajectoryJsonlAsync(fromUtc, toUtc, sessionId, anonymize, CancellationToken.None);
+            var outputPath = parsed.GetOption("--output");
+            if (string.IsNullOrWhiteSpace(outputPath))
+            {
+                Console.Write(jsonl);
+            }
+            else
+            {
+                await File.WriteAllTextAsync(outputPath, jsonl);
+                Console.WriteLine($"wrote {outputPath}");
+            }
+
             return 0;
         }
 
@@ -713,6 +935,17 @@ internal static class Program
 
         var subcommand = args[0].Trim().ToLowerInvariant();
         var parsed = CliArgs.Parse(args.Skip(1).ToArray());
+
+        if (subcommand == "presets")
+        {
+            foreach (var preset in LocalModelPresetCatalog.List())
+                Console.WriteLine($"- {preset.Id} | {preset.Label} | tags={string.Join(",", preset.Tags)} | {preset.Description}");
+            return 0;
+        }
+
+        if (subcommand is "packages" or "status" or "install" or "verify" or "remove")
+            return await ModelCommands.RunLocalPackageCommandAsync(subcommand, args.Skip(1).ToArray());
+
         var baseUrl = parsed.GetOption("--url") ?? Environment.GetEnvironmentVariable(EnvBaseUrl) ?? DefaultBaseUrl;
         var token = ResolveAuthToken(parsed, Console.Error);
         using var client = new OpenClawHttpClient(baseUrl, token);
@@ -723,7 +956,9 @@ internal static class Program
             Console.WriteLine($"default_profile={response.DefaultProfileId ?? "none"}");
             foreach (var profile in response.Profiles)
             {
-                Console.WriteLine($"- {profile.Id} | {profile.ProviderId}/{profile.ModelId} | default={profile.IsDefault.ToString().ToLowerInvariant()} | tags={string.Join(",", profile.Tags)}");
+                Console.WriteLine($"- {profile.Id} | {profile.ProviderId}/{profile.ModelId} | default={profile.IsDefault.ToString().ToLowerInvariant()} | preset={profile.PresetId ?? "none"} | tags={string.Join(",", profile.Tags)}");
+                if (profile.CompatibilityNotes.Count > 0)
+                    Console.WriteLine($"  notes: {string.Join("; ", profile.CompatibilityNotes)}");
                 if (profile.ValidationIssues.Length > 0)
                     Console.WriteLine($"  issues: {string.Join("; ", profile.ValidationIssues)}");
             }
@@ -740,7 +975,7 @@ internal static class Program
             foreach (var warning in response.Warnings)
                 Console.WriteLine($"WARN: {warning}");
             foreach (var profile in response.Profiles)
-                Console.WriteLine($"- {profile.Id} | available={profile.IsAvailable.ToString().ToLowerInvariant()} | {profile.ProviderId}/{profile.ModelId}");
+                Console.WriteLine($"- {profile.Id} | available={profile.IsAvailable.ToString().ToLowerInvariant()} | preset={profile.PresetId ?? "none"} | compatibility={profile.UsesCompatibilityTransport.ToString().ToLowerInvariant()} | {profile.ProviderId}/{profile.ModelId}");
             return response.Errors.Count > 0 ? 1 : 0;
         }
 
@@ -1051,6 +1286,72 @@ internal static class Program
     {
         var status = await client.GetHeartbeatStatusAsync(CancellationToken.None);
         WriteHeartbeatStatus(status);
+        return 0;
+    }
+
+    private static async Task<int> PulseStatusAsync(OpenClawHttpClient client)
+    {
+        var status = await client.GetPulseStatusAsync(CancellationToken.None);
+        WritePulseStatus(status);
+        return 0;
+    }
+
+    private static async Task<int> PulseRunAsync(OpenClawHttpClient client, CliArgs parsed)
+    {
+        var result = await client.RunPulseAsync(new PulseRunRequest
+        {
+            Text = parsed.GetOption("--text"),
+            Mode = parsed.GetOption("--mode") ?? "now"
+        }, CancellationToken.None);
+        Console.WriteLine($"outcome: {result.Outcome}");
+        if (!string.IsNullOrWhiteSpace(result.SkipReason))
+            Console.WriteLine($"skip_reason: {result.SkipReason}");
+        if (!string.IsNullOrWhiteSpace(result.SessionId))
+            Console.WriteLine($"session: {result.SessionId}");
+        if (!string.IsNullOrWhiteSpace(result.MessagePreview))
+            Console.WriteLine(result.MessagePreview);
+        return result.Success ? 0 : 1;
+    }
+
+    private static async Task<int> PulseEnableAsync(OpenClawHttpClient client)
+    {
+        var status = await client.EnablePulseAsync(CancellationToken.None);
+        WritePulseStatus(status);
+        return 0;
+    }
+
+    private static async Task<int> PulseDisableAsync(OpenClawHttpClient client)
+    {
+        var status = await client.DisablePulseAsync(CancellationToken.None);
+        WritePulseStatus(status);
+        return 0;
+    }
+
+    private static async Task<int> PulseEventsAsync(OpenClawHttpClient client, CliArgs parsed)
+    {
+        var limit = int.TryParse(parsed.GetOption("--limit"), out var parsedLimit) ? parsedLimit : 50;
+        var events = await client.GetPulseEventsAsync(limit, CancellationToken.None);
+        foreach (var item in events.Items)
+            Console.WriteLine($"{item.TimestampUtc:O} {item.Severity} {item.Action} {item.Summary}");
+        return 0;
+    }
+
+    private static async Task<int> PulseDoctorAsync(OpenClawHttpClient client)
+    {
+        var status = await client.GetPulseStatusAsync(CancellationToken.None);
+        WritePulseStatus(status);
+        Console.WriteLine();
+        Console.WriteLine("doctor:");
+        if (!status.Enabled)
+            Console.WriteLine("- pulse is disabled or has a zero interval");
+        if (status.Config.Visibility is { ShowOk: false, ShowAlerts: false, UseIndicator: false })
+            Console.WriteLine("- all visibility controls are disabled; scheduled pulse calls are skipped");
+        if (status.HeartbeatExists && status.HeartbeatEmpty)
+            Console.WriteLine("- HEARTBEAT.md exists but has no actionable content");
+        if (string.Equals(status.Config.Target, "last", StringComparison.OrdinalIgnoreCase))
+            Console.WriteLine("- target=last may send alerts externally");
+        if (status.Config.IncludeReasoning)
+            Console.WriteLine("- includeReasoning may expose more detail in human-facing channels");
         return 0;
     }
 
@@ -1484,7 +1785,76 @@ internal static class Program
             Console.WriteLine("Issues:");
             foreach (var issue in status.Issues)
                 Console.WriteLine($"- {issue.Severity}: {issue.Message}");
+            }
+    }
+
+    private static void WritePulseStatus(PulseStatusResponse status)
+    {
+        Console.WriteLine("Runtime Pulse");
+        Console.WriteLine($"Enabled: {status.Enabled}");
+        Console.WriteLine($"Interval: {status.Interval}");
+        Console.WriteLine($"HEARTBEAT path: {status.HeartbeatPath}");
+        Console.WriteLine($"HEARTBEAT exists: {status.HeartbeatExists}");
+        Console.WriteLine($"HEARTBEAT empty: {status.HeartbeatEmpty}");
+        Console.WriteLine($"Last result: {status.LastResult}");
+        if (!string.IsNullOrWhiteSpace(status.LastSkipReason))
+            Console.WriteLine($"Last skip reason: {status.LastSkipReason}");
+        if (status.LastRunAtUtc is not null)
+            Console.WriteLine($"Last run: {status.LastRunAtUtc:O}");
+        if (status.NextRunAtUtc is not null)
+            Console.WriteLine($"Next run: {status.NextRunAtUtc:O}");
+        Console.WriteLine($"Target: {status.Config.Target}");
+        Console.WriteLine($"Session: {status.Config.Session}");
+        Console.WriteLine($"Light context: {status.Config.LightContext}");
+        Console.WriteLine($"Isolated session: {status.Config.IsolatedSession}");
+        Console.WriteLine($"Recent OKs: {status.RecentOkCount}");
+        Console.WriteLine($"Recent alerts: {status.RecentAlertCount}");
+        foreach (var alert in status.RecentAlerts.Take(5))
+            Console.WriteLine($"- {alert.TimestampUtc:O} [{alert.Severity}] {alert.Text}");
+    }
+
+    private static void WriteInsights(OperatorInsightsResponse insights)
+    {
+        Console.WriteLine($"window: {insights.StartUtc:O}..{insights.EndUtc:O}");
+        Console.WriteLine($"sessions: active={insights.Sessions.Active} persisted={insights.Sessions.Persisted} total={insights.Sessions.UniqueTotal} range={insights.Sessions.InRange} 24h={insights.Sessions.Last24Hours} 7d={insights.Sessions.Last7Days}");
+        Console.WriteLine($"provider_usage: requests={insights.Totals.ProviderRequests} errors={insights.Totals.ProviderErrors} tokens={insights.Totals.TotalTokens} input={insights.Totals.InputTokens} output={insights.Totals.OutputTokens} cache_read={insights.Totals.CacheReadTokens} cache_write={insights.Totals.CacheWriteTokens} estimated_cost_usd={insights.Totals.EstimatedCostUsd.ToString("0.######", CultureInfo.InvariantCulture)}");
+        Console.WriteLine($"tool_calls: {insights.Totals.ToolCalls}");
+
+        Console.WriteLine();
+        Console.WriteLine("Providers");
+        if (insights.Providers.Count == 0)
+        {
+            Console.WriteLine("- none");
         }
+        else
+        {
+            foreach (var provider in insights.Providers.Take(10))
+            {
+                Console.WriteLine($"- {provider.ProviderId}/{provider.ModelId}: requests={provider.Requests} tokens={provider.TotalTokens} input={provider.InputTokens} output={provider.OutputTokens} retries={provider.Retries} errors={provider.Errors} estimated_cost_usd={provider.EstimatedCostUsd.ToString("0.######", CultureInfo.InvariantCulture)}");
+            }
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("Tools");
+        if (insights.Tools.Count == 0)
+        {
+            Console.WriteLine("- none");
+        }
+        else
+        {
+            foreach (var tool in insights.Tools.Take(10))
+            {
+                Console.WriteLine($"- {tool.ToolName}: calls={tool.Calls} failures={tool.Failures} timeouts={tool.Timeouts} avg_ms={tool.AverageDurationMs.ToString("0.0", CultureInfo.InvariantCulture)}");
+            }
+        }
+
+        if (insights.Sessions.ByChannel.Count > 0)
+            Console.WriteLine($"session_channels: {string.Join(", ", insights.Sessions.ByChannel.Select(static item => $"{item.Label}={item.Count}"))}");
+        if (insights.Sessions.ByState.Count > 0)
+            Console.WriteLine($"session_states: {string.Join(", ", insights.Sessions.ByState.Select(static item => $"{item.Label}={item.Count}"))}");
+
+        foreach (var warning in insights.Warnings)
+            Console.WriteLine($"note: {warning}");
     }
 
     private static void WritePosture(SecurityPostureResponse posture)
@@ -1558,15 +1928,43 @@ internal static class Program
         return messages;
     }
 
-    private static string BuildUserContent(string prompt, IReadOnlyList<string> files)
+    internal static string? BuildImageCommandContent(string command)
     {
-        if (files.Count == 0)
+        var tail = command["/image ".Length..].Trim();
+        if (tail.Length == 0)
+        {
+            Console.Error.WriteLine("Usage: /image <path|url> [prompt]");
+            return null;
+        }
+
+        var firstSpace = tail.IndexOf(' ');
+        var image = firstSpace < 0 ? tail : tail[..firstSpace].Trim();
+        var prompt = firstSpace < 0 ? "Describe this image." : tail[(firstSpace + 1)..].Trim();
+        if (string.IsNullOrWhiteSpace(prompt))
+            prompt = "Describe this image.";
+
+        return BuildUserContent(prompt, files: [], images: [image]);
+    }
+
+    internal static string BuildUserContent(string prompt, IReadOnlyList<string> files, IReadOnlyList<string>? images = null)
+    {
+        images ??= [];
+        if (files.Count == 0 && images.Count == 0)
             return prompt;
 
         var parts = new List<string> { prompt };
+        foreach (var image in images)
+            parts.Add(BuildImageMarker(image));
+
         foreach (var path in files)
         {
             var fullPath = Path.GetFullPath(path);
+            if (IsImagePath(fullPath))
+            {
+                parts.Add(BuildImageMarker(fullPath));
+                continue;
+            }
+
             var content = File.ReadAllText(fullPath);
             parts.Add(
                 $"""
@@ -1578,6 +1976,30 @@ internal static class Program
                 """);
         }
         return string.Join('\n', parts);
+    }
+
+    private static string BuildImageMarker(string image)
+    {
+        if (Uri.TryCreate(image, UriKind.Absolute, out var uri) &&
+            (uri.Scheme is "http" or "https" or "data"))
+        {
+            return $"[IMAGE_URL:{image}]";
+        }
+
+        if (Uri.TryCreate(image, UriKind.Absolute, out uri) && uri.IsFile)
+            return $"[IMAGE_PATH:{Path.GetFullPath(uri.LocalPath)}]";
+
+        return $"[IMAGE_PATH:{Path.GetFullPath(image)}]";
+    }
+
+    private static bool IsImagePath(string path)
+    {
+        var extension = Path.GetExtension(path);
+        return extension.Equals(".png", StringComparison.OrdinalIgnoreCase)
+               || extension.Equals(".jpg", StringComparison.OrdinalIgnoreCase)
+               || extension.Equals(".jpeg", StringComparison.OrdinalIgnoreCase)
+               || extension.Equals(".webp", StringComparison.OrdinalIgnoreCase)
+               || extension.Equals(".gif", StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task<string?> ReadAllStdinAsync()

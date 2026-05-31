@@ -1,84 +1,123 @@
-using OpenClaw.Agent;
-using OpenClaw.Gateway.A2A;
+using ModelContextProtocol.AspNetCore;
 using OpenClaw.Gateway.Bootstrap;
 using OpenClaw.Gateway.Composition;
 using OpenClaw.Gateway.Endpoints;
 using OpenClaw.Gateway.Mcp;
 using OpenClaw.Gateway.Pipeline;
 using OpenClaw.Gateway.Profiles;
-using System.Text;
+using OpenClaw.Gateway.A2A;
+using OpenClaw.Agent;
 #if OPENCLAW_ENABLE_OPENSANDBOX
 using OpenClawNet.Sandbox.OpenSandbox;
 #endif
 
-var builder = WebApplication.CreateSlimBuilder(args);
+var launchOptions = StartupLaunchOptions.Parse(args);
+var environmentName = Environments.Production;
+var currentDirectory = Directory.GetCurrentDirectory();
+var recoveryAttempted = false;
+var startupConsole = new StartupConsoleCoordinator();
+var stateStore = new LocalStartupStateStore();
+LocalStartupSession? localSession = null;
 
-// 设置控制台输出编码为UTF-8
-Console.OutputEncoding = Encoding.UTF8;
-
-var bootstrap = await builder.AddOpenClawBootstrapAsync(args);
-if (bootstrap.ShouldExit)
+var quickstartValidationError = launchOptions.ValidateQuickstart();
+if (!string.IsNullOrWhiteSpace(quickstartValidationError))
 {
-    Environment.ExitCode = bootstrap.ExitCode;
+    Console.Error.WriteLine(quickstartValidationError);
+    Environment.ExitCode = 2;
     return;
 }
 
-var startup = bootstrap.Startup
-    ?? throw new InvalidOperationException("Bootstrap completed without a startup context.");
-builder.Services.AddOpenApi("openclaw-integration");
-// builder.AddOpenClawObservability();
-builder.Services.AddOpenClawCoreServices(startup);
-builder.Services.AddOpenClawChannelServices(startup);
-builder.Services.AddOpenClawBackendServices(startup);
-builder.Services.AddOpenClawToolServices(startup);
-builder.Services.AddOpenClawSecurityServices(startup);
-builder.Services.AddOpenClawMcpServices(startup);
-builder.Services.ApplyOpenClawRuntimeProfile(startup);
-builder.Services.AddMicrosoftAgentFramework(builder.Configuration);
-builder.Services.AddOpenClawA2AServices();
-if (builder.Environment.IsDevelopment())
-    builder.Services.AddOpenClawDevUI(startup.Config);
-#if OPENCLAW_ENABLE_OPENSANDBOX
-builder.Services.AddOpenSandboxIntegration(builder.Configuration);
-#endif
-
-// Add service defaults & Aspire components.
-builder.AddServiceDefaults();
-
-var app = builder.Build();
-var runtime = await app.InitializeOpenClawRuntimeAsync(startup);
-
-// Populate the GatewayRuntimeHolder so MCP tools can access the runtime via DI.
-app.InitializeMcpRuntime(runtime);
-
-// Browser WebSocket API cannot set custom Authorization headers.
-// Bridge /ws?token=... into Authorization: Bearer ... so standard auth can validate it.
-app.Use(async (ctx, next) =>
+if (launchOptions.IsQuickstartRequested)
 {
-    if (ctx.Request.Path.StartsWithSegments("/ws", StringComparison.OrdinalIgnoreCase)
-        && !ctx.Request.Headers.ContainsKey("Authorization"))
+    var quickstart = InteractiveStartupRecovery.TryQuickstart(currentDirectory, stateStore);
+    if (quickstart.Result != StartupRecoveryResult.Recovered || quickstart.Session is null)
     {
-        var queryToken = ctx.Request.Query["token"].FirstOrDefault();
-        if (!string.IsNullOrWhiteSpace(queryToken))
-            ctx.Request.Headers.Authorization = $"Bearer {queryToken}";
+        Environment.ExitCode = quickstart.Result == StartupRecoveryResult.NotHandled ? 2 : 1;
+        return;
     }
 
-    await next(ctx);
-});
+    localSession = quickstart.Session;
+}
 
-// Enable ASP.NET Core authentication middleware when OIDC is configured.
-if (!string.IsNullOrEmpty(startup.Config.Security.OidcAuthority))
-    app.UseAuthentication();
-app.UseOpenClawMcpAuth(startup, runtime);
-app.UseOpenClawA2AAuth(startup, runtime);
+while (true)
+{
+    GatewayStartupContext? startup = null;
+    var started = false;
 
-app.UseOpenClawPipeline(startup, runtime);
-app.MapOpenApi("/openapi/{documentName}.json");
-app.MapOpenClawEndpoints(startup, runtime);
-app.MapMcp("/mcp");
-app.MapOpenClawA2AEndpoints(startup, runtime);
+    try
+    {
+        startupConsole.WritePhase("Loading configuration");
+        var builder = WebApplication.CreateSlimBuilder(launchOptions.EffectiveArgs);
+        environmentName = builder.Environment.EnvironmentName;
 
-if (app.Environment.IsDevelopment())
-    app.MapOpenClawDevUI();
+        var bootstrap = await builder.AddOpenClawBootstrapAsync(launchOptions.EffectiveArgs);
+        if (bootstrap.ShouldExit)
+        {
+            Environment.ExitCode = bootstrap.ExitCode;
+            return;
+        }
 
-app.Run($"http://{startup.Config.BindAddress}:{startup.Config.Port}");
+        startup = bootstrap.Startup
+            ?? throw new InvalidOperationException("Bootstrap completed without a startup context.");
+
+        startupConsole.WriteConfigurationSummary(builder.Configuration, startup.Config, environmentName, localSession);
+        startupConsole.WritePhase("Building services");
+        builder.Services.AddOpenApi("openclaw-integration");
+        builder.AddOpenClawObservability();
+        builder.Services.AddOpenClawCoreServices(startup);
+        builder.Services.AddOpenClawChannelServices(startup);
+        builder.Services.AddOpenClawToolServices(startup);
+        builder.Services.AddOpenClawBackendServices(startup);
+        builder.Services.AddOpenClawSecurityServices(startup);
+        builder.Services.AddOpenClawMcpServices(startup);
+        builder.Services.ApplyOpenClawRuntimeProfile(startup);
+        builder.Services.AddMicrosoftAgentFramework(builder.Configuration);
+        builder.Services.AddOpenClawA2AServices();
+#if OPENCLAW_ENABLE_OPENSANDBOX
+        builder.Services.AddOpenSandboxIntegration(builder.Configuration);
+#endif
+
+        await using var app = builder.Build();
+        app.Lifetime.ApplicationStarted.Register(() => started = true);
+        startupConsole.WritePhase("Initializing runtime");
+        var runtime = await app.InitializeOpenClawRuntimeAsync(startup);
+
+        app.InitializeMcpRuntime(runtime);
+        app.UseOpenClawMcpAuth(startup, runtime);
+        app.UseOpenClawA2AAuth(startup, runtime);
+
+        app.UseOpenClawPipeline(startup, runtime, launchOptions, localSession, stateStore);
+        app.MapOpenApi("/openapi/{documentName}.json");
+        app.MapOpenClawEndpoints(startup, runtime);
+        app.MapMcp("/mcp");
+        app.MapOpenClawA2AEndpoints(startup, runtime);
+
+        startupConsole.WritePhase("Starting listener");
+        await app.RunAsync($"http://{startup.Config.BindAddress}:{startup.Config.Port}");
+        return;
+    }
+    catch (Exception ex) when (!started)
+    {
+        var recovery = InteractiveStartupRecovery.TryRecover(
+            ex,
+            startup,
+            environmentName,
+            currentDirectory,
+            canPrompt: !recoveryAttempted && launchOptions.CanPrompt && !launchOptions.IsDoctorMode && !launchOptions.IsHealthCheckMode,
+            stateStore,
+            suggestQuickstart: launchOptions.ShouldSuggestQuickstart);
+
+        if (recovery.Result == StartupRecoveryResult.Recovered && recovery.Session is not null)
+        {
+            localSession = recovery.Session;
+            recoveryAttempted = true;
+            continue;
+        }
+
+        if (recovery.Result == StartupRecoveryResult.NotHandled)
+            StartupFailureReporter.Write(ex, startup, environmentName, launchOptions.IsDoctorMode, launchOptions.ShouldSuggestQuickstart);
+
+        Environment.ExitCode = 1;
+        return;
+    }
+}

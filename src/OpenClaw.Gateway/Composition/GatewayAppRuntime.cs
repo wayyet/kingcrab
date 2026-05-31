@@ -14,6 +14,7 @@ using OpenClaw.Core.Sessions;
 using OpenClaw.Core.Skills;
 using OpenClaw.Gateway;
 using OpenClaw.Gateway.Extensions;
+using OpenClaw.Payments.Core;
 
 namespace OpenClaw.Gateway.Composition;
 
@@ -36,7 +37,9 @@ internal sealed class GatewayAppRuntime
     public required ApprovalAuditStore ApprovalAuditStore { get; init; }
     public required RuntimeMetrics RuntimeMetrics { get; init; }
     public required ProviderUsageTracker ProviderUsage { get; init; }
+    public required PaymentRuntimeService PaymentRuntime { get; init; }
     public required HeartbeatService Heartbeat { get; init; }
+    public required IReadOnlyList<SkillDefinition> LoadedSkills { get; set; }
     public required SkillWatcherService SkillWatcher { get; init; }
     public required IReadOnlyList<PluginLoadReport> PluginReports { get; init; }
     public required RuntimeOperationsState Operations { get; init; }
@@ -45,7 +48,6 @@ internal sealed class GatewayAppRuntime
     public required NativePluginRegistry NativeRegistry { get; init; }
     public required ConcurrentDictionary<string, SemaphoreSlim> SessionLocks { get; init; }
     public required ConcurrentDictionary<string, DateTimeOffset> LockLastUsed { get; init; }
-    public required SessionAbortRegistry AbortRegistry { get; init; }
     public required FrozenSet<string>? AllowedOriginsSet { get; init; }
     public required IReadOnlyList<string> DynamicProviderOwners { get; init; }
     public required int EstimatedSkillPromptChars { get; init; }

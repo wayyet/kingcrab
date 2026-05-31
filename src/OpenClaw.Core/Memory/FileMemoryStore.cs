@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Models;
 using OpenClaw.Core.Observability;
+using OpenClaw.Core.Security;
 
 namespace OpenClaw.Core.Memory;
 
@@ -28,7 +29,7 @@ public sealed class MemoryStoreCorruptionException : IOException
 /// Sessions and notes are stored as JSON files with URL-safe base64 encoded filenames
 /// to prevent path traversal attacks. Includes in-memory LRU cache for sessions.
 /// </summary>
-public sealed class FileMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryRetentionStore, ISessionAdminStore, ISessionSearchStore, IAsyncDisposable, IDisposable
+public sealed class FileMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryNoteCatalog, IMemoryRetentionStore, ISessionAdminStore, ISessionSearchStore, IAsyncDisposable, IDisposable
 {
     private const int SessionLoadStripeCount = 64;
 
@@ -42,13 +43,20 @@ public sealed class FileMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryRe
     private readonly ConcurrentDictionary<string, NoteIndexEntry> _noteIndex = new(StringComparer.Ordinal);
     private readonly ILogger<FileMemoryStore>? _logger;
     private readonly RuntimeMetrics? _metrics;
+    private readonly IRedactionPipeline? _redaction;
     private int _noteIndexInitialized;
 
-    public FileMemoryStore(string basePath, int maxCachedSessions = 100, ILogger<FileMemoryStore>? logger = null, RuntimeMetrics? metrics = null)
+    public FileMemoryStore(
+        string basePath,
+        int maxCachedSessions = 100,
+        ILogger<FileMemoryStore>? logger = null,
+        RuntimeMetrics? metrics = null,
+        IRedactionPipeline? redaction = null)
     {
         _basePath = basePath ?? throw new ArgumentNullException(nameof(basePath));
         _logger = logger;
         _metrics = metrics;
+        _redaction = redaction;
         
         _sessionsPath = Path.Combine(_basePath, "sessions");
         _notesPath = Path.Combine(_basePath, "notes");
@@ -219,6 +227,7 @@ public sealed class FileMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryRe
         if (session is null)
             throw new ArgumentNullException(nameof(session));
 
+        var persistedSession = _redaction?.RedactSession(session) ?? session;
         var encodedId = EncodeKey(session.Id);
         var filePath = Path.Combine(_sessionsPath, $"{encodedId}.json");
         var tempPath = $"{filePath}.tmp";
@@ -234,7 +243,7 @@ public sealed class FileMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryRe
                 Options = FileOptions.Asynchronous
             }))
             {
-                await JsonSerializer.SerializeAsync(stream, session, CoreJsonContext.Default.Session, ct);
+                await JsonSerializer.SerializeAsync(stream, persistedSession, CoreJsonContext.Default.Session, ct);
                 await stream.FlushAsync(ct);
             }
 
@@ -242,7 +251,7 @@ public sealed class FileMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryRe
             File.Move(tempPath, filePath, overwrite: true);
 
             // Update cache
-            await AddToCacheAsync(session.Id, session);
+            await AddToCacheAsync(session.Id, persistedSession);
         }
         catch
         {
@@ -302,10 +311,11 @@ public sealed class FileMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryRe
 
         try
         {
-            await File.WriteAllTextAsync(tempPath, content, ct);
+            var safeContent = _redaction?.Redact(content) ?? content;
+            await File.WriteAllTextAsync(tempPath, safeContent, ct);
             File.Move(tempPath, filePath, overwrite: true);
             await PersistOriginalNoteKeyAsync(key, keyPath, keyTempPath, ct);
-            UpsertNoteIndexEntry(key, content, nowUtc);
+            UpsertNoteIndexEntry(key, safeContent, nowUtc);
         }
         catch
         {
@@ -394,11 +404,63 @@ public sealed class FileMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryRe
         }
     }
 
+    public async ValueTask<IReadOnlyList<MemoryNoteCatalogEntry>> ListNotesAsync(string prefix, int limit, CancellationToken ct)
+    {
+        prefix ??= "";
+        limit = Math.Clamp(limit, 1, 500);
+
+        try
+        {
+            await EnsureNoteIndexLoadedAsync(ct);
+            return _noteIndex.Values
+                .Where(entry => string.IsNullOrEmpty(prefix) || entry.Key.StartsWith(prefix, StringComparison.Ordinal))
+                .OrderByDescending(static entry => entry.UpdatedAt)
+                .ThenBy(static entry => entry.Key, StringComparer.Ordinal)
+                .Take(limit)
+                .Select(static entry => new MemoryNoteCatalogEntry
+                {
+                    Key = entry.Key,
+                    PreviewContent = entry.PreviewContent,
+                    UpdatedAt = entry.UpdatedAt
+                })
+                .ToArray();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    public async ValueTask<MemoryNoteCatalogEntry?> GetNoteEntryAsync(string key, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            return null;
+
+        try
+        {
+            await EnsureNoteIndexLoadedAsync(ct);
+            if (!_noteIndex.TryGetValue(key, out var entry))
+                return null;
+
+            return new MemoryNoteCatalogEntry
+            {
+                Key = entry.Key,
+                PreviewContent = entry.PreviewContent,
+                UpdatedAt = entry.UpdatedAt
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public async ValueTask SaveBranchAsync(SessionBranch branch, CancellationToken ct)
     {
         if (branch is null)
             throw new ArgumentNullException(nameof(branch));
 
+        var persistedBranch = _redaction?.RedactBranch(branch) ?? branch;
         var encodedId = EncodeKey(branch.BranchId);
         var filePath = Path.Combine(_branchesPath, $"{encodedId}.json");
         var tempPath = $"{filePath}.tmp";
@@ -413,7 +475,7 @@ public sealed class FileMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryRe
                 Options = FileOptions.Asynchronous
             }))
             {
-                await JsonSerializer.SerializeAsync(stream, branch, CoreJsonContext.Default.SessionBranch, ct);
+                await JsonSerializer.SerializeAsync(stream, persistedBranch, CoreJsonContext.Default.SessionBranch, ct);
                 await stream.FlushAsync(ct);
             }
 
@@ -1053,7 +1115,10 @@ public sealed class FileMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryRe
                     var s = query.Search;
                     if (!session.Id.Contains(s, StringComparison.OrdinalIgnoreCase) &&
                         !session.ChannelId.Contains(s, StringComparison.OrdinalIgnoreCase) &&
-                        !session.SenderId.Contains(s, StringComparison.OrdinalIgnoreCase))
+                        !session.SenderId.Contains(s, StringComparison.OrdinalIgnoreCase) &&
+                        !(session.StableSessionBinding?.ExternalSessionId?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false) &&
+                        !(session.StableSessionBinding?.Namespace?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false) &&
+                        !(session.StableSessionBinding?.OwnerKey?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false))
                         continue;
                 }
 
@@ -1062,6 +1127,9 @@ public sealed class FileMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryRe
                     Id = session.Id,
                     ChannelId = session.ChannelId,
                     SenderId = session.SenderId,
+                    StableSessionId = session.StableSessionBinding?.ExternalSessionId,
+                    StableSessionNamespace = session.StableSessionBinding?.Namespace,
+                    StableSessionOwnerKey = session.StableSessionBinding?.OwnerKey,
                     CreatedAt = session.CreatedAt,
                     LastActiveAt = session.LastActiveAt,
                     State = session.State,

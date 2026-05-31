@@ -87,4 +87,4 @@ internal sealed class OpenClawA2AExecutionBridge : IOpenClawA2AExecutionBridge
             await runtime.SessionManager.PersistAsync(session, cancellationToken, sessionLockHeld: true);
         }
     }
-} 
+}

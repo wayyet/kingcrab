@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authentication.JwtBearer;
+using OpenClaw.Core.ExternalCli;
 using OpenClaw.Core.Pipeline;
 using OpenClaw.Core.Security;
 using OpenClaw.Gateway;
@@ -10,25 +10,20 @@ internal static class SecurityServicesExtensions
 {
     public static IServiceCollection AddOpenClawSecurityServices(this IServiceCollection services, GatewayStartupContext startup)
     {
-        // Register standard OIDC/JWT Bearer authentication when OidcAuthority is configured.
-        if (!string.IsNullOrEmpty(startup.Config.Security.OidcAuthority))
-        {
-            services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-                .AddJwtBearer(options =>
-                {
-                    options.Authority = startup.Config.Security.OidcAuthority;
-                    options.Audience = startup.Config.Security.OidcAudience;
-                    options.RequireHttpsMetadata = startup.Config.Security.OidcRequireHttpsMetadata;
-                });
-            services.AddAuthorization();
-        }
-
         services.AddSingleton<ToolApprovalService>();
         services.AddSingleton(sp =>
             new PairingManager(
                 startup.Config.Memory.StoragePath,
                 sp.GetRequiredService<ILogger<PairingManager>>()));
         services.AddSingleton(sp => new BrowserSessionAuthService(startup.Config));
+        services.AddSingleton(sp =>
+            new OperatorAccountService(
+                startup.Config.Memory.StoragePath,
+                sp.GetRequiredService<ILogger<OperatorAccountService>>()));
+        services.AddSingleton(sp =>
+            new OrganizationPolicyService(
+                startup.Config.Memory.StoragePath,
+                sp.GetRequiredService<ILogger<OrganizationPolicyService>>()));
         services.AddSingleton(sp =>
             new AdminSettingsService(
                 startup.Config,
@@ -49,6 +44,13 @@ internal static class SecurityServicesExtensions
                 sp.GetRequiredService<ILogger<RuntimeEventStore>>(),
                 sp.GetRequiredService<OpenClaw.Core.Observability.RuntimeMetrics>()));
         services.AddSingleton(sp =>
+            new ExternalCliAuditStore(
+                startup.Config.Memory.StoragePath,
+                sp.GetRequiredService<ILogger<ExternalCliAuditStore>>()));
+        services.AddSingleton<IExternalCliAuditSink>(sp => sp.GetRequiredService<ExternalCliAuditStore>());
+        services.AddSingleton<IExternalCliEventSink>(sp =>
+            new ExternalCliRuntimeEventSink(sp.GetRequiredService<RuntimeEventStore>()));
+        services.AddSingleton(sp =>
             new OperatorAuditStore(
                 startup.Config.Memory.StoragePath,
                 sp.GetRequiredService<ILogger<OperatorAuditStore>>(),
@@ -64,7 +66,8 @@ internal static class SecurityServicesExtensions
         services.AddSingleton(sp =>
             new PluginHealthService(
                 startup.Config.Memory.StoragePath,
-                sp.GetRequiredService<ILogger<PluginHealthService>>()));
+                sp.GetRequiredService<ILogger<PluginHealthService>>(),
+                startup.Config.Plugins));
         services.AddSingleton(sp =>
             new ContractStore(
                 startup.Config.Memory.StoragePath,

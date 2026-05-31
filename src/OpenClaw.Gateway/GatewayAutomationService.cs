@@ -7,7 +7,15 @@ using OpenClaw.Core.Pipeline;
 
 namespace OpenClaw.Gateway;
 
-internal enum RunNowResult { Queued, NotFound, AlreadyRunning }
+internal sealed class RunNowResult
+{
+    public static readonly RunNowResult NotFound = new() { Status = "not_found" };
+    public static readonly RunNowResult AlreadyRunning = new() { Status = "already_running" };
+    public static readonly RunNowResult Quarantined = new() { Status = "quarantined" };
+
+    public required string Status { get; init; }
+    public string? RunId { get; init; }
+}
 
 internal sealed class GatewayAutomationService
 {
@@ -16,7 +24,9 @@ internal sealed class GatewayAutomationService
     private readonly ConcurrentDictionary<string, byte> _runningAutomations = new(StringComparer.OrdinalIgnoreCase);
     private readonly GatewayConfig _config;
     private readonly IAutomationStore _store;
+    private readonly ILearningProposalStore? _proposalStore;
     private readonly HeartbeatService _heartbeat;
+    private readonly AutomationRunCoordinator _runCoordinator;
     private readonly ILogger<GatewayAutomationService>? _logger;
     private AutomationDefinition[] _cachedAutomations = [];
 
@@ -24,11 +34,15 @@ internal sealed class GatewayAutomationService
         GatewayConfig config,
         IAutomationStore store,
         HeartbeatService heartbeat,
-        ILogger<GatewayAutomationService>? logger = null)
+        AutomationRunCoordinator runCoordinator,
+        ILogger<GatewayAutomationService>? logger = null,
+        ILearningProposalStore? proposalStore = null)
     {
         _config = config;
         _store = store;
+        _proposalStore = proposalStore;
         _heartbeat = heartbeat;
+        _runCoordinator = runCoordinator;
         _logger = logger;
     }
 
@@ -94,9 +108,50 @@ internal sealed class GatewayAutomationService
             return MapHeartbeatConfig(_heartbeat.LoadConfig());
         }
 
+        var existing = await _store.GetAutomationAsync(normalized.Id, ct);
         await _store.SaveAutomationAsync(normalized, ct);
+        await RecordLearningEditFeedbackAsync(existing, normalized, ct);
         await RefreshCacheAsync(ct);
         return normalized;
+    }
+
+    private async ValueTask RecordLearningEditFeedbackAsync(AutomationDefinition? existing, AutomationDefinition normalized, CancellationToken ct)
+    {
+        if (_proposalStore is null || existing is null || string.IsNullOrWhiteSpace(normalized.CreatedByLearningProposalId))
+            return;
+
+        var changedFields = GetChangedFields(existing, normalized);
+        if (changedFields.Length == 0)
+            return;
+
+        var proposal = await _proposalStore.GetProposalAsync(normalized.CreatedByLearningProposalId, ct);
+        if (proposal is null)
+            return;
+
+        await new LearningFeedbackRecorder(_proposalStore).RecordAsync(
+            proposal.Id,
+            LearningProposalFeedbackActions.EditedAfterApproval,
+            changedFields,
+            proposal.AutomationQuality?.Score,
+            null,
+            "Automation fields changed after approval.",
+            ct);
+    }
+
+    private static string[] GetChangedFields(AutomationDefinition existing, AutomationDefinition normalized)
+    {
+        var fields = new List<string>();
+        if (!string.Equals(existing.Name, normalized.Name, StringComparison.Ordinal))
+            fields.Add("name");
+        if (!string.Equals(existing.Prompt, normalized.Prompt, StringComparison.Ordinal))
+            fields.Add("prompt");
+        if (!string.Equals(existing.Schedule, normalized.Schedule, StringComparison.OrdinalIgnoreCase))
+            fields.Add("schedule");
+        if (!string.Equals(existing.DeliveryChannelId, normalized.DeliveryChannelId, StringComparison.OrdinalIgnoreCase))
+            fields.Add("deliveryChannelId");
+        if (!string.Equals(existing.DeliveryRecipientId, normalized.DeliveryRecipientId, StringComparison.Ordinal))
+            fields.Add("deliveryRecipientId");
+        return fields.ToArray();
     }
 
     public async ValueTask DeleteAsync(string automationId, CancellationToken ct)
@@ -115,54 +170,46 @@ internal sealed class GatewayAutomationService
     {
         if (string.Equals(automationId, HeartbeatAutomationId, StringComparison.OrdinalIgnoreCase))
         {
+            var overlay = AutomationRunStatusMapper.NormalizeState(automationId, await _store.GetRunStateAsync(automationId, ct));
             var status = _heartbeat.LoadStatus();
             if (status is null)
-                return null;
+                return overlay;
 
-            return new AutomationRunState
-            {
-                AutomationId = HeartbeatAutomationId,
-                Outcome = status.Outcome,
-                LastRunAtUtc = status.LastRunAtUtc,
-                LastDeliveredAtUtc = status.LastDeliveredAtUtc,
-                DeliverySuppressed = status.DeliverySuppressed,
-                InputTokens = status.InputTokens,
-                OutputTokens = status.OutputTokens,
-                SessionId = status.SessionId,
-                MessagePreview = status.MessagePreview
-            };
+            return AutomationRunStatusMapper.MapHeartbeatState(status, overlay);
         }
 
-        return await _store.GetRunStateAsync(automationId, ct);
+        return AutomationRunStatusMapper.NormalizeState(automationId, await _store.GetRunStateAsync(automationId, ct));
     }
 
     public ValueTask SaveRunStateAsync(AutomationRunState runState, CancellationToken ct)
         => _store.SaveRunStateAsync(runState, ct);
 
-    public async ValueTask AppendRunHistoryAsync(string automationId, RunHistoryEntry entry, CancellationToken ct)
-    {
-        const int MaxHistory = 20;
-        var existing = await _store.GetRunStateAsync(automationId, ct);
-        var history = existing?.RecentRuns ?? [];
-        var updated = new List<RunHistoryEntry>(history.Count + 1) { entry };
-        foreach (var h in history.Take(MaxHistory - 1))
-            updated.Add(h);
+    public ValueTask<IReadOnlyList<AutomationRunRecord>> ListRunRecordsAsync(string automationId, int limit, CancellationToken ct)
+        => string.Equals(automationId, HeartbeatAutomationId, StringComparison.OrdinalIgnoreCase)
+            ? ValueTask.FromResult<IReadOnlyList<AutomationRunRecord>>([])
+            : _runCoordinator.ListRunRecordsAsync(automationId, limit, ct);
 
-        var newState = new AutomationRunState
-        {
-            AutomationId = automationId,
-            Outcome = entry.Outcome,
-            LastRunAtUtc = entry.RanAtUtc,
-            LastDeliveredAtUtc = existing?.LastDeliveredAtUtc,
-            DeliverySuppressed = existing?.DeliverySuppressed ?? false,
-            InputTokens = entry.InputTokens,
-            OutputTokens = entry.OutputTokens,
-            SessionId = existing?.SessionId,
-            MessagePreview = entry.MessagePreview,
-            RecentRuns = updated
-        };
-        await _store.SaveRunStateAsync(newState, ct);
-    }
+    public ValueTask<AutomationRunRecord?> GetRunRecordAsync(string automationId, string runId, CancellationToken ct)
+        => string.Equals(automationId, HeartbeatAutomationId, StringComparison.OrdinalIgnoreCase)
+            ? ValueTask.FromResult<AutomationRunRecord?>(null)
+            : _runCoordinator.GetRunRecordAsync(automationId, runId, ct);
+
+    public ValueTask ClearQuarantineAsync(string automationId, CancellationToken ct)
+        => new(_runCoordinator.ClearQuarantineAsync(automationId, ct));
+
+    public ValueTask MarkRunRunningAsync(AutomationDefinition automation, InboundMessage message, CancellationToken ct)
+        => _runCoordinator.MarkRunningAsync(automation, message, ct);
+
+    public Task FinalizeRunAsync(
+        AutomationDefinition automation,
+        InboundMessage message,
+        Session? session,
+        AutomationRunCompletion completion,
+        CancellationToken ct)
+        => _runCoordinator.FinalizeRunAsync(automation, message, session, completion, ct);
+
+    public IReadOnlyCollection<string> ListRunningIds()
+        => _runningAutomations.Keys.ToArray();
 
     public async ValueTask<RunNowResult> RunNowAsync(string automationId, MessagePipeline pipeline, CancellationToken ct)
     {
@@ -178,26 +225,31 @@ internal sealed class GatewayAutomationService
 
         try
         {
-            var sessionId = string.IsNullOrWhiteSpace(automation.SessionId)
-                ? $"automation:{automation.Id}"
-                : automation.SessionId;
+            return await QueueAutomationAsync(automation, pipeline, AutomationRunTriggerSources.Manual, replayOfRunId: null, retryAttempt: 0, ct);
+        }
+        catch
+        {
+            _runningAutomations.TryRemove(automation.Id, out _);
+            throw;
+        }
+    }
 
-            var inbound = new InboundMessage
-            {
-                IsSystem = true,
-                SessionId = sessionId,
-                CronJobName = automation.Id,
-                ChannelId = automation.DeliveryChannelId,
-                SenderId = automation.DeliveryRecipientId ?? sessionId,
-                Subject = automation.DeliverySubject,
-                Text = automation.Prompt,
-                ModelOverride = string.IsNullOrWhiteSpace(automation.ModelId) ? null : automation.ModelId
-            };
+    public async ValueTask<RunNowResult> ReplayAsync(string automationId, string runId, MessagePipeline pipeline, CancellationToken ct)
+    {
+        var automation = await GetAsync(automationId, ct);
+        if (automation is null)
+            return RunNowResult.NotFound;
 
-            if (!pipeline.InboundWriter.TryWrite(inbound))
-                await pipeline.InboundWriter.WriteAsync(inbound, ct);
+        var run = await GetRunRecordAsync(automationId, runId, ct);
+        if (run is null)
+            return RunNowResult.NotFound;
 
-            return RunNowResult.Queued;
+        if (!_runningAutomations.TryAdd(automation.Id, 0))
+            return RunNowResult.AlreadyRunning;
+
+        try
+        {
+            return await QueueAutomationAsync(automation, pipeline, AutomationRunTriggerSources.Replay, runId, retryAttempt: 0, ct);
         }
         catch
         {
@@ -211,6 +263,90 @@ internal sealed class GatewayAutomationService
         if (!string.IsNullOrWhiteSpace(automationId))
             _runningAutomations.TryRemove(automationId!, out _);
     }
+
+    public async ValueTask RunMaintenanceAsync(MessagePipeline pipeline, CancellationToken ct)
+    {
+        var automations = await ListAsync(ct);
+        var now = DateTimeOffset.UtcNow;
+        foreach (var automation in automations)
+        {
+            var state = await GetRunStateAsync(automation.Id, ct);
+            if (state is null)
+                continue;
+
+            if (await _runCoordinator.MarkRunStuckAsync(automation, state, ct))
+            {
+                _runningAutomations.TryRemove(automation.Id, out _);
+                continue;
+            }
+
+            if (string.Equals(automation.Id, HeartbeatAutomationId, StringComparison.OrdinalIgnoreCase)
+                || !automation.Enabled
+                || automation.IsDraft
+                || state.QuarantinedAtUtc is not null
+                || state.NextRetryAtUtc is null
+                || state.NextRetryAttempt is null
+                || state.NextRetryAtUtc > now)
+            {
+                continue;
+            }
+
+            if (!_runningAutomations.TryAdd(automation.Id, 0))
+                continue;
+
+            try
+            {
+                var result = await QueueAutomationAsync(
+                    automation,
+                    pipeline,
+                    AutomationRunTriggerSources.Retry,
+                    replayOfRunId: null,
+                    retryAttempt: state.NextRetryAttempt.Value,
+                    ct);
+
+                if (!string.Equals(result.Status, "queued", StringComparison.Ordinal))
+                    _runningAutomations.TryRemove(automation.Id, out _);
+            }
+            catch
+            {
+                _runningAutomations.TryRemove(automation.Id, out _);
+                throw;
+            }
+        }
+    }
+
+    public void AttachRunContract(Session session, AutomationDefinition automation, string? runId, ContractGovernanceService governance)
+    {
+        if (session.ContractPolicy is not null
+            || string.IsNullOrWhiteSpace(runId)
+            || string.Equals(automation.Id, HeartbeatAutomationId, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        governance.AttachToSession(session, new ContractPolicy
+        {
+            Id = BuildAutomationRunContractId(automation.Id, runId!),
+            Name = $"Automation run: {automation.Name}",
+            CreatedBy = automation.Source,
+            Verification = automation.Verification,
+            CreatedAtUtc = DateTimeOffset.UtcNow
+        });
+    }
+
+    internal static string BuildAutomationRunContractId(string automationId, string runId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(automationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(runId);
+
+        var contractId = $"ctr_{automationId}_{runId}".Replace(':', '_');
+        return contractId.Length > 20 ? contractId[..20] : contractId;
+    }
+
+    internal static bool IsAutomationRunContract(string? contractId, string automationId, string? runId)
+        => !string.IsNullOrWhiteSpace(contractId)
+           && !string.IsNullOrWhiteSpace(runId)
+           && string.Equals(contractId, BuildAutomationRunContractId(automationId, runId!), StringComparison.Ordinal);
 
     public async ValueTask<IReadOnlyList<AutomationDefinition>> MigrateLegacyAsync(bool apply, CancellationToken ct)
     {
@@ -268,6 +404,12 @@ internal sealed class GatewayAutomationService
                 Key = "heartbeat",
                 Label = "Heartbeat",
                 Description = "Managed heartbeat automation compatible with the existing heartbeat flow.",
+                Category = "ops",
+                SuggestedName = "Managed heartbeat",
+                Schedule = "@hourly",
+                Prompt = "Summarize operational health, active issues, and urgent follow-ups.",
+                DeliveryChannelId = "cron",
+                Tags = ["ops", "heartbeat"],
                 Available = true
             },
             new AutomationTemplate
@@ -275,6 +417,77 @@ internal sealed class GatewayAutomationService
                 Key = "custom",
                 Label = "Custom",
                 Description = "A direct scheduled prompt delivered through any supported channel.",
+                Category = "general",
+                SuggestedName = "Custom automation",
+                Schedule = "@daily",
+                Prompt = "Describe the recurring task this automation should perform.",
+                DeliveryChannelId = "cron",
+                Tags = ["custom"],
+                Available = true
+            },
+            new AutomationTemplate
+            {
+                Key = "inbox_triage",
+                Label = "Inbox Triage",
+                Description = "Review new inbox activity and surface only the messages that need an operator response.",
+                Category = "productivity",
+                SuggestedName = "Inbox triage",
+                Schedule = "0 8 * * *",
+                Prompt = "Review new inbox activity since the last run. Group urgent, blocking, and informational items separately and recommend the next operator actions.",
+                DeliveryChannelId = "cron",
+                Tags = ["inbox", "triage", "review"],
+                Available = true
+            },
+            new AutomationTemplate
+            {
+                Key = "daily_summary",
+                Label = "Daily Summary",
+                Description = "Produce a concise day-start or day-end summary of recent sessions, approvals, and notable events.",
+                Category = "ops",
+                SuggestedName = "Daily summary",
+                Schedule = "0 9 * * *",
+                Prompt = "Summarize the last 24 hours of agent activity, approvals, failed actions, and important follow-ups. Keep it concise and actionable.",
+                DeliveryChannelId = "cron",
+                Tags = ["summary", "daily", "ops"],
+                Available = true
+            },
+            new AutomationTemplate
+            {
+                Key = "channel_moderation",
+                Label = "Channel Moderation",
+                Description = "Review recent channel traffic for abuse, escalation signals, or messages that should be added to allowlist workflows.",
+                Category = "channels",
+                SuggestedName = "Channel moderation sweep",
+                Schedule = "0 */6 * * *",
+                Prompt = "Review recent channel traffic for abuse, moderation issues, escalation signals, and sender patterns that need operator action. Highlight risky senders and suggested allowlist changes.",
+                DeliveryChannelId = "cron",
+                Tags = ["channels", "moderation", "safety"],
+                Available = true
+            },
+            new AutomationTemplate
+            {
+                Key = "incident_follow_up",
+                Label = "Incident Follow-Up",
+                Description = "Track unresolved runtime failures, dead-letter items, and degraded integrations until they are cleared.",
+                Category = "ops",
+                SuggestedName = "Incident follow-up",
+                Schedule = "@hourly",
+                Prompt = "Review unresolved runtime failures, dead-letter items, approval bottlenecks, and degraded integrations. Report what changed since the last run and what still needs operator attention.",
+                DeliveryChannelId = "cron",
+                Tags = ["incident", "ops", "follow-up"],
+                Available = true
+            },
+            new AutomationTemplate
+            {
+                Key = "repo_hygiene",
+                Label = "Repo Hygiene",
+                Description = "Check codebase health tasks such as stale branches, docs drift, test failures, and compatibility gaps.",
+                Category = "engineering",
+                SuggestedName = "Repo hygiene review",
+                Schedule = "0 10 * * 1-5",
+                Prompt = "Review repository hygiene for stale work, failing tests, docs drift, or compatibility regressions. Summarize high-priority fixes and deferred cleanup separately.",
+                DeliveryChannelId = "cron",
+                Tags = ["repo", "engineering", "hygiene"],
                 Available = true
             }
         ];
@@ -287,20 +500,8 @@ internal sealed class GatewayAutomationService
             issues.Add(new AutomationValidationIssue { Code = "name_required", Message = "Automation name is required." });
         if (string.IsNullOrWhiteSpace(normalized.Prompt))
             issues.Add(new AutomationValidationIssue { Code = "prompt_required", Message = "Automation prompt is required." });
-        // One-shot jobs (RunAt set) don't need a cron schedule — skip schedule validation for them.
-        if (!normalized.RunAt.HasValue)
-        {
-            if (string.IsNullOrWhiteSpace(normalized.Schedule))
-                issues.Add(new AutomationValidationIssue { Code = "schedule_required", Message = "Automation schedule is required." });
-            else if (!CronScheduler.IsValidExpression(normalized.Schedule))
-                issues.Add(new AutomationValidationIssue
-                {
-                    Code = "invalid_schedule",
-                    Message = $"'{normalized.Schedule}' is not a valid cron expression. " +
-                              "Use standard 5-field format (e.g. '*/5 * * * *' for every 5 minutes, '0 9 * * 1-5' for weekdays at 09:00) " +
-                              "or an alias such as @hourly, @daily, @weekly, @monthly."
-                });
-        }
+        if (string.IsNullOrWhiteSpace(normalized.Schedule))
+            issues.Add(new AutomationValidationIssue { Code = "schedule_required", Message = "Automation schedule is required." });
 
         return new AutomationPreview
         {
@@ -316,11 +517,30 @@ internal sealed class GatewayAutomationService
     {
         var jobs = new List<CronJobConfig>();
         if (_config.Cron.Enabled && _config.Cron.Jobs is { Count: > 0 })
-            jobs.AddRange(_config.Cron.Jobs);
+        {
+            jobs.AddRange(_config.Cron.Jobs.Select(job => new CronJobConfig
+            {
+                Name = job.Name,
+                CronExpression = job.CronExpression,
+                Prompt = job.Prompt,
+                RunOnStartup = job.RunOnStartup,
+                SessionId = job.SessionId,
+                ChannelId = job.ChannelId,
+                RecipientId = job.RecipientId,
+                Subject = job.Subject,
+                AutomationId = job.AutomationId ?? GetLegacyAutomationId(job),
+                AutomationTriggerSource = job.AutomationTriggerSource ?? AutomationRunTriggerSources.Schedule,
+                Timezone = job.Timezone
+            }));
+        }
 
         var managedHeartbeatJob = _heartbeat.BuildManagedJob();
         if (managedHeartbeatJob is not null)
+        {
+            managedHeartbeatJob.AutomationId = HeartbeatAutomationId;
+            managedHeartbeatJob.AutomationTriggerSource = AutomationRunTriggerSources.Heartbeat;
             jobs.Add(managedHeartbeatJob);
+        }
 
         foreach (var automation in _cachedAutomations)
         {
@@ -330,7 +550,6 @@ internal sealed class GatewayAutomationService
             jobs.Add(new CronJobConfig
             {
                 Name = automation.Id,
-                DisplayName = automation.Name,
                 CronExpression = automation.Schedule,
                 Prompt = automation.Prompt,
                 RunOnStartup = automation.RunOnStartup,
@@ -338,65 +557,46 @@ internal sealed class GatewayAutomationService
                 ChannelId = automation.DeliveryChannelId,
                 RecipientId = automation.DeliveryRecipientId,
                 Subject = automation.DeliverySubject,
-                Timezone = automation.Timezone,
-                ModelId = automation.ModelId,
-                RunAt = automation.RunAt,
-                DeleteAfterRun = automation.DeleteAfterRun
+                AutomationId = automation.Id,
+                AutomationTriggerSource = AutomationRunTriggerSources.Schedule,
+                Timezone = automation.Timezone
             });
         }
 
         return jobs;
     }
 
-    /// <summary>
-    /// Tries to coerce a schedule string to a valid 5-field Cronos expression.
-    /// Handles the common LLM mistake of supplying a 6-field Quartz/Spring expression by
-    /// stripping the leading seconds field.
-    /// </summary>
-    private static string NormalizeSchedule(string schedule)
-    {
-        var trimmed = schedule.Trim();
-        if (CronScheduler.IsValidExpression(trimmed))
-            return trimmed;
-
-        // Many LLMs emit Quartz/Spring 6-field expressions (seconds first).
-        // Try dropping the first token to get a standard 5-field expression.
-        var parts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length == 6)
-        {
-            var fiveField = string.Join(' ', parts.Skip(1));
-            if (CronScheduler.IsValidExpression(fiveField))
-                return fiveField;
-        }
-        return trimmed; // return as-is; validation will catch it later
-    }
-
     private static AutomationDefinition Normalize(AutomationDefinition automation)
     {
         var now = DateTimeOffset.UtcNow;
-        var rawSchedule = string.IsNullOrWhiteSpace(automation.Schedule) ? "@hourly" : automation.Schedule.Trim();
         return new AutomationDefinition
         {
             Id = string.IsNullOrWhiteSpace(automation.Id) ? $"automation-{Guid.NewGuid():N}"[..20] : automation.Id.Trim(),
-            Name = automation.Name?.Trim() ?? "",
+            Name = automation.Name.Trim(),
             Enabled = automation.Enabled,
-            Schedule = NormalizeSchedule(rawSchedule),
+            Schedule = string.IsNullOrWhiteSpace(automation.Schedule) ? "@hourly" : automation.Schedule.Trim(),
             Timezone = string.IsNullOrWhiteSpace(automation.Timezone) ? null : automation.Timezone.Trim(),
             Prompt = automation.Prompt ?? "",
             ModelId = string.IsNullOrWhiteSpace(automation.ModelId) ? null : automation.ModelId.Trim(),
+            ResponseMode = NormalizeResponseMode(automation.ResponseMode),
             RunOnStartup = automation.RunOnStartup,
             SessionId = string.IsNullOrWhiteSpace(automation.SessionId) ? null : automation.SessionId.Trim(),
             DeliveryChannelId = string.IsNullOrWhiteSpace(automation.DeliveryChannelId) ? "cron" : automation.DeliveryChannelId.Trim(),
             DeliveryRecipientId = string.IsNullOrWhiteSpace(automation.DeliveryRecipientId) ? null : automation.DeliveryRecipientId.Trim(),
             DeliverySubject = string.IsNullOrWhiteSpace(automation.DeliverySubject) ? null : automation.DeliverySubject.Trim(),
-            Tags = (automation.Tags ?? []).Where(static item => !string.IsNullOrWhiteSpace(item)).Select(static item => item.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+            Tags = (automation.Tags ?? [])
+                .Where(static item => !string.IsNullOrWhiteSpace(item))
+                .Select(static item => item.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray(),
             IsDraft = automation.IsDraft,
             Source = string.IsNullOrWhiteSpace(automation.Source) ? "managed" : automation.Source.Trim(),
             TemplateKey = string.IsNullOrWhiteSpace(automation.TemplateKey) ? null : automation.TemplateKey.Trim(),
+            CreatedByLearningProposalId = string.IsNullOrWhiteSpace(automation.CreatedByLearningProposalId) ? null : automation.CreatedByLearningProposalId.Trim(),
+            Verification = automation.Verification,
+            RetryPolicy = automation.RetryPolicy ?? new AutomationRetryPolicy(),
             CreatedAtUtc = automation.CreatedAtUtc == default ? now : automation.CreatedAtUtc,
-            UpdatedAtUtc = now,
-            RunAt = automation.RunAt,
-            DeleteAfterRun = automation.DeleteAfterRun
+            UpdatedAtUtc = now
         };
     }
 
@@ -411,12 +611,14 @@ internal sealed class GatewayAutomationService
             Prompt = job.Prompt ?? "",
             RunOnStartup = job.RunOnStartup,
             SessionId = job.SessionId,
+            ResponseMode = SessionResponseModes.ConciseOps,
             DeliveryChannelId = string.IsNullOrWhiteSpace(job.ChannelId) ? "cron" : job.ChannelId!,
             DeliveryRecipientId = job.RecipientId,
             DeliverySubject = job.Subject,
             Tags = ["legacy"],
             Source = "legacy-cron",
-            TemplateKey = "custom"
+            TemplateKey = "custom",
+            RetryPolicy = new AutomationRetryPolicy()
         };
 
     private AutomationDefinition MapHeartbeatConfig(HeartbeatConfigDto config)
@@ -429,13 +631,53 @@ internal sealed class GatewayAutomationService
             Timezone = config.Timezone,
             Prompt = _heartbeat.BuildManagedPrompt(config, _heartbeat.RenderMarkdown(config)),
             ModelId = config.ModelId,
+            ResponseMode = SessionResponseModes.ConciseOps,
             DeliveryChannelId = config.DeliveryChannelId,
             DeliveryRecipientId = config.DeliveryRecipientId,
             DeliverySubject = config.DeliverySubject,
             Tags = ["heartbeat"],
             Source = "heartbeat",
-            TemplateKey = "heartbeat"
+            TemplateKey = "heartbeat",
+            RetryPolicy = new AutomationRetryPolicy()
         };
+
+    private async ValueTask<RunNowResult> QueueAutomationAsync(
+        AutomationDefinition automation,
+        MessagePipeline pipeline,
+        string triggerSource,
+        string? replayOfRunId,
+        int retryAttempt,
+        CancellationToken ct)
+    {
+        var sessionId = string.IsNullOrWhiteSpace(automation.SessionId)
+            ? $"automation:{automation.Id}"
+            : automation.SessionId;
+
+        var dispatch = await _runCoordinator.PrepareDispatchAsync(new AutomationDispatchRequest
+        {
+            AutomationId = automation.Id,
+            TriggerSource = triggerSource,
+            ReplayOfRunId = replayOfRunId,
+            RetryAttempt = retryAttempt,
+            SessionId = sessionId,
+            ChannelId = automation.DeliveryChannelId,
+            SenderId = automation.DeliveryRecipientId ?? sessionId,
+            Prompt = automation.Prompt,
+            Subject = automation.DeliverySubject
+        }, ct);
+
+        if (dispatch is null)
+            return RunNowResult.Quarantined;
+
+        if (!pipeline.InboundWriter.TryWrite(dispatch))
+            await pipeline.InboundWriter.WriteAsync(dispatch, ct);
+
+        return new RunNowResult
+        {
+            Status = "queued",
+            RunId = dispatch.AutomationRunId
+        };
+    }
 
     private static string GetLegacyAutomationId(CronJobConfig job)
     {
@@ -458,5 +700,17 @@ internal sealed class GatewayAutomationService
         if (string.Equals(schedule, "@monthly", StringComparison.OrdinalIgnoreCase))
             return 1;
         return 30;
+    }
+
+    private static string NormalizeResponseMode(string? responseMode)
+    {
+        var normalized = responseMode?.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            SessionResponseModes.Default => SessionResponseModes.Default,
+            SessionResponseModes.ConciseOps => SessionResponseModes.ConciseOps,
+            SessionResponseModes.Full => SessionResponseModes.Full,
+            _ => SessionResponseModes.Default
+        };
     }
 }

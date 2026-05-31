@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Models;
+using OpenClaw.Agent.Tools;
 
 namespace OpenClaw.Agent;
 
@@ -142,7 +143,7 @@ public sealed class ContractScopeHook : IToolHookWithContext
         foreach (var allowed in allowedPaths)
         {
             var allowedExpanded = ExpandTilde(allowed.Trim());
-            var allowedFull = Path.GetFullPath(allowedExpanded);
+            var allowedFull = ToolPathPolicy.ResolveRealPath(allowedExpanded);
 
             if (string.Equals(full, allowedFull, comparison))
                 return true;

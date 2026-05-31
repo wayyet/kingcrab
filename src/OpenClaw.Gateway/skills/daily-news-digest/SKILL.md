@@ -19,3 +19,4 @@ When asked for “daily news”, “today’s news”, or a “news digest”:
    - “What to watch” (next 24–72h)
    - Optional: “Recommended reads” (3 links)
 5) Be explicit about uncertainty and avoid quoting large blocks from sources.
+

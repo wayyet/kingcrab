@@ -1,0 +1,228 @@
+using OpenClaw.Core.Models;
+using OpenClaw.Core.Validation;
+
+namespace OpenClaw.Core.Setup;
+
+public static class GatewaySetupProfileFactory
+{
+    public static GatewayConfig CreateProfileConfig(
+        string profile,
+        string bindAddress,
+        int port,
+        string authToken,
+        string workspacePath,
+        string memoryPath,
+        string provider,
+        string model,
+        string apiKey,
+        string? modelPresetId = null,
+        List<string>? warnings = null)
+    {
+        var normalizedProfile = NormalizeProfile(profile);
+        var localLikeProfile = normalizedProfile is "local" or "tailscale-serve";
+        var normalizedProvider = provider.Trim();
+        var config = new GatewayConfig
+        {
+            BindAddress = bindAddress,
+            Port = port,
+            AuthToken = authToken,
+            Llm = new LlmProviderConfig
+            {
+                Provider = normalizedProvider,
+                Model = model,
+                ApiKey = string.IsNullOrWhiteSpace(apiKey) ? null : apiKey
+            },
+            Memory = new MemoryConfig
+            {
+                Provider = "file",
+                StoragePath = memoryPath,
+                Retention = new MemoryRetentionConfig
+                {
+                    ArchivePath = Path.Combine(memoryPath, "archive")
+                }
+            },
+            Tooling = new ToolingConfig
+            {
+                WorkspaceRoot = workspacePath,
+                WorkspaceOnly = true,
+                AllowShell = localLikeProfile,
+                EnableBrowserTool = false,
+                AllowedReadRoots = [workspacePath],
+                AllowedWriteRoots = [workspacePath],
+                RequireToolApproval = normalizedProfile == "public"
+            },
+            Security = new SecurityConfig
+            {
+                AllowQueryStringToken = false,
+                TrustForwardedHeaders = normalizedProfile == "public",
+                RequireRequesterMatchForHttpToolApproval = normalizedProfile == "public"
+            }
+        };
+
+        if (normalizedProfile == "tailscale-serve")
+        {
+            config.Deployment = new DeploymentConfig
+            {
+                Mode = "tailscale-serve",
+                PublicExposure = false,
+                ReverseProxy = "tailscale-serve",
+                ExpectedLocalUrl = GatewaySetupArtifacts.BuildReachableBaseUrl(bindAddress, port)
+            };
+        }
+
+        ConfigureModelProfiles(config, normalizedProvider, model, modelPresetId, warnings);
+
+        if (normalizedProfile == "public")
+        {
+            config.Plugins.Enabled = false;
+            warnings?.Add("Public profile disables third-party bridge plugins by default. Re-enable them only after you have a proxy, TLS, and explicit public-bind trust settings in place.");
+        }
+
+        if (normalizedProfile == "public" &&
+            !string.IsNullOrWhiteSpace(apiKey) &&
+            !apiKey.StartsWith("env:", StringComparison.OrdinalIgnoreCase))
+        {
+            warnings?.Add("Public profile is using a direct API key value in the config file. Prefer env:... references or OS-backed secret storage.");
+        }
+
+        return config;
+    }
+
+    public static string NormalizeProfile(string profile)
+    {
+        var normalized = profile.Trim().ToLowerInvariant();
+        if (normalized is not ("local" or "public" or "tailscale-serve"))
+            throw new ArgumentException("Invalid value for --profile (expected: local|public|tailscale-serve).");
+        return normalized;
+    }
+
+    private static void ConfigureModelProfiles(
+        GatewayConfig config,
+        string provider,
+        string model,
+        string? modelPresetId,
+        List<string>? warnings)
+    {
+        if (!provider.Equals("ollama", StringComparison.OrdinalIgnoreCase))
+        {
+            if (provider.Equals("embedded", StringComparison.OrdinalIgnoreCase))
+            {
+                ConfigureEmbeddedModelProfile(config, model, modelPresetId, warnings);
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(modelPresetId))
+                warnings?.Add($"Ignoring model preset '{modelPresetId}' because local presets currently apply only to Ollama or embedded providers.");
+            return;
+        }
+
+        config.Llm.Endpoint = OllamaEndpointNormalizer.DefaultBaseUrl;
+        config.Models.DefaultProfile = "local-primary";
+
+        LocalModelPresetDefinition? preset = null;
+        if (!string.IsNullOrWhiteSpace(modelPresetId) &&
+            !LocalModelPresetCatalog.TryGet(modelPresetId, out preset))
+        {
+            warnings?.Add($"Unknown model preset '{modelPresetId}'. Falling back to inferred local capabilities.");
+        }
+
+        var capabilities = preset?.Capabilities ?? new ModelCapabilities
+        {
+            SupportsStreaming = true,
+            SupportsSystemMessages = true,
+            MaxContextTokens = 32768,
+            MaxOutputTokens = 4096
+        };
+
+        config.Models.Profiles =
+        [
+            new ModelProfileConfig
+            {
+                Id = "local-primary",
+                PresetId = preset?.Id,
+                Provider = "ollama",
+                Model = model,
+                BaseUrl = OllamaEndpointNormalizer.DefaultBaseUrl,
+                Tags = preset?.Tags?.ToArray() ?? ["local", "private"],
+                Capabilities = CloneCapabilities(capabilities)
+            }
+        ];
+    }
+
+    private static void ConfigureEmbeddedModelProfile(
+        GatewayConfig config,
+        string model,
+        string? modelPresetId,
+        List<string>? warnings)
+    {
+        config.Llm.ApiKey = null;
+        config.LocalInference.Enabled = true;
+        config.LocalInference.AutoStart = true;
+        config.Models.DefaultProfile = "embedded-local";
+
+        LocalModelPackageDefinition? package = null;
+        if (!string.IsNullOrWhiteSpace(modelPresetId))
+        {
+            if (!LocalModelPackageCatalog.TryGet(modelPresetId, out package))
+                warnings?.Add($"Unknown embedded local model preset or package '{modelPresetId}'. Falling back to inferred embedded capabilities.");
+        }
+        else if (!LocalModelPackageCatalog.TryGet(model, out package))
+        {
+            _ = LocalModelPackageCatalog.TryGet("gemma-local-small-q4", out package);
+        }
+
+        var capabilities = package?.Capabilities ?? new ModelCapabilities
+        {
+            SupportsStreaming = true,
+            SupportsSystemMessages = true,
+            MaxContextTokens = 4096,
+            MaxOutputTokens = 1024
+        };
+
+        var modelId = package?.ModelId ?? model;
+        config.Llm.Model = modelId;
+        if (package is not null)
+        {
+            config.LocalInference.Backend = package.Runtime.Backend;
+            config.LocalInference.ContextSize = package.Runtime.ContextSize;
+            config.LocalInference.EnableJinja = package.Runtime.EnableJinja;
+            config.LocalInference.ChatTemplate = package.Runtime.ChatTemplate;
+            config.LocalInference.ReasoningMode = package.Runtime.ReasoningMode;
+            config.LocalInference.ReasoningBudget = package.Runtime.ReasoningBudget;
+        }
+        config.Models.Profiles =
+        [
+            new ModelProfileConfig
+            {
+                Id = "embedded-local",
+                PresetId = package?.PresetId,
+                Provider = "embedded",
+                Model = modelId,
+                Tags = package?.Tags?.ToArray() ?? ["local", "private", "offline", "cheap"],
+                Capabilities = CloneCapabilities(capabilities)
+            }
+        ];
+    }
+
+    private static ModelCapabilities CloneCapabilities(ModelCapabilities source)
+        => new()
+        {
+            SupportsTools = source.SupportsTools,
+            SupportsVision = source.SupportsVision,
+            SupportsJsonSchema = source.SupportsJsonSchema,
+            SupportsStructuredOutputs = source.SupportsStructuredOutputs,
+            SupportsStreaming = source.SupportsStreaming,
+            SupportsParallelToolCalls = source.SupportsParallelToolCalls,
+            SupportsReasoningEffort = source.SupportsReasoningEffort,
+            SupportsSystemMessages = source.SupportsSystemMessages,
+            SupportsImageInput = source.SupportsImageInput,
+            SupportsVideoInput = source.SupportsVideoInput,
+            SupportsAudioInput = source.SupportsAudioInput,
+            SupportsPromptCaching = source.SupportsPromptCaching,
+            SupportsExplicitCacheRetention = source.SupportsExplicitCacheRetention,
+            ReportsCacheReadTokens = source.ReportsCacheReadTokens,
+            ReportsCacheWriteTokens = source.ReportsCacheWriteTokens,
+            MaxContextTokens = source.MaxContextTokens,
+            MaxOutputTokens = source.MaxOutputTokens
+        };
+}

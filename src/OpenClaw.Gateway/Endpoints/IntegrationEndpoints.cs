@@ -3,6 +3,8 @@ using OpenClaw.Core.Models;
 using System.Text.Json;
 using OpenClaw.Gateway.Bootstrap;
 using OpenClaw.Gateway.Composition;
+using OpenClaw.Payments.Abstractions;
+using OpenClaw.Payments.Core;
 
 namespace OpenClaw.Gateway.Endpoints;
 
@@ -19,7 +21,7 @@ internal static class IntegrationEndpoints
 
         group.MapGet("/dashboard", async (HttpContext ctx) =>
         {
-            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration_http", requireCsrf: false);
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
             if (failure is not null)
                 return failure;
 
@@ -30,7 +32,7 @@ internal static class IntegrationEndpoints
 
         group.MapGet("/status", (HttpContext ctx) =>
         {
-            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration_http", requireCsrf: false);
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
             if (failure is not null)
                 return failure;
 
@@ -39,7 +41,7 @@ internal static class IntegrationEndpoints
 
         group.MapGet("/approvals", (HttpContext ctx) =>
         {
-            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration_http", requireCsrf: false);
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
             if (failure is not null)
                 return failure;
 
@@ -53,7 +55,7 @@ internal static class IntegrationEndpoints
 
         group.MapGet("/approval-history", (HttpContext ctx) =>
         {
-            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration_http", requireCsrf: false);
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
             if (failure is not null)
                 return failure;
 
@@ -61,6 +63,8 @@ internal static class IntegrationEndpoints
             var channelId = GetOptionalQueryString(ctx, "channelId");
             var senderId = GetOptionalQueryString(ctx, "senderId");
             var toolName = GetOptionalQueryString(ctx, "toolName");
+            var fromUtc = GetQueryDateTimeOffset(ctx, "fromUtc");
+            var toUtc = GetQueryDateTimeOffset(ctx, "toUtc");
 
             return Results.Json(
                 facade.GetApprovalHistory(new ApprovalHistoryQuery
@@ -68,14 +72,16 @@ internal static class IntegrationEndpoints
                     Limit = limit,
                     ChannelId = channelId,
                     SenderId = senderId,
-                    ToolName = toolName
+                    ToolName = toolName,
+                    FromUtc = fromUtc,
+                    ToUtc = toUtc
                 }),
                 CoreJsonContext.Default.IntegrationApprovalHistoryResponse);
         });
 
         group.MapGet("/providers", (HttpContext ctx) =>
         {
-            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration_http", requireCsrf: false);
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
             if (failure is not null)
                 return failure;
 
@@ -88,7 +94,7 @@ internal static class IntegrationEndpoints
 
         group.MapGet("/plugins", (HttpContext ctx) =>
         {
-            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration_http", requireCsrf: false);
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
             if (failure is not null)
                 return failure;
 
@@ -97,9 +103,35 @@ internal static class IntegrationEndpoints
                 CoreJsonContext.Default.IntegrationPluginsResponse);
         });
 
+        group.MapGet("/compatibility/catalog", (HttpContext ctx) =>
+        {
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
+            if (failure is not null)
+                return failure;
+
+            var compatibilityStatus = GetOptionalQueryString(ctx, "compatibilityStatus");
+            var kind = GetOptionalQueryString(ctx, "kind");
+            var category = GetOptionalQueryString(ctx, "category");
+
+            return Results.Json(
+                facade.GetCompatibilityCatalog(compatibilityStatus, kind, category),
+                CoreJsonContext.Default.IntegrationCompatibilityCatalogResponse);
+        });
+
+        group.MapGet("/compatibility/export", (HttpContext ctx) =>
+        {
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
+            if (failure is not null)
+                return failure;
+
+            return Results.Json(
+                facade.GetCompatibilityExport(),
+                CoreJsonContext.Default.IntegrationCompatibilityExportResponse);
+        });
+
         group.MapGet("/operator-audit", (HttpContext ctx) =>
         {
-            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration_http", requireCsrf: false);
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
             if (failure is not null)
                 return failure;
 
@@ -107,6 +139,8 @@ internal static class IntegrationEndpoints
             var actorId = GetOptionalQueryString(ctx, "actorId");
             var actionType = GetOptionalQueryString(ctx, "actionType");
             var targetId = GetOptionalQueryString(ctx, "targetId");
+            var fromUtc = GetQueryDateTimeOffset(ctx, "fromUtc");
+            var toUtc = GetQueryDateTimeOffset(ctx, "toUtc");
 
             return Results.Json(
                 facade.GetOperatorAudit(new OperatorAuditQuery
@@ -114,14 +148,16 @@ internal static class IntegrationEndpoints
                     Limit = limit,
                     ActorId = actorId,
                     ActionType = actionType,
-                    TargetId = targetId
+                    TargetId = targetId,
+                    FromUtc = fromUtc,
+                    ToUtc = toUtc
                 }),
                 CoreJsonContext.Default.IntegrationOperatorAuditResponse);
         });
 
         group.MapGet("/sessions", async (HttpContext ctx) =>
         {
-            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration_http", requireCsrf: false);
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
             if (failure is not null)
                 return failure;
 
@@ -144,7 +180,7 @@ internal static class IntegrationEndpoints
 
         group.MapGet("/sessions/{id}", async (HttpContext ctx, string id) =>
         {
-            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration_http", requireCsrf: false);
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
             if (failure is not null)
                 return failure;
 
@@ -162,7 +198,7 @@ internal static class IntegrationEndpoints
 
         group.MapGet("/sessions/{id}/timeline", async (HttpContext ctx, string id) =>
         {
-            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration_http", requireCsrf: false);
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
             if (failure is not null)
                 return failure;
 
@@ -182,7 +218,7 @@ internal static class IntegrationEndpoints
 
         group.MapGet("/session-search", async (HttpContext ctx) =>
         {
-            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration_http", requireCsrf: false);
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
             if (failure is not null)
                 return failure;
 
@@ -211,7 +247,7 @@ internal static class IntegrationEndpoints
 
         group.MapGet("/profiles", async (HttpContext ctx) =>
         {
-            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration_http", requireCsrf: false);
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
             if (failure is not null)
                 return failure;
 
@@ -222,7 +258,7 @@ internal static class IntegrationEndpoints
 
         group.MapPost("/text-to-speech", async (HttpContext ctx) =>
         {
-            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration_http", requireCsrf: false);
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
             if (failure is not null)
                 return failure;
 
@@ -266,7 +302,7 @@ internal static class IntegrationEndpoints
 
         group.MapGet("/tool-presets", (HttpContext ctx) =>
         {
-            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration_http", requireCsrf: false);
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
             if (failure is not null)
                 return failure;
 
@@ -275,9 +311,129 @@ internal static class IntegrationEndpoints
                 CoreJsonContext.Default.IntegrationToolPresetsResponse);
         });
 
+        group.MapGet("/workflows", (HttpContext ctx) =>
+        {
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
+            if (failure is not null)
+                return failure;
+
+            return Results.Json(
+                facade.ListWorkflows(),
+                CoreJsonContext.Default.IntegrationWorkflowsResponse);
+        });
+
+        group.MapPost("/workflows/{workflowId}/runs", async (HttpContext ctx, string workflowId) =>
+        {
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.mutate", requireCsrf: true);
+            if (failure is not null)
+                return failure;
+
+            AgentWorkflowRequest? request;
+            try
+            {
+                request = await JsonSerializer.DeserializeAsync(
+                    ctx.Request.Body,
+                    CoreJsonContext.Default.AgentWorkflowRequest,
+                    ctx.RequestAborted);
+            }
+            catch (JsonException)
+            {
+                return BadIntegrationRequest("Invalid JSON request body.");
+            }
+            catch (NotSupportedException)
+            {
+                return BadIntegrationRequest("Invalid JSON request body.");
+            }
+
+            if (request is null)
+                return BadIntegrationRequest("request body is required.");
+
+            try
+            {
+                return Results.Json(
+                    await facade.RunWorkflowAsync(workflowId, request, ctx.RequestAborted),
+                    CoreJsonContext.Default.AgentWorkflowRunResult,
+                    statusCode: StatusCodes.Status202Accepted);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return IntegrationNotFound(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return IntegrationBackendFailure(ex.Message);
+            }
+        });
+
+        group.MapGet("/workflows/{workflowId}/runs/{runId}", async (HttpContext ctx, string workflowId, string runId) =>
+        {
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
+            if (failure is not null)
+                return failure;
+
+            try
+            {
+                return Results.Json(
+                    await facade.GetWorkflowRunAsync(workflowId, runId, ctx.RequestAborted),
+                    CoreJsonContext.Default.AgentWorkflowRunSnapshot);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return IntegrationNotFound(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return IntegrationBackendFailure(ex.Message);
+            }
+        });
+
+        group.MapPost("/workflows/{workflowId}/runs/{runId}/responses", async (HttpContext ctx, string workflowId, string runId) =>
+        {
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.mutate", requireCsrf: true);
+            if (failure is not null)
+                return failure;
+
+            AgentWorkflowResponse? response;
+            try
+            {
+                response = await JsonSerializer.DeserializeAsync(
+                    ctx.Request.Body,
+                    CoreJsonContext.Default.AgentWorkflowResponse,
+                    ctx.RequestAborted);
+            }
+            catch (JsonException)
+            {
+                return BadIntegrationRequest("Invalid JSON request body.");
+            }
+            catch (NotSupportedException)
+            {
+                return BadIntegrationRequest("Invalid JSON request body.");
+            }
+
+            if (response is null)
+                return BadIntegrationRequest("request body is required.");
+            if (string.IsNullOrWhiteSpace(response.PortId))
+                return BadIntegrationRequest("portId is required.");
+
+            try
+            {
+                return Results.Json(
+                    await facade.RespondWorkflowRunAsync(workflowId, runId, response, ctx.RequestAborted),
+                    CoreJsonContext.Default.AgentWorkflowRunSnapshot);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return IntegrationNotFound(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return IntegrationBackendFailure(ex.Message);
+            }
+        });
+
         group.MapGet("/profiles/{actorId}", async (HttpContext ctx, string actorId) =>
         {
-            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration_http", requireCsrf: false);
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
             if (failure is not null)
                 return failure;
 
@@ -295,7 +451,7 @@ internal static class IntegrationEndpoints
 
         group.MapPut("/profiles/{actorId}", async (HttpContext ctx, string actorId) =>
         {
-            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration_http", requireCsrf: true);
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.mutate", requireCsrf: true);
             if (failure is not null)
                 return failure;
 
@@ -330,7 +486,7 @@ internal static class IntegrationEndpoints
 
         group.MapGet("/automations", async (HttpContext ctx) =>
         {
-            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration_http", requireCsrf: false);
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
             if (failure is not null)
                 return failure;
 
@@ -339,9 +495,20 @@ internal static class IntegrationEndpoints
                 CoreJsonContext.Default.IntegrationAutomationsResponse);
         });
 
+        group.MapGet("/automations/templates", (HttpContext ctx) =>
+        {
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
+            if (failure is not null)
+                return failure;
+
+            return Results.Json(
+                facade.ListAutomationTemplates(),
+                CoreJsonContext.Default.AutomationTemplateListResponse);
+        });
+
         group.MapGet("/automations/{id}", async (HttpContext ctx, string id) =>
         {
-            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration_http", requireCsrf: false);
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
             if (failure is not null)
                 return failure;
 
@@ -357,9 +524,47 @@ internal static class IntegrationEndpoints
             return Results.Json(detail, CoreJsonContext.Default.IntegrationAutomationDetailResponse);
         });
 
+        group.MapGet("/automations/{id}/runs", async (HttpContext ctx, string id) =>
+        {
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
+            if (failure is not null)
+                return failure;
+
+            var detail = await facade.GetAutomationAsync(id, ctx.RequestAborted);
+            if (detail.Automation is null)
+            {
+                return Results.Json(
+                    new OperationStatusResponse { Success = false, Error = "Automation not found." },
+                    CoreJsonContext.Default.OperationStatusResponse,
+                    statusCode: StatusCodes.Status404NotFound);
+            }
+
+            return Results.Json(
+                await facade.GetAutomationRunsAsync(id, ctx.RequestAborted),
+                CoreJsonContext.Default.IntegrationAutomationRunsResponse);
+        });
+
+        group.MapGet("/automations/{id}/runs/{runId}", async (HttpContext ctx, string id, string runId) =>
+        {
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
+            if (failure is not null)
+                return failure;
+
+            var detail = await facade.GetAutomationRunAsync(id, runId, ctx.RequestAborted);
+            if (detail.Automation is null || detail.Run is null)
+            {
+                return Results.Json(
+                    new OperationStatusResponse { Success = false, Error = "Automation run not found." },
+                    CoreJsonContext.Default.OperationStatusResponse,
+                    statusCode: StatusCodes.Status404NotFound);
+            }
+
+            return Results.Json(detail, CoreJsonContext.Default.IntegrationAutomationRunDetailResponse);
+        });
+
         group.MapPost("/automations/{id}/run", async (HttpContext ctx, string id) =>
         {
-            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration_http", requireCsrf: true);
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.mutate", requireCsrf: true);
             if (failure is not null)
                 return failure;
 
@@ -389,9 +594,48 @@ internal static class IntegrationEndpoints
                 statusCode: result.Success ? StatusCodes.Status202Accepted : StatusCodes.Status404NotFound);
         });
 
+        group.MapPost("/automations/{id}/runs/{runId}/replay", async (HttpContext ctx, string id, string runId) =>
+        {
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.mutate", requireCsrf: true);
+            if (failure is not null)
+                return failure;
+
+            var result = await facade.ReplayAutomationRunAsync(id, runId, ctx.RequestAborted);
+            return Results.Json(
+                result,
+                CoreJsonContext.Default.MutationResponse,
+                statusCode: result.Success ? StatusCodes.Status202Accepted : StatusCodes.Status404NotFound);
+        });
+
+        group.MapPost("/automations/{id}/quarantine/clear", async (HttpContext ctx, string id) =>
+        {
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.mutate", requireCsrf: true);
+            if (failure is not null)
+                return failure;
+
+            var result = await facade.ClearAutomationQuarantineAsync(id, ctx.RequestAborted);
+            return Results.Json(
+                result,
+                CoreJsonContext.Default.MutationResponse,
+                statusCode: result.Success ? StatusCodes.Status200OK : StatusCodes.Status404NotFound);
+        });
+
+        group.MapDelete("/automations/{id}", async (HttpContext ctx, string id) =>
+        {
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.mutate", requireCsrf: true);
+            if (failure is not null)
+                return failure;
+
+            var result = await facade.DeleteAutomationAsync(id, ctx.RequestAborted);
+            return Results.Json(
+                result,
+                CoreJsonContext.Default.MutationResponse,
+                statusCode: result.Success ? StatusCodes.Status200OK : StatusCodes.Status404NotFound);
+        });
+
         group.MapGet("/runtime-events", (HttpContext ctx) =>
         {
-            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration_http", requireCsrf: false);
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
             if (failure is not null)
                 return failure;
 
@@ -401,6 +645,8 @@ internal static class IntegrationEndpoints
             var senderId = GetOptionalQueryString(ctx, "senderId");
             var component = GetOptionalQueryString(ctx, "component");
             var action = GetOptionalQueryString(ctx, "action");
+            var fromUtc = GetQueryDateTimeOffset(ctx, "fromUtc");
+            var toUtc = GetQueryDateTimeOffset(ctx, "toUtc");
 
             var query = new RuntimeEventQuery
             {
@@ -409,15 +655,159 @@ internal static class IntegrationEndpoints
                 ChannelId = string.IsNullOrWhiteSpace(channelId) ? null : channelId,
                 SenderId = string.IsNullOrWhiteSpace(senderId) ? null : senderId,
                 Component = string.IsNullOrWhiteSpace(component) ? null : component,
-                Action = string.IsNullOrWhiteSpace(action) ? null : action
+                Action = string.IsNullOrWhiteSpace(action) ? null : action,
+                FromUtc = fromUtc,
+                ToUtc = toUtc
             };
 
             return Results.Json(facade.QueryRuntimeEvents(query), CoreJsonContext.Default.IntegrationRuntimeEventsResponse);
         });
 
+        group.MapGet("/payment/setup", async (HttpContext ctx) =>
+        {
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
+            if (failure is not null)
+                return failure;
+
+            var provider = GetOptionalQueryString(ctx, "provider") ?? startup.Config.Payments.Provider;
+            return Results.Json(
+                await runtime.PaymentRuntime.GetSetupStatusAsync(provider, ctx.RequestAborted),
+                PaymentJsonContext.Default.PaymentSetupStatus);
+        });
+
+        group.MapGet("/payment/funding", async (HttpContext ctx) =>
+        {
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
+            if (failure is not null)
+                return failure;
+            if (!startup.Config.Payments.Enabled)
+                return PaymentDisabled();
+
+            var provider = GetOptionalQueryString(ctx, "provider") ?? startup.Config.Payments.Provider;
+            try
+            {
+                var items = await runtime.PaymentRuntime.ListFundingSourcesAsync(
+                    provider,
+                    BuildPaymentContext(ctx, startup.Config),
+                    ctx.RequestAborted);
+                return Results.Json(new List<FundingSource>(items), PaymentJsonContext.Default.ListFundingSource);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadPaymentRequest(ex.Message);
+            }
+        });
+
+        group.MapPost("/payment/virtual-card", async (HttpContext ctx) =>
+        {
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.mutate", requireCsrf: false);
+            if (failure is not null)
+                return failure;
+            if (!startup.Config.Payments.Enabled)
+                return PaymentDisabled();
+
+            VirtualCardRequest? request;
+            try
+            {
+                request = await JsonSerializer.DeserializeAsync(ctx.Request.Body, PaymentJsonContext.Default.VirtualCardRequest, ctx.RequestAborted);
+            }
+            catch (JsonException)
+            {
+                return BadPaymentRequest("Invalid JSON request body.");
+            }
+
+            if (request is null || string.IsNullOrWhiteSpace(request.MerchantName))
+                return BadPaymentRequest("merchantName is required.");
+
+            try
+            {
+                var handle = await runtime.PaymentRuntime.IssueVirtualCardAsync(
+                    request with
+                    {
+                        ProviderId = request.ProviderId ?? startup.Config.Payments.Provider,
+                        Environment = NormalizePaymentEnvironment(string.IsNullOrWhiteSpace(request.Environment) ? startup.Config.Payments.Environment : request.Environment)
+                    },
+                    BuildPaymentContext(ctx, startup.Config),
+                    ctx.RequestAborted);
+                return Results.Json(handle, PaymentJsonContext.Default.VirtualCardHandle);
+            }
+            catch (PaymentPolicyDeniedException ex)
+            {
+                return BadPaymentRequest(ex.Message);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadPaymentRequest(ex.Message);
+            }
+        });
+
+        group.MapPost("/payment/execute", async (HttpContext ctx) =>
+        {
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.mutate", requireCsrf: false);
+            if (failure is not null)
+                return failure;
+            if (!startup.Config.Payments.Enabled)
+                return PaymentDisabled();
+
+            MachinePaymentRequest? request;
+            try
+            {
+                request = await JsonSerializer.DeserializeAsync(ctx.Request.Body, PaymentJsonContext.Default.MachinePaymentRequest, ctx.RequestAborted);
+            }
+            catch (JsonException)
+            {
+                return BadPaymentRequest("Invalid JSON request body.");
+            }
+
+            if (request is null)
+                return BadPaymentRequest("request body is required.");
+
+            try
+            {
+                var result = await runtime.PaymentRuntime.ExecuteMachinePaymentAsync(
+                    request with
+                    {
+                        ProviderId = request.ProviderId ?? startup.Config.Payments.Provider,
+                        Environment = NormalizePaymentEnvironment(string.IsNullOrWhiteSpace(request.Environment) ? startup.Config.Payments.Environment : request.Environment)
+                    },
+                    BuildPaymentContext(ctx, startup.Config),
+                    ctx.RequestAborted);
+                return Results.Json(result, PaymentJsonContext.Default.MachinePaymentResult);
+            }
+            catch (PaymentPolicyDeniedException ex)
+            {
+                return BadPaymentRequest(ex.Message);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadPaymentRequest(ex.Message);
+            }
+        });
+
+        group.MapGet("/payment/status/{id}", async (HttpContext ctx, string id) =>
+        {
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.read", requireCsrf: false);
+            if (failure is not null)
+                return failure;
+            if (!startup.Config.Payments.Enabled)
+                return PaymentDisabled();
+
+            var provider = GetOptionalQueryString(ctx, "provider") ?? startup.Config.Payments.Provider;
+            try
+            {
+                return Results.Json(
+                    await runtime.PaymentRuntime.GetPaymentStatusAsync(id, provider, BuildPaymentContext(ctx, startup.Config), ctx.RequestAborted),
+                    PaymentJsonContext.Default.PaymentStatus);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadPaymentRequest(ex.Message);
+            }
+        });
+
         group.MapPost("/messages", async (HttpContext ctx) =>
         {
-            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration_http", requireCsrf: true);
+            var failure = AuthorizeAndConsume(ctx, startup, runtime, browserSessions, endpointScope: "integration.mutate", requireCsrf: true);
             if (failure is not null)
                 return failure;
 
@@ -452,6 +842,50 @@ internal static class IntegrationEndpoints
         });
     }
 
+    private static PaymentExecutionContext BuildPaymentContext(HttpContext ctx, GatewayConfig config)
+        => new()
+        {
+            SessionId = GetOptionalQueryString(ctx, "sessionId"),
+            ChannelId = GetOptionalQueryString(ctx, "channelId"),
+            SenderId = GetOptionalQueryString(ctx, "senderId"),
+            Environment = NormalizePaymentEnvironment(GetOptionalQueryString(ctx, "environment") ?? config.Payments.Environment),
+            CliConfirmed = GetQueryBool(ctx, "yes") == true,
+            AllowTestModeWithoutApproval = config.Payments.Policy.AllowTestModeWithoutApproval
+        };
+
+    private static string NormalizePaymentEnvironment(string? environment)
+        => PaymentEnvironments.Normalize(environment);
+
+    private static IResult PaymentDisabled()
+        => Results.Json(
+            new OperationStatusResponse { Success = false, Error = "Native payments are disabled by configuration." },
+            CoreJsonContext.Default.OperationStatusResponse,
+            statusCode: StatusCodes.Status409Conflict);
+
+    private static IResult BadPaymentRequest(string message)
+        => Results.Json(
+            new OperationStatusResponse { Success = false, Error = message },
+            CoreJsonContext.Default.OperationStatusResponse,
+            statusCode: StatusCodes.Status400BadRequest);
+
+    private static IResult BadIntegrationRequest(string message)
+        => Results.Json(
+            new OperationStatusResponse { Success = false, Error = message },
+            CoreJsonContext.Default.OperationStatusResponse,
+            statusCode: StatusCodes.Status400BadRequest);
+
+    private static IResult IntegrationNotFound(string message)
+        => Results.Json(
+            new OperationStatusResponse { Success = false, Error = message },
+            CoreJsonContext.Default.OperationStatusResponse,
+            statusCode: StatusCodes.Status404NotFound);
+
+    private static IResult IntegrationBackendFailure(string message)
+        => Results.Json(
+            new OperationStatusResponse { Success = false, Error = message },
+            CoreJsonContext.Default.OperationStatusResponse,
+            statusCode: StatusCodes.Status502BadGateway);
+
     private static IResult? AuthorizeAndConsume(
         HttpContext ctx,
         GatewayStartupContext startup,
@@ -463,6 +897,18 @@ internal static class IntegrationEndpoints
         var auth = EndpointHelpers.AuthorizeOperatorRequest(ctx, startup, browserSessions, requireCsrf);
         if (!auth.IsAuthorized)
             return Results.Unauthorized();
+
+        if (!EndpointHelpers.IsRoleAllowed(auth.Role, endpointScope, out var requiredRole))
+        {
+            return Results.Json(
+                new OperationStatusResponse
+                {
+                    Success = false,
+                    Error = $"Endpoint '{endpointScope}' requires role '{requiredRole}'."
+                },
+                CoreJsonContext.Default.OperationStatusResponse,
+                statusCode: StatusCodes.Status403Forbidden);
+        }
 
         if (!EndpointHelpers.TryConsumeOperatorRateLimit(ctx, runtime.Operations, auth, endpointScope, out var blockedByPolicyId))
         {

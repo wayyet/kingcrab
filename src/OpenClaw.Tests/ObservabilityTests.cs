@@ -222,7 +222,7 @@ public sealed class ObservabilityTests
                     m.IncrementToolCalls();
                     m.AddInputTokens(1);
                 }
-            }, CancellationToken.None);
+            });
         }
 
         await Task.WhenAll(tasks);

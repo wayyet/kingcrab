@@ -36,13 +36,13 @@ public sealed class SocketBridgeTransportTests
         await using (var badClient = await ConnectAsync(socketPath))
         {
             await badClient.Writer.WriteLineAsync("""{"type":"bridge_auth","token":"wrong-token"}""");
-            await badClient.Writer.FlushAsync(CancellationToken.None);
+            await badClient.Writer.FlushAsync();
         }
 
         await using (var goodClient = await ConnectAsync(socketPath))
         {
             await goodClient.Writer.WriteLineAsync("""{"type":"bridge_auth","token":"expected-token"}""");
-            await goodClient.Writer.FlushAsync(CancellationToken.None);
+            await goodClient.Writer.FlushAsync();
             await startTask;
         }
 
@@ -58,7 +58,7 @@ public sealed class SocketBridgeTransportTests
         var tempDir = Path.Combine("/tmp", $".openclaw-socket-configured-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDir);
         var markerPath = Path.Combine(tempDir, "keep.txt");
-        await File.WriteAllTextAsync(markerPath, "keep", CancellationToken.None);
+        await File.WriteAllTextAsync(markerPath, "keep");
         var socketPath = Path.Combine(tempDir, "bridge.sock");
 
         await using (var transport = new SocketBridgeTransport(

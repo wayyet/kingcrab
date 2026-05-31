@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Models;
+using OpenClaw.Core.Observability;
 using OpenClaw.Core.Security;
 
 namespace OpenClawNet.Sandbox.OpenSandbox;
@@ -27,17 +28,21 @@ public static class OpenSandboxServiceCollectionExtensions
             ApiKey = ResolveSecretRefOrValue(sandboxSection["ApiKey"]),
             DefaultTTL = int.TryParse(sandboxSection["DefaultTTL"], out var defaultTtl)
                 ? defaultTtl
-                : 300,
-            ReadyTimeoutSeconds = int.TryParse(sandboxSection["ReadyTimeoutSeconds"], out var readyTimeout) && readyTimeout > 0
-                ? readyTimeout
-                : 60
+                : 300
         };
 
         services.AddSingleton(options);
+        services.AddHttpClient(nameof(OpenSandboxToolSandbox), client =>
+        {
+            client.BaseAddress = options.GetApiBaseUri();
+            client.Timeout = Timeout.InfiniteTimeSpan;
+        });
         services.AddSingleton<IToolSandbox>(sp =>
             new OpenSandboxToolSandbox(
+                sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(OpenSandboxToolSandbox)),
                 sp.GetRequiredService<OpenSandboxOptions>(),
-                sp.GetService<Microsoft.Extensions.Logging.ILogger<OpenSandboxToolSandbox>>()));
+                sp.GetService<Microsoft.Extensions.Logging.ILogger<OpenSandboxToolSandbox>>(),
+                sp.GetService<RuntimeMetrics>()));
 
         return services;
     }

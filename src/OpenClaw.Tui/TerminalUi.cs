@@ -1,3 +1,4 @@
+using System.Text;
 using OpenClaw.Client;
 using OpenClaw.Core.Models;
 using Spectre.Console;
@@ -22,6 +23,7 @@ public static class TerminalUi
                     .AddChoices(
                     [
                         "Status",
+                        "Insights",
                         "Approvals",
                         "Sessions",
                         "Session Search",
@@ -38,6 +40,9 @@ public static class TerminalUi
             {
                 case "Status":
                     await ShowStatusAsync(client, ct);
+                    break;
+                case "Insights":
+                    await ShowInsightsAsync(client, ct);
                     break;
                 case "Approvals":
                     await ShowApprovalsAsync(client, ct);
@@ -91,6 +96,73 @@ public static class TerminalUi
         table.AddRow("Recent runtime events", dashboard.Events.Items.Count.ToString());
 
         AnsiConsole.Write(table);
+        Pause();
+    }
+
+    private static async Task ShowInsightsAsync(OpenClawHttpClient client, CancellationToken ct)
+    {
+        var insights = await client.GetOperatorInsightsAsync(null, null, ct);
+
+        var summary = new Table().RoundedBorder();
+        summary.AddColumn("Metric");
+        summary.AddColumn("Value");
+        summary.AddRow("Window", $"{insights.StartUtc:yyyy-MM-dd HH:mm} UTC - {insights.EndUtc:yyyy-MM-dd HH:mm} UTC");
+        summary.AddRow("Sessions", $"active {insights.Sessions.Active}, persisted {insights.Sessions.Persisted}, range {insights.Sessions.InRange}");
+        summary.AddRow("Provider requests", insights.Totals.ProviderRequests.ToString());
+        summary.AddRow("Tokens", $"{insights.Totals.TotalTokens} ({insights.Totals.InputTokens} in / {insights.Totals.OutputTokens} out)");
+        summary.AddRow("Estimated spend", $"${insights.Totals.EstimatedCostUsd:0.######}");
+        summary.AddRow("Tool calls", insights.Totals.ToolCalls.ToString());
+        AnsiConsole.Write(summary);
+
+        var providers = new Table().RoundedBorder().Title("Providers");
+        providers.AddColumn("Provider");
+        providers.AddColumn("Requests");
+        providers.AddColumn("Tokens");
+        providers.AddColumn("Cost");
+        providers.AddColumn("Errors");
+        if (insights.Providers.Count == 0)
+        {
+            providers.AddRow("none", "-", "-", "-", "-");
+        }
+        else
+        {
+            foreach (var item in insights.Providers.Take(8))
+            {
+                providers.AddRow(
+                    $"{Markup.Escape(item.ProviderId)}/{Markup.Escape(item.ModelId)}",
+                    item.Requests.ToString(),
+                    item.TotalTokens.ToString(),
+                    $"${item.EstimatedCostUsd:0.######}",
+                    item.Errors.ToString());
+            }
+        }
+        AnsiConsole.Write(providers);
+
+        var tools = new Table().RoundedBorder().Title("Tools");
+        tools.AddColumn("Tool");
+        tools.AddColumn("Calls");
+        tools.AddColumn("Failures");
+        tools.AddColumn("Avg ms");
+        if (insights.Tools.Count == 0)
+        {
+            tools.AddRow("none", "-", "-", "-");
+        }
+        else
+        {
+            foreach (var item in insights.Tools.Take(10))
+            {
+                tools.AddRow(
+                    Markup.Escape(item.ToolName),
+                    item.Calls.ToString(),
+                    item.Failures.ToString(),
+                    item.AverageDurationMs.ToString("0.0"));
+            }
+        }
+        AnsiConsole.Write(tools);
+
+        foreach (var warning in insights.Warnings)
+            AnsiConsole.MarkupLine($"[grey]{Markup.Escape(warning)}[/]");
+
         Pause();
     }
 
@@ -272,11 +344,12 @@ public static class TerminalUi
         var table = new Table().RoundedBorder();
         table.AddColumn("ID");
         table.AddColumn("Kind");
+        table.AddColumn("Risk");
         table.AddColumn("Title");
         table.AddColumn("Confidence");
 
         foreach (var item in proposals.Items)
-            table.AddRow(item.Id, item.Kind, item.Title, item.Confidence.ToString("0.00"));
+            table.AddRow(item.Id, item.Kind, item.RiskLevel, item.Title, item.Confidence.ToString("0.00"));
 
         if (proposals.Items.Count == 0)
         {
@@ -298,11 +371,36 @@ public static class TerminalUi
             return;
         }
 
-        AnsiConsole.Write(new Panel(proposal.DraftContent ?? proposal.Summary).Header(proposal.Title));
+        var detail = await client.GetLearningProposalDetailAsync(proposalId, ct);
+        var current = detail?.Proposal ?? proposal;
+        var reviewTextBuilder = new StringBuilder()
+            .AppendLine(current.Summary)
+            .AppendLine($"Risk: {current.RiskLevel}")
+            .AppendLine($"Validation: {current.ValidationStatus}")
+            .AppendLine($"Repeated count: {current.RepeatedCount}")
+            .AppendLine($"Sources: {string.Join(", ", current.SourceSessionIds)}")
+            .AppendLine($"Warnings: {(current.ValidationWarnings.Count == 0 ? "none" : string.Join("; ", current.ValidationWarnings))}");
+        if (current.HarnessEvolution is { } harness)
+        {
+            reviewTextBuilder
+                .AppendLine()
+                .AppendLine($"Component: {harness.Component}")
+                .AppendLine($"Failure mode: {harness.FailureMode}")
+                .AppendLine($"Proposed change: {harness.ProposedChange}")
+                .AppendLine($"Apply mode: {harness.ApplyMode}")
+                .AppendLine($"Regression: {string.Join(", ", harness.RegressionCategories)}")
+                .AppendLine($"Rollback plan: {harness.RollbackPlan ?? "none"}");
+        }
+
+        var reviewText = reviewTextBuilder
+            .AppendLine()
+            .AppendLine(current.DraftContent ?? current.DraftPreview ?? current.AutomationDraft?.Prompt ?? current.ProfileUpdate?.Summary ?? string.Empty)
+            .ToString();
+        AnsiConsole.Write(new Panel(reviewText).Header(current.Title));
         var action = AnsiConsole.Prompt(
             new SelectionPrompt<string>()
                 .Title("Review action")
-                .AddChoices(["Approve", "Reject", "Return"]));
+                .AddChoices(detail?.CanRollback == true ? ["Approve", "Reject", "Rollback", "Return"] : ["Approve", "Reject", "Return"]));
 
         switch (action)
         {
@@ -314,6 +412,11 @@ public static class TerminalUi
                 var reason = AnsiConsole.Ask<string>("Reason ([grey]optional[/])");
                 await client.RejectLearningProposalAsync(proposalId, string.IsNullOrWhiteSpace(reason) ? null : reason, ct);
                 AnsiConsole.MarkupLine("[yellow]Proposal rejected.[/]");
+                break;
+            case "Rollback":
+                var rollbackReason = AnsiConsole.Ask<string>("Rollback reason ([grey]optional[/])");
+                await client.RollbackLearningProposalAsync(proposalId, string.IsNullOrWhiteSpace(rollbackReason) ? null : rollbackReason, ct);
+                AnsiConsole.MarkupLine("[yellow]Proposal rolled back.[/]");
                 break;
         }
 

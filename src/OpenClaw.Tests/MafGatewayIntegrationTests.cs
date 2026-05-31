@@ -1,4 +1,3 @@
-#if OPENCLAW_ENABLE_MAF_EXPERIMENT
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Threading.Channels;
@@ -18,7 +17,7 @@ using OpenClaw.Core.Security;
 using OpenClaw.Core.Sessions;
 using OpenClaw.Gateway;
 using OpenClaw.Gateway.Extensions;
-using OpenClaw.MicrosoftAgentFrameworkAdapter;
+using OpenClaw.Agent;
 using Xunit;
 
 namespace OpenClaw.Tests;
@@ -631,4 +630,3 @@ public sealed class MafGatewayIntegrationTests
         public void Dispose() => _stopping.Cancel();
     }
 }
-#endif

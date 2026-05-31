@@ -18,13 +18,14 @@ internal sealed class AutomationTool : IToolWithContext
     }
 
     public string Name => "automation";
-    public string Description => "Inspect and manage scheduled automations. Supports list, get, preview, create, update, delete, pause, resume, and run.";
+    public string Description => "Inspect and manage scheduled automations. Supports list, get, runs, preview, create, update, pause, resume, run, replay, and clear_quarantine.";
     public string ParameterSchema => """
     {
       "type":"object",
       "properties":{
-        "action":{"type":"string","enum":["list","get","preview","create","update","delete","pause","resume","run"],"default":"list"},
+        "action":{"type":"string","enum":["list","get","runs","preview","create","update","pause","resume","run","replay","clear_quarantine"],"default":"list"},
         "automation_id":{"type":"string"},
+        "run_id":{"type":"string"},
         "name":{"type":"string"},
         "schedule":{"type":"string"},
         "timezone":{"type":"string"},
@@ -36,7 +37,9 @@ internal sealed class AutomationTool : IToolWithContext
         "session_id":{"type":"string"},
         "run_on_startup":{"type":"boolean"},
         "enabled":{"type":"boolean"},
-        "tags":{"type":"array","items":{"type":"string"}}
+        "tags":{"type":"array","items":{"type":"string"}},
+        "verification":{"type":"object"},
+        "retry_policy":{"type":"object"}
       },
       "required":["action"]
     }
@@ -55,14 +58,16 @@ internal sealed class AutomationTool : IToolWithContext
         {
             "list" => await ListAsync(ct),
             "get" => await GetAsync(root, ct),
+            "runs" => await RunsAsync(root, ct),
             "preview" => Preview(root, context),
             "create" => await SaveAsync(root, context, isUpdate: false, ct),
             "update" => await SaveAsync(root, context, isUpdate: true, ct),
-            "delete" => await DeleteAsync(root, ct),
             "pause" => await SetEnabledAsync(root, enabled: false, ct),
             "resume" => await SetEnabledAsync(root, enabled: true, ct),
             "run" => await RunAsync(root, ct),
-            _ => "Error: Unknown action. Valid actions are list, get, preview, create, update, delete, pause, resume, and run."
+            "replay" => await ReplayAsync(root, ct),
+            "clear_quarantine" => await ClearQuarantineAsync(root, ct),
+            _ => "Error: Unknown action. Valid actions are list, get, runs, preview, create, update, pause, resume, run, replay, and clear_quarantine."
         };
     }
 
@@ -89,25 +94,25 @@ internal sealed class AutomationTool : IToolWithContext
             return $"Error: automation '{automationId}' was not found.";
 
         var state = await _automations.GetRunStateAsync(automationId, ct);
+        return $"id: {automation.Id}\nname: {automation.Name}\nenabled: {automation.Enabled}\nschedule: {automation.Schedule}\nprompt:\n{automation.Prompt}\nlast_outcome: {state?.Outcome ?? "never"}\nlifecycle: {state?.LifecycleState ?? AutomationLifecycleStates.Never}\nverification: {state?.VerificationStatus ?? AutomationVerificationStatuses.NotRun}\nhealth: {state?.HealthState ?? AutomationHealthStates.Unknown}";
+    }
+
+    private async Task<string> RunsAsync(JsonElement root, CancellationToken ct)
+    {
+        var automationId = GetString(root, "automation_id");
+        if (string.IsNullOrWhiteSpace(automationId))
+            return "Error: automation_id is required.";
+
+        var runs = await _automations.ListRunRecordsAsync(automationId, 20, ct);
+        if (runs.Count == 0)
+            return $"No stored runs found for automation '{automationId}'.";
+
         var sb = new StringBuilder();
-        sb.AppendLine($"id: {automation.Id}");
-        sb.AppendLine($"name: {automation.Name}");
-        sb.AppendLine($"enabled: {automation.Enabled}");
-        sb.AppendLine($"schedule: {automation.Schedule}");
-        if (automation.RunAt.HasValue)
-            sb.AppendLine($"run_at: {automation.RunAt.Value:u} (one-shot)");
-        if (!string.IsNullOrWhiteSpace(automation.ModelId))
-            sb.AppendLine($"model: {automation.ModelId}");
-        sb.AppendLine($"prompt:\n{automation.Prompt}");
-        sb.AppendLine($"last_outcome: {state?.Outcome ?? "never"}");
-        if (state?.LastRunAtUtc.HasValue == true)
-            sb.AppendLine($"last_run: {state.LastRunAtUtc.Value:u}");
-        if (state?.RecentRuns is { Count: > 0 } runs)
+        foreach (var run in runs)
         {
-            sb.AppendLine($"recent_runs ({runs.Count}):");
-            foreach (var r in runs)
-                sb.AppendLine($"  {r.RanAtUtc:u}  [{r.Outcome}]  in:{r.InputTokens} out:{r.OutputTokens}");
+            sb.AppendLine($"{run.RunId} [{run.TriggerSource}] {run.LifecycleState} / {run.VerificationStatus}");
         }
+
         return sb.ToString().TrimEnd();
     }
 
@@ -127,30 +132,9 @@ internal sealed class AutomationTool : IToolWithContext
         if (isUpdate && string.IsNullOrWhiteSpace(definition.Id))
             return "Error: automation_id is required for update.";
 
-        // Validate — also applies NormalizeSchedule (auto-fixes common 6-field Quartz format)
-        var preview = _automations.BuildPreview(definition);
-        var scheduleIssue = preview.Issues.FirstOrDefault(static i => i.Code is "schedule_required" or "invalid_schedule");
-        if (scheduleIssue is not null)
-            return $"Error: {scheduleIssue.Message}";
-
-        // Save the definition with the already-normalised schedule from the preview
-        var saved = await _automations.SaveAsync(preview.Definition, ct);
+        var saved = await _automations.SaveAsync(definition, ct);
         return $"{(isUpdate ? "Updated" : "Created")} automation {saved.Id}.";
     }
-
-    private async Task<string> DeleteAsync(JsonElement root, CancellationToken ct)
-    {
-        var automationId = GetString(root, "automation_id");
-        if (string.IsNullOrWhiteSpace(automationId))
-            return "Error: automation_id is required.";
-
-        var existing = await _automations.GetAsync(automationId, ct);
-        if (existing is null)
-            return $"Error: automation '{automationId}' was not found.";
-
-        await _automations.DeleteAsync(automationId, ct);
-        return $"Deleted automation {automationId}.";
- }
 
     private async Task<string> SetEnabledAsync(JsonElement root, bool enabled, CancellationToken ct)
     {
@@ -180,10 +164,10 @@ internal sealed class AutomationTool : IToolWithContext
             IsDraft = existing.IsDraft,
             Source = existing.Source,
             TemplateKey = existing.TemplateKey,
+            Verification = existing.Verification,
+            RetryPolicy = existing.RetryPolicy,
             CreatedAtUtc = existing.CreatedAtUtc,
-            UpdatedAtUtc = DateTimeOffset.UtcNow,
-            RunAt = existing.RunAt,
-            DeleteAfterRun = existing.DeleteAfterRun
+            UpdatedAtUtc = DateTimeOffset.UtcNow
         }, ct);
 
         return $"{(enabled ? "Resumed" : "Paused")} automation {automationId}.";
@@ -196,12 +180,43 @@ internal sealed class AutomationTool : IToolWithContext
             return "Error: automation_id is required.";
 
         var result = await _automations.RunNowAsync(automationId, _pipeline, ct);
-        return result switch
+        return result.Status switch
         {
-            RunNowResult.Queued => $"Automation {automationId} queued.",
-            RunNowResult.AlreadyRunning => $"Error: automation '{automationId}' is already running.",
+            "queued" => string.IsNullOrWhiteSpace(result.RunId)
+                ? $"Automation {automationId} queued."
+                : $"Automation {automationId} queued as run {result.RunId}.",
+            "already_running" => $"Error: automation '{automationId}' is already running.",
+            "quarantined" => $"Error: automation '{automationId}' is quarantined.",
             _ => $"Error: automation '{automationId}' was not found."
         };
+    }
+
+    private async Task<string> ReplayAsync(JsonElement root, CancellationToken ct)
+    {
+        var automationId = GetString(root, "automation_id");
+        var runId = GetString(root, "run_id");
+        if (string.IsNullOrWhiteSpace(automationId) || string.IsNullOrWhiteSpace(runId))
+            return "Error: automation_id and run_id are required.";
+
+        var result = await _automations.ReplayAsync(automationId, runId, _pipeline, ct);
+        return result.Status switch
+        {
+            "queued" => string.IsNullOrWhiteSpace(result.RunId)
+                ? $"Replay queued for automation {automationId}."
+                : $"Replay queued for automation {automationId} as run {result.RunId}.",
+            "already_running" => $"Error: automation '{automationId}' is already running.",
+            _ => $"Error: replay for automation '{automationId}' could not be queued."
+        };
+    }
+
+    private async Task<string> ClearQuarantineAsync(JsonElement root, CancellationToken ct)
+    {
+        var automationId = GetString(root, "automation_id");
+        if (string.IsNullOrWhiteSpace(automationId))
+            return "Error: automation_id is required.";
+
+        await _automations.ClearQuarantineAsync(automationId, ct);
+        return $"Cleared quarantine for automation {automationId}.";
     }
 
     private static AutomationDefinition BuildDefinition(JsonElement root, ToolExecutionContext context, bool keepExistingId)
@@ -224,7 +239,13 @@ internal sealed class AutomationTool : IToolWithContext
                 : [],
             IsDraft = false,
             Source = "agent",
-            TemplateKey = null
+            TemplateKey = null,
+            Verification = root.TryGetProperty("verification", out var verification) && verification.ValueKind == JsonValueKind.Object
+                ? verification.Deserialize(CoreJsonContext.Default.VerificationPolicy)
+                : null,
+            RetryPolicy = root.TryGetProperty("retry_policy", out var retryPolicy) && retryPolicy.ValueKind == JsonValueKind.Object
+                ? retryPolicy.Deserialize(CoreJsonContext.Default.AutomationRetryPolicy) ?? new AutomationRetryPolicy()
+                : new AutomationRetryPolicy()
         };
 
     private static string? GetString(JsonElement root, string propertyName)

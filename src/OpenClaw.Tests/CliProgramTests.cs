@@ -4,8 +4,51 @@ using Xunit;
 
 namespace OpenClaw.Tests;
 
+[Collection(EnvironmentVariableCollection.Name)]
 public sealed class CliProgramTests
 {
+    [Fact]
+    public async Task Main_Help_ListsPluginsCommand()
+    {
+        var previousOut = Console.Out;
+        using var output = new StringWriter();
+        try
+        {
+            Console.SetOut(output);
+
+            var exitCode = await OpenClaw.Cli.Program.Main(["--help"]);
+
+            Assert.Equal(0, exitCode);
+            Assert.Contains("openclaw plugins <install|remove|list|search> [options]", output.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Console.SetOut(previousOut);
+        }
+    }
+
+    [Fact]
+    public async Task Main_ModelsHelp_ListsInstallOptions()
+    {
+        var previousOut = Console.Out;
+        using var output = new StringWriter();
+        try
+        {
+            Console.SetOut(output);
+
+            var exitCode = await OpenClaw.Cli.Program.Main(["models", "--help"]);
+
+            var help = output.ToString();
+            Assert.Equal(0, exitCode);
+            Assert.Contains("--download-url <url>", help, StringComparison.Ordinal);
+            Assert.Contains("--no-optional-files", help, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Console.SetOut(previousOut);
+        }
+    }
+
     [Fact]
     public void ResolveAuthToken_CliToken_WarnsAndTakesPrecedence()
     {
@@ -68,5 +111,63 @@ public sealed class CliProgramTests
         Assert.Equal(2, parsed.Options["--metadata"].Count);
         Assert.Equal("./repo", parsed.GetOption("--workspace"));
         Assert.True(parsed.HasFlag("--no-stream"));
+    }
+
+    [Fact]
+    public void CliArgs_Parse_RepeatedImageOptions()
+    {
+        var parsed = CliArgs.Parse(["describe", "--image", "one.png", "--image", "https://example.test/two.png"]);
+
+        Assert.Equal(["one.png", "https://example.test/two.png"], parsed.Images);
+    }
+
+    [Fact]
+    public void CliArgs_Parse_TrajectoryExportAnonymizeFlag()
+    {
+        var parsed = CliArgs.Parse([
+            "--session", "sess-1",
+            "--anonymize",
+            "--output", "trajectory.jsonl"
+        ]);
+
+        Assert.Equal("sess-1", parsed.GetOption("--session"));
+        Assert.Equal("trajectory.jsonl", parsed.GetOption("--output"));
+        Assert.True(parsed.HasFlag("--anonymize"));
+    }
+
+    [Fact]
+    public void BuildUserContent_AddsImageMarkersForImageOptions()
+    {
+        var content = OpenClaw.Cli.Program.BuildUserContent(
+            "Describe these.",
+            files: [],
+            images: ["https://example.test/cat.png"]);
+
+        Assert.Contains("Describe these.", content, StringComparison.Ordinal);
+        Assert.Contains("[IMAGE_URL:https://example.test/cat.png]", content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildImageCommandContent_AddsImageMarkerAndDefaultPrompt()
+    {
+        var content = OpenClaw.Cli.Program.BuildImageCommandContent("/image https://example.test/cat.png");
+
+        Assert.NotNull(content);
+        Assert.Contains("Describe this image.", content, StringComparison.Ordinal);
+        Assert.Contains("[IMAGE_URL:https://example.test/cat.png]", content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildUserContent_TreatsFileUriImagesAsImagePaths()
+    {
+        var tempImage = Path.Combine(Path.GetTempPath(), $"openclaw-{Guid.NewGuid():N}.png");
+        var fileUri = new Uri(tempImage).AbsoluteUri;
+
+        var content = OpenClaw.Cli.Program.BuildUserContent(
+            "Describe it.",
+            files: [],
+            images: [fileUri]);
+
+        Assert.Contains($"[IMAGE_PATH:{tempImage}]", content, StringComparison.Ordinal);
     }
 }

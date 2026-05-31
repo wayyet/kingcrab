@@ -56,6 +56,72 @@ public sealed class ConfigValidatorTests
     }
 
     [Fact]
+    public void Validate_RootApertureBearerWithoutEndpointOrApiKey_ReturnsErrors()
+    {
+        var config = new GatewayConfig
+        {
+            Llm = new LlmProviderConfig
+            {
+                Provider = "aperture",
+                Model = "team/default",
+                AuthMode = "bearer"
+            }
+        };
+
+        var errors = ConfigValidator.Validate(config);
+
+        Assert.Contains(errors, error => error.Contains("Llm.Endpoint", StringComparison.Ordinal));
+        Assert.Contains(errors, error => error.Contains("Llm.ApiKey", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_ApertureProfileTailnetIdentityWithoutApiKey_IsAccepted()
+    {
+        var config = new GatewayConfig
+        {
+            Models = new ModelsConfig
+            {
+                Profiles =
+                [
+                    new ModelProfileConfig
+                    {
+                        Id = "aperture-default",
+                        Provider = "aperture",
+                        Model = "team/default",
+                        BaseUrl = "https://aperture.example.test/v1",
+                        AuthMode = "tailnet-identity"
+                    }
+                ],
+                DefaultProfile = "aperture-default"
+            }
+        };
+
+        var errors = ConfigValidator.Validate(config);
+
+        Assert.DoesNotContain(errors, error => error.Contains("Models.Profiles.aperture-default.ApiKey", StringComparison.Ordinal));
+        Assert.DoesNotContain(errors, error => error.Contains("Models.Profiles.aperture-default.Endpoint", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_UnsupportedTailnetIdentityProvider_ReturnsError()
+    {
+        var config = new GatewayConfig
+        {
+            Llm = new LlmProviderConfig
+            {
+                Provider = "openai",
+                Model = "gpt-4.1",
+                ApiKey = "env:MODEL_PROVIDER_KEY",
+                AuthMode = "tailnet-identity"
+            }
+        };
+
+        var errors = ConfigValidator.Validate(config);
+
+        Assert.Contains(errors, error => error.Contains("tailnet-identity", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void Validate_WebhookHmacEnabledWithoutSecret_ReturnsError()
     {
         var config = new GatewayConfig
@@ -259,6 +325,43 @@ public sealed class ConfigValidatorTests
 
         var errors = ConfigValidator.Validate(config);
         Assert.Contains(errors, e => e.Contains("Runtime.Orchestrator", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_WorkflowsEnabledWithoutBackends_ReturnsError()
+    {
+        var config = new GatewayConfig
+        {
+            Workflows = new WorkflowsConfig
+            {
+                Enabled = true
+            }
+        };
+
+        var errors = ConfigValidator.Validate(config);
+        Assert.Contains(errors, e => e.Contains("Workflows", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_WorkflowBackendWithoutAbsoluteBaseUrl_ReturnsError()
+    {
+        var config = new GatewayConfig
+        {
+            Workflows = new WorkflowsConfig
+            {
+                Enabled = true,
+                Backends =
+                {
+                    ["review"] = new WorkflowBackendConfig
+                    {
+                        BaseUrl = "/relative"
+                    }
+                }
+            }
+        };
+
+        var errors = ConfigValidator.Validate(config);
+        Assert.Contains(errors, e => e.Contains("Workflows.Backends.review.BaseUrl", StringComparison.Ordinal));
     }
 
     [Fact]

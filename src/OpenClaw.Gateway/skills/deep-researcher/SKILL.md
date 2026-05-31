@@ -12,7 +12,7 @@ When asked to "research", "deep dive", or investigate a complex topic:
 
 2) Deep Extraction Phase:
    - Use the `web_fetch` tool to read the full text of the identified sources.
-   - If documents are PDFs, use the `pdf_parse` tool to extract their contents as Markdown, then use `read_file` to read the saved Markdown file.
+   - If documents are PDFs, use the `pdf_read` tool to extract their contents.
    - Take notes using the `memory` tool if the context is too large to hold at once.
 
 3) Synthesis & Cross-Referencing:

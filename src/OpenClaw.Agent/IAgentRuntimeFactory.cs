@@ -27,7 +27,10 @@ public sealed class AgentRuntimeFactoryContext
     public required bool RequireToolApproval { get; init; }
     public required IReadOnlyList<string> ApprovalRequiredTools { get; init; }
     public IToolSandbox? ToolSandbox { get; init; }
+    public IToolGovernanceService? ToolGovernance { get; init; }
+    public IPlanExecuteVerifyOrchestrator? PlanExecuteVerify { get; init; }
     public ToolUsageTracker? ToolUsageTracker { get; init; }
+    public ToolAuditLog? ToolAuditLog { get; init; }
     public Func<Session, bool>? IsContractTokenBudgetExceeded { get; init; }
     public Func<Session, bool>? IsContractRuntimeBudgetExceeded { get; init; }
     public Action<Session, string, string, long, long>? RecordContractTurnUsage { get; init; }
@@ -56,7 +59,7 @@ public static class AgentRuntimeFactorySelector
 
         throw new InvalidOperationException(
             normalizedOrchestrator == RuntimeOrchestrator.Maf
-                ? "Runtime.Orchestrator='maf' requires the Microsoft Agent Framework experiment adapter. Build with OpenClawEnableMafExperiment=true."
+                ? "Runtime.Orchestrator='maf' requires the Microsoft Agent Framework adapter. Set OpenClaw:Runtime:Orchestrator='maf' in a build that includes OpenClaw.MicrosoftAgentFrameworkAdapter."
                 : $"No agent runtime factory is registered for orchestrator '{normalizedOrchestrator}'.");
     }
 }

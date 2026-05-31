@@ -1,135 +1,135 @@
-using OpenClaw.Core.Models;
+//using OpenClaw.Core.Models;
 
-namespace OpenClaw.Core.Security;
+//namespace OpenClaw.Core.Security;
 
-public static class ToolPathPolicy
-{
-    public static bool IsReadAllowed(ToolingConfig config, string path) =>
-        IsPathAllowed(config.AllowedReadRoots, path);
+//public static class ToolPathPolicy
+//{
+//    public static bool IsReadAllowed(ToolingConfig config, string path) =>
+//        IsPathAllowed(config.AllowedReadRoots, path);
 
-    public static bool IsWriteAllowed(ToolingConfig config, string path) =>
-        IsPathAllowed(config.AllowedWriteRoots, path);
+//    public static bool IsWriteAllowed(ToolingConfig config, string path) =>
+//        IsPathAllowed(config.AllowedWriteRoots, path);
 
-    private static bool IsPathAllowed(string[] roots, string path)
-    {
-        if (roots.Length == 0)
-            return false;
+//    private static bool IsPathAllowed(string[] roots, string path)
+//    {
+//        if (roots.Length == 0)
+//            return false;
 
-        if (roots.Length == 1 && roots[0] == "*")
-            return true;
+//        if (roots.Length == 1 && roots[0] == "*")
+//            return true;
 
-        var fullPath = ResolveRealPath(path);
-        foreach (var root in roots)
-        {
-            if (root == "*")
-                return true;
+//        var fullPath = ResolveRealPath(path);
+//        foreach (var root in roots)
+//        {
+//            if (root == "*")
+//                return true;
 
-            var fullRoot = ResolveRealPath(root);
-            if (IsUnderRoot(fullPath, fullRoot))
-                return true;
-        }
+//            var fullRoot = ResolveRealPath(root);
+//            if (IsUnderRoot(fullPath, fullRoot))
+//                return true;
+//        }
 
-        return false;
-    }
+//        return false;
+//    }
 
-    /// <summary>
-    /// Resolves the real filesystem path, following symlinks.
-    /// For paths that don't exist yet (e.g. write targets), resolves the deepest
-    /// existing ancestor and appends the remaining segments.
-    /// </summary>
-    public static string ResolveRealPath(string path)
-    {
-        var full = Path.GetFullPath(path);
+//    /// <summary>
+//    /// Resolves the real filesystem path, following symlinks.
+//    /// For paths that don't exist yet (e.g. write targets), resolves the deepest
+//    /// existing ancestor and appends the remaining segments.
+//    /// </summary>
+//    public static string ResolveRealPath(string path)
+//    {
+//        var full = Path.GetFullPath(path);
 
-        if (File.Exists(full))
-            return ResolveFileLinkOrSelf(full);
+//        if (File.Exists(full))
+//            return ResolveFileLinkOrSelf(full);
 
-        if (Directory.Exists(full))
-            return ResolveDirectoryLinkOrSelf(full);
+//        if (Directory.Exists(full))
+//            return ResolveDirectoryLinkOrSelf(full);
 
-        var dir = Path.GetDirectoryName(full);
-        var tail = Path.GetFileName(full);
+//        var dir = Path.GetDirectoryName(full);
+//        var tail = Path.GetFileName(full);
 
-        while (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-        {
-            tail = Path.Combine(Path.GetFileName(dir), tail);
-            dir = Path.GetDirectoryName(dir);
-        }
+//        while (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+//        {
+//            tail = Path.Combine(Path.GetFileName(dir), tail);
+//            dir = Path.GetDirectoryName(dir);
+//        }
 
-        if (!string.IsNullOrEmpty(dir))
-        {
-            if (IsPathRoot(dir))
-                return Path.Combine(dir, tail);
+//        if (!string.IsNullOrEmpty(dir))
+//        {
+//            if (IsPathRoot(dir))
+//                return Path.Combine(dir, tail);
 
-            var realDir = ResolveDirectoryLinkOrSelf(dir);
-            return Path.Combine(realDir, tail);
-        }
+//            var realDir = ResolveDirectoryLinkOrSelf(dir);
+//            return Path.Combine(realDir, tail);
+//        }
 
-        return full;
-    }
+//        return full;
+//    }
 
-    private static string ResolveFileLinkOrSelf(string path)
-    {
-        try
-        {
-            var resolved = File.ResolveLinkTarget(path, returnFinalTarget: true);
-            return resolved?.FullName ?? path;
-        }
-        catch (IOException)
-        {
-            return path;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return path;
-        }
-    }
+//    private static string ResolveFileLinkOrSelf(string path)
+//    {
+//        try
+//        {
+//            var resolved = File.ResolveLinkTarget(path, returnFinalTarget: true);
+//            return resolved?.FullName ?? path;
+//        }
+//        catch (IOException)
+//        {
+//            return path;
+//        }
+//        catch (UnauthorizedAccessException)
+//        {
+//            return path;
+//        }
+//    }
 
-    private static string ResolveDirectoryLinkOrSelf(string path)
-    {
-        try
-        {
-            var resolved = Directory.ResolveLinkTarget(path, returnFinalTarget: true);
-            return resolved?.FullName ?? path;
-        }
-        catch (IOException)
-        {
-            return path;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return path;
-        }
-    }
+//    private static string ResolveDirectoryLinkOrSelf(string path)
+//    {
+//        try
+//        {
+//            var resolved = Directory.ResolveLinkTarget(path, returnFinalTarget: true);
+//            return resolved?.FullName ?? path;
+//        }
+//        catch (IOException)
+//        {
+//            return path;
+//        }
+//        catch (UnauthorizedAccessException)
+//        {
+//            return path;
+//        }
+//    }
 
-    private static bool IsPathRoot(string path)
-    {
-        var root = Path.GetPathRoot(path);
-        if (string.IsNullOrEmpty(root))
-            return false;
+//    private static bool IsPathRoot(string path)
+//    {
+//        var root = Path.GetPathRoot(path);
+//        if (string.IsNullOrEmpty(root))
+//            return false;
 
-        var comparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
+//        var comparison = OperatingSystem.IsWindows()
+//            ? StringComparison.OrdinalIgnoreCase
+//            : StringComparison.Ordinal;
 
-        return string.Equals(
-            Path.TrimEndingDirectorySeparator(path),
-            Path.TrimEndingDirectorySeparator(root),
-            comparison);
-    }
+//        return string.Equals(
+//            Path.TrimEndingDirectorySeparator(path),
+//            Path.TrimEndingDirectorySeparator(root),
+//            comparison);
+//    }
 
-    private static bool IsUnderRoot(string fullPath, string fullRoot)
-    {
-        var comparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
+//    private static bool IsUnderRoot(string fullPath, string fullRoot)
+//    {
+//        var comparison = OperatingSystem.IsWindows()
+//            ? StringComparison.OrdinalIgnoreCase
+//            : StringComparison.Ordinal;
 
-        if (string.Equals(fullPath, fullRoot, comparison))
-            return true;
+////        if (string.Equals(fullPath, fullRoot, comparison))
+//            return true;
 
-        if (!fullRoot.EndsWith(Path.DirectorySeparatorChar))
-            fullRoot += Path.DirectorySeparatorChar;
+//        if (!fullRoot.EndsWith(Path.DirectorySeparatorChar))
+//            fullRoot += Path.DirectorySeparatorChar;
 
-        return fullPath.StartsWith(fullRoot, comparison);
-    }
-}
+//        return fullPath.StartsWith(fullRoot, comparison);
+//    }
+//}

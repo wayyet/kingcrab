@@ -33,10 +33,10 @@ If this repo is useful to you, star it.
 - Gateway surfaces for HTTP, WebSocket, browser UI, webhooks, and OpenAI-compatible endpoints
 - Agent runtime for tools, memory, sessions, skills, policy, approvals, and message pipeline execution
 - Two runtime lanes: trim-safe `aot` and broader-compatibility `jit`
-- Two artifact families: standard artifacts plus MAF-enabled artifacts where `Runtime.Orchestrator=maf` is optional
-- Built-in clients: browser UI at `/chat`, CLI, and Avalonia desktop companion
-- Reusable library packages in-repo: `OpenClaw.Core`, `OpenClaw.PluginKit`, and `OpenClaw.SemanticKernelAdapter`
-- Optional integrations for Telegram, Twilio SMS, WhatsApp, Semantic Kernel, the JS/TS plugin bridge, and the MAF adapter
+- Microsoft Agent Framework (MAF) is the only orchestration path; MEAI / Semantic Kernel adapters are not shipped from this repo
+- Built-in clients: browser UI at `/chat`, CLI, Avalonia desktop companion, and Blazor WASM operator dashboard (`OpenClaw.Dashboard`)
+- Reusable library packages in-repo: `OpenClaw.Core`, `OpenClaw.PluginKit`, `OpenClaw.SkillKit`, `OpenClaw.Payments.*`, `OpenClaw.Testing`
+- Optional integrations for Telegram, Twilio SMS, WhatsApp (Baileys worker), Stripe Link, and the JS/TS plugin bridge
 
 ## Ecosystem Compatibility
 

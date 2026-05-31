@@ -5,10 +5,11 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Models;
+using OpenClaw.Core.Security;
 
 namespace OpenClaw.Core.Memory;
 
-public sealed class SqliteMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryRetentionStore, ISessionAdminStore, ISessionSearchStore, IDisposable
+public sealed class SqliteMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryNoteCatalog, IMemoryRetentionStore, ISessionAdminStore, ISessionSearchStore, IDisposable
 {
     private readonly string _dbPath;
     private readonly bool _enableFtsRequested;
@@ -16,6 +17,7 @@ public sealed class SqliteMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemory
     private readonly IEmbeddingGenerator<string, Embedding<float>>? _embeddingGenerator;
     private readonly bool _enableVectors;
     private readonly ILogger? _logger;
+    private readonly IRedactionPipeline? _redaction;
 
     public SqliteMemoryStore(string dbPath, bool enableFts)
         : this(dbPath, enableFts, embeddingGenerator: null, enableVectors: false, logger: null)
@@ -25,13 +27,15 @@ public sealed class SqliteMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemory
     public SqliteMemoryStore(string dbPath, bool enableFts,
         IEmbeddingGenerator<string, Embedding<float>>? embeddingGenerator = null,
         bool enableVectors = false,
-        ILogger? logger = null)
+        ILogger? logger = null,
+        IRedactionPipeline? redaction = null)
     {
         _dbPath = dbPath ?? throw new ArgumentNullException(nameof(dbPath));
         _enableFtsRequested = enableFts;
         _embeddingGenerator = embeddingGenerator;
         _enableVectors = enableVectors && embeddingGenerator is not null;
         _logger = logger;
+        _redaction = redaction;
 
         var dir = Path.GetDirectoryName(Path.GetFullPath(_dbPath));
         if (!string.IsNullOrWhiteSpace(dir))
@@ -179,7 +183,8 @@ public sealed class SqliteMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemory
         if (session is null)
             throw new ArgumentNullException(nameof(session));
 
-        var json = JsonSerializer.Serialize(session, CoreJsonContext.Default.Session);
+        var persistedSession = _redaction?.RedactSession(session) ?? session;
+        var json = JsonSerializer.Serialize(persistedSession, CoreJsonContext.Default.Session);
         var updatedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
         await using var conn = new SqliteConnection(ConnectionString);
@@ -198,7 +203,7 @@ public sealed class SqliteMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemory
         cmd.Parameters.AddWithValue("$updated_at", updatedAt);
 
         await cmd.ExecuteNonQueryAsync(ct);
-        await SyncSessionSearchIndexAsync(conn, session, ct);
+        await SyncSessionSearchIndexAsync(conn, persistedSession, ct);
     }
 
     public async ValueTask DeleteSessionAsync(string sessionId, CancellationToken ct)
@@ -484,12 +489,78 @@ public sealed class SqliteMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemory
         }
     }
 
+    public async ValueTask<IReadOnlyList<MemoryNoteCatalogEntry>> ListNotesAsync(string prefix, int limit, CancellationToken ct)
+    {
+        prefix ??= "";
+        limit = Math.Clamp(limit, 1, 500);
+
+        await using var conn = new SqliteConnection(ConnectionString);
+        await conn.OpenAsync(ct);
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT key, content, updated_at
+            FROM notes
+            WHERE key LIKE $prefix || '%'
+            ORDER BY updated_at DESC, key ASC
+            LIMIT $limit;
+            """;
+        cmd.Parameters.AddWithValue("$prefix", prefix);
+        cmd.Parameters.AddWithValue("$limit", limit);
+
+        var items = new List<MemoryNoteCatalogEntry>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var content = reader.GetString(1);
+            items.Add(new MemoryNoteCatalogEntry
+            {
+                Key = reader.GetString(0),
+                PreviewContent = content.Length <= 4_096 ? content : content[..4_096] + "…",
+                UpdatedAt = DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(2))
+            });
+        }
+
+        return items;
+    }
+
+    public async ValueTask<MemoryNoteCatalogEntry?> GetNoteEntryAsync(string key, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            return null;
+
+        await using var conn = new SqliteConnection(ConnectionString);
+        await conn.OpenAsync(ct);
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT key, content, updated_at
+            FROM notes
+            WHERE key = $key
+            LIMIT 1;
+            """;
+        cmd.Parameters.AddWithValue("$key", key);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+            return null;
+
+        var content = reader.GetString(1);
+        return new MemoryNoteCatalogEntry
+        {
+            Key = reader.GetString(0),
+            PreviewContent = content.Length <= 4_096 ? content : content[..4_096] + "…",
+            UpdatedAt = DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(2))
+        };
+    }
+
     public async ValueTask SaveBranchAsync(SessionBranch branch, CancellationToken ct)
     {
         if (branch is null)
             throw new ArgumentNullException(nameof(branch));
 
-        var json = JsonSerializer.Serialize(branch, CoreJsonContext.Default.SessionBranch);
+        var persistedBranch = _redaction?.RedactBranch(branch) ?? branch;
+        var json = JsonSerializer.Serialize(persistedBranch, CoreJsonContext.Default.SessionBranch);
         var updatedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
         await using var conn = new SqliteConnection(ConnectionString);

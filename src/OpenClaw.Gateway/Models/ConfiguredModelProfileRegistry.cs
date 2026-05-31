@@ -4,11 +4,13 @@ using Microsoft.Extensions.Logging;
 using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Models;
 using OpenClaw.Core.Security;
+using OpenClaw.Core.Setup;
+using OpenClaw.Core.Validation;
 using OpenClaw.Gateway.Extensions;
 
 namespace OpenClaw.Gateway.Models;
 
-internal sealed class ConfiguredModelProfileRegistry : IModelProfileRegistry
+internal sealed class ConfiguredModelProfileRegistry : IModelProfileRegistry, IDisposable
 {
     internal sealed class Registration
     {
@@ -16,12 +18,14 @@ internal sealed class ConfiguredModelProfileRegistry : IModelProfileRegistry
         public required LlmProviderConfig ProviderConfig { get; init; }
         public required string[] ValidationIssues { get; init; }
         public IChatClient? Client { get; init; }
+        public bool OwnsClient { get; init; }
         public bool IsDefault { get; init; }
     }
 
     private readonly ConcurrentDictionary<string, Registration> _registrations = new(StringComparer.OrdinalIgnoreCase);
     private readonly ILogger<ConfiguredModelProfileRegistry> _logger;
     private readonly LlmProviderRegistry? _providerRegistry;
+    private readonly IVideoFrameExtractionService? _videoFrameExtraction;
 
     public ConfiguredModelProfileRegistry(GatewayConfig config, ILogger<ConfiguredModelProfileRegistry> logger)
         : this(config, logger, null)
@@ -31,10 +35,12 @@ internal sealed class ConfiguredModelProfileRegistry : IModelProfileRegistry
     public ConfiguredModelProfileRegistry(
         GatewayConfig config,
         ILogger<ConfiguredModelProfileRegistry> logger,
-        LlmProviderRegistry? providerRegistry)
+        LlmProviderRegistry? providerRegistry,
+        IVideoFrameExtractionService? videoFrameExtraction = null)
     {
         _logger = logger;
         _providerRegistry = providerRegistry;
+        _videoFrameExtraction = videoFrameExtraction;
         DefaultProfileId = BuildRegistrations(config);
     }
 
@@ -67,12 +73,18 @@ internal sealed class ConfiguredModelProfileRegistry : IModelProfileRegistry
                 IsDefault = item.IsDefault,
                 IsImplicit = item.Profile.IsImplicit,
                 IsAvailable = item.Client is not null && item.ValidationIssues.Length == 0,
+                ProviderGateway = ResolveProviderGateway(item.Profile),
+                AuthMode = item.Profile.AuthMode,
+                SendRequestMetadata = item.Profile.SendRequestMetadata,
                 Tags = item.Profile.Tags,
                 Capabilities = item.Profile.Capabilities,
                 PromptCaching = item.Profile.PromptCaching,
                 ValidationIssues = item.ValidationIssues,
                 FallbackProfileIds = item.Profile.FallbackProfileIds,
-                FallbackModels = item.Profile.FallbackModels
+                FallbackModels = item.Profile.FallbackModels,
+                PresetId = item.Profile.PresetId,
+                CompatibilityNotes = BuildCompatibilityNotes(item.Profile),
+                UsesCompatibilityTransport = ProfileUsesCompatibilityTransport(item.Profile)
             })
             .ToArray();
 
@@ -90,13 +102,15 @@ internal sealed class ConfiguredModelProfileRegistry : IModelProfileRegistry
             var issues = ValidateProfile(profile, config).ToArray();
             var providerConfig = BuildProviderConfig(config, profile);
             IChatClient? client = null;
+            var ownsClient = false;
             if (issues.Length == 0)
             {
                 if (!TryResolveRegisteredClient(profile, out client))
                 {
                     try
                     {
-                        client = LlmClientFactory.CreateChatClient(providerConfig);
+                        client = LlmClientFactory.CreateChatClient(providerConfig, config.LocalInference, config.Multimodal, _videoFrameExtraction);
+                        ownsClient = true;
                     }
                     catch (Exception ex)
                     {
@@ -115,6 +129,7 @@ internal sealed class ConfiguredModelProfileRegistry : IModelProfileRegistry
                 ProviderConfig = providerConfig,
                 ValidationIssues = issues,
                 Client = client,
+                OwnsClient = ownsClient,
                 IsDefault = isDefault
             };
 
@@ -133,6 +148,7 @@ internal sealed class ConfiguredModelProfileRegistry : IModelProfileRegistry
                     ProviderConfig = registration.ProviderConfig,
                     ValidationIssues = registration.ValidationIssues,
                     Client = registration.Client,
+                    OwnsClient = registration.OwnsClient,
                     IsDefault = true
                 };
             }
@@ -145,10 +161,13 @@ internal sealed class ConfiguredModelProfileRegistry : IModelProfileRegistry
         => new()
         {
             Id = "default",
+            PresetId = null,
             Provider = config.Llm.Provider,
             Model = config.Llm.Model,
             BaseUrl = config.Llm.Endpoint,
             ApiKey = config.Llm.ApiKey,
+            AuthMode = config.Llm.AuthMode,
+            SendRequestMetadata = config.Llm.SendRequestMetadata,
             FallbackModels = config.Llm.FallbackModels,
             Capabilities = GuessCapabilities(config.Llm.Provider),
             PromptCaching = ClonePromptCaching(config.Llm.PromptCaching)
@@ -157,8 +176,28 @@ internal sealed class ConfiguredModelProfileRegistry : IModelProfileRegistry
     private static ModelCapabilities GuessCapabilities(string providerId)
     {
         var provider = (providerId ?? string.Empty).Trim().ToLowerInvariant();
-        var supportsTools = provider is "openai" or "openai-compatible" or "azure-openai" or "groq" or "together" or "lmstudio" or "anthropic" or "claude" or "anthropic-vertex" or "amazon-bedrock" or "gemini" or "google";
-        var supportsVision = provider is "openai" or "openai-compatible" or "azure-openai" or "gemini" or "google" or "ollama" or "amazon-bedrock";
+        if (provider == "embedded")
+        {
+            return new ModelCapabilities
+            {
+                SupportsTools = false,
+                SupportsVision = false,
+                SupportsJsonSchema = false,
+                SupportsStructuredOutputs = false,
+                SupportsStreaming = true,
+                SupportsParallelToolCalls = false,
+                SupportsReasoningEffort = false,
+                SupportsSystemMessages = true,
+                SupportsImageInput = false,
+                SupportsVideoInput = false,
+                SupportsAudioInput = false,
+                MaxContextTokens = 4096,
+                MaxOutputTokens = 1024
+            };
+        }
+
+        var supportsTools = provider is "openai" or "openai-compatible" or "aperture" or "azure-openai" or "groq" or "together" or "lmstudio" or "anthropic" or "claude" or "anthropic-vertex" or "amazon-bedrock" or "gemini" or "google";
+        var supportsVision = provider is "openai" or "openai-compatible" or "aperture" or "azure-openai" or "gemini" or "google" or "ollama" or "amazon-bedrock";
         var supportsPromptCaching = provider is "openai" or "azure-openai" or "anthropic" or "claude" or "anthropic-vertex" or "gemini" or "google";
         var supportsExplicitCacheRetention = provider is "anthropic" or "claude" or "anthropic-vertex";
         var reportsCacheReadTokens = supportsPromptCaching;
@@ -167,14 +206,15 @@ internal sealed class ConfiguredModelProfileRegistry : IModelProfileRegistry
         {
             SupportsTools = supportsTools,
             SupportsVision = supportsVision,
-            SupportsJsonSchema = provider is "openai" or "openai-compatible" or "azure-openai",
-            SupportsStructuredOutputs = provider is "openai" or "openai-compatible" or "azure-openai",
+            SupportsJsonSchema = provider is "openai" or "openai-compatible" or "aperture" or "azure-openai",
+            SupportsStructuredOutputs = provider is "openai" or "openai-compatible" or "aperture" or "azure-openai",
             SupportsStreaming = true,
-            SupportsParallelToolCalls = provider is "openai" or "openai-compatible" or "azure-openai",
-            SupportsReasoningEffort = provider is "openai" or "openai-compatible" or "azure-openai",
+            SupportsParallelToolCalls = provider is "openai" or "openai-compatible" or "aperture" or "azure-openai",
+            SupportsReasoningEffort = provider is "openai" or "openai-compatible" or "aperture" or "azure-openai",
             SupportsSystemMessages = true,
             SupportsImageInput = supportsVision,
-            SupportsAudioInput = provider is "openai" or "openai-compatible" or "azure-openai",
+            SupportsVideoInput = supportsVision,
+            SupportsAudioInput = provider is "openai" or "openai-compatible" or "aperture" or "azure-openai",
             SupportsPromptCaching = supportsPromptCaching,
             SupportsExplicitCacheRetention = supportsExplicitCacheRetention,
             ReportsCacheReadTokens = reportsCacheReadTokens,
@@ -186,14 +226,17 @@ internal sealed class ConfiguredModelProfileRegistry : IModelProfileRegistry
         => new()
         {
             Id = Normalize(model.Id) ?? "default",
+            PresetId = Normalize(model.PresetId),
             ProviderId = Normalize(model.Provider) ?? config.Llm.Provider,
             ModelId = Normalize(model.Model) ?? config.Llm.Model,
             BaseUrl = ResolveSecretValue(model.BaseUrl),
             ApiKey = ResolveSecretValue(model.ApiKey),
-            Tags = NormalizeDistinct(model.Tags),
+            AuthMode = Normalize(model.AuthMode) ?? Normalize(config.Llm.AuthMode) ?? "bearer",
+            SendRequestMetadata = model.SendRequestMetadata ?? config.Llm.SendRequestMetadata,
+            Tags = MergeTags(model),
             FallbackProfileIds = NormalizeDistinct(model.FallbackProfileIds),
             FallbackModels = NormalizeDistinct(model.FallbackModels),
-            Capabilities = model.Capabilities ?? GuessCapabilities(Normalize(model.Provider) ?? config.Llm.Provider),
+            Capabilities = ResolveCapabilities(config, model),
             PromptCaching = MergePromptCaching(config.Llm.PromptCaching, model.PromptCaching),
             IsImplicit = string.Equals(model.Id, "default", StringComparison.OrdinalIgnoreCase)
                 && config.Models.Profiles.Count == 0
@@ -208,6 +251,7 @@ internal sealed class ConfiguredModelProfileRegistry : IModelProfileRegistry
         if (string.IsNullOrWhiteSpace(profile.ModelId))
             yield return "Model is required.";
         if ((profile.ProviderId.Equals("openai-compatible", StringComparison.OrdinalIgnoreCase) ||
+             profile.ProviderId.Equals("aperture", StringComparison.OrdinalIgnoreCase) ||
              profile.ProviderId.Equals("groq", StringComparison.OrdinalIgnoreCase) ||
              profile.ProviderId.Equals("together", StringComparison.OrdinalIgnoreCase) ||
              profile.ProviderId.Equals("lmstudio", StringComparison.OrdinalIgnoreCase) ||
@@ -217,11 +261,12 @@ internal sealed class ConfiguredModelProfileRegistry : IModelProfileRegistry
             string.IsNullOrWhiteSpace(profile.BaseUrl) &&
             string.IsNullOrWhiteSpace(config.Llm.Endpoint))
         {
-            yield return "BaseUrl is required for OpenAI-compatible, Anthropic Vertex, Amazon Bedrock, and Azure OpenAI profiles unless inherited from OpenClaw:Llm:Endpoint.";
+            yield return "BaseUrl is required for OpenAI-compatible, Aperture, Anthropic Vertex, Amazon Bedrock, and Azure OpenAI profiles unless inherited from OpenClaw:Llm:Endpoint.";
         }
 
         if ((profile.ProviderId.Equals("openai", StringComparison.OrdinalIgnoreCase) ||
              profile.ProviderId.Equals("openai-compatible", StringComparison.OrdinalIgnoreCase) ||
+             profile.ProviderId.Equals("aperture", StringComparison.OrdinalIgnoreCase) ||
              profile.ProviderId.Equals("groq", StringComparison.OrdinalIgnoreCase) ||
              profile.ProviderId.Equals("together", StringComparison.OrdinalIgnoreCase) ||
              profile.ProviderId.Equals("azure-openai", StringComparison.OrdinalIgnoreCase) ||
@@ -231,6 +276,7 @@ internal sealed class ConfiguredModelProfileRegistry : IModelProfileRegistry
              profile.ProviderId.Equals("amazon-bedrock", StringComparison.OrdinalIgnoreCase) ||
              profile.ProviderId.Equals("gemini", StringComparison.OrdinalIgnoreCase) ||
              profile.ProviderId.Equals("google", StringComparison.OrdinalIgnoreCase)) &&
+            !AllowsTailnetIdentityAuth(profile.ProviderId, profile.AuthMode) &&
             string.IsNullOrWhiteSpace(profile.ApiKey) &&
             string.IsNullOrWhiteSpace(config.Llm.ApiKey))
         {
@@ -244,7 +290,9 @@ internal sealed class ConfiguredModelProfileRegistry : IModelProfileRegistry
             Provider = profile.ProviderId,
             Model = profile.ModelId,
             ApiKey = profile.ApiKey ?? config.Llm.ApiKey,
-            Endpoint = profile.BaseUrl ?? config.Llm.Endpoint,
+            Endpoint = ResolveEndpoint(config, profile),
+            AuthMode = profile.AuthMode,
+            SendRequestMetadata = profile.SendRequestMetadata,
             FallbackModels = profile.FallbackModels,
             MaxTokens = profile.Capabilities.MaxOutputTokens > 0 ? profile.Capabilities.MaxOutputTokens : config.Llm.MaxTokens,
             Temperature = config.Llm.Temperature,
@@ -265,6 +313,122 @@ internal sealed class ConfiguredModelProfileRegistry : IModelProfileRegistry
 
         var resolved = SecretResolver.Resolve(value);
         return string.IsNullOrWhiteSpace(resolved) ? null : resolved.Trim();
+    }
+
+    private static string[] MergeTags(ModelProfileConfig model)
+    {
+        var configured = NormalizeDistinct(model.Tags);
+        if (!LocalModelPresetCatalog.TryGet(model.PresetId, out var preset) || preset is null)
+            return configured;
+
+        return configured
+            .Concat(preset.Tags)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static ModelCapabilities ResolveCapabilities(GatewayConfig config, ModelProfileConfig model)
+    {
+        ModelCapabilities capabilities;
+        if (model.Capabilities is not null)
+        {
+            capabilities = CloneCapabilities(model.Capabilities);
+        }
+        else if (LocalModelPresetCatalog.TryGet(model.PresetId, out var preset) && preset is not null)
+        {
+            capabilities = CloneCapabilities(preset.Capabilities);
+        }
+        else
+        {
+            capabilities = GuessCapabilities(Normalize(model.Provider) ?? config.Llm.Provider);
+        }
+
+        return ApplyRuntimeCapabilityConstraints(config, model, capabilities);
+    }
+
+    private static ModelCapabilities ApplyRuntimeCapabilityConstraints(
+        GatewayConfig config,
+        ModelProfileConfig model,
+        ModelCapabilities capabilities)
+    {
+        var provider = Normalize(model.Provider)
+            ?? (LocalModelPresetCatalog.TryGet(model.PresetId, out var preset) ? preset?.Provider : null)
+            ?? config.Llm.Provider;
+        if (!provider.Equals("embedded", StringComparison.OrdinalIgnoreCase))
+            return capabilities;
+
+        if (!config.Multimodal.Enabled ||
+            !config.Multimodal.Video.Enabled ||
+            !capabilities.SupportsImageInput)
+        {
+            capabilities.SupportsVideoInput = false;
+        }
+
+        return capabilities;
+    }
+
+    private static ModelCapabilities CloneCapabilities(ModelCapabilities source)
+    {
+        return new ModelCapabilities
+        {
+            SupportsTools = source.SupportsTools,
+            SupportsVision = source.SupportsVision,
+            SupportsJsonSchema = source.SupportsJsonSchema,
+            SupportsStructuredOutputs = source.SupportsStructuredOutputs,
+            SupportsStreaming = source.SupportsStreaming,
+            SupportsParallelToolCalls = source.SupportsParallelToolCalls,
+            SupportsReasoningEffort = source.SupportsReasoningEffort,
+            SupportsSystemMessages = source.SupportsSystemMessages,
+            SupportsImageInput = source.SupportsImageInput,
+            SupportsVideoInput = source.SupportsVideoInput,
+            SupportsAudioInput = source.SupportsAudioInput,
+            SupportsPromptCaching = source.SupportsPromptCaching,
+            SupportsExplicitCacheRetention = source.SupportsExplicitCacheRetention,
+            ReportsCacheReadTokens = source.ReportsCacheReadTokens,
+            ReportsCacheWriteTokens = source.ReportsCacheWriteTokens,
+            MaxContextTokens = source.MaxContextTokens,
+            MaxOutputTokens = source.MaxOutputTokens
+        };
+    }
+
+    private static string? ResolveEndpoint(GatewayConfig config, ModelProfile profile)
+    {
+        var endpoint = profile.BaseUrl ?? config.Llm.Endpoint;
+        return profile.ProviderId.Equals("ollama", StringComparison.OrdinalIgnoreCase)
+            ? OllamaEndpointNormalizer.NormalizeBaseUrl(endpoint)
+            : endpoint;
+    }
+
+    private static bool ProfileUsesCompatibilityTransport(ModelProfile profile)
+        => profile.ProviderId.Equals("ollama", StringComparison.OrdinalIgnoreCase) &&
+           OllamaEndpointNormalizer.UsesCompatibilityEndpoint(profile.BaseUrl);
+
+    private static string? ResolveProviderGateway(ModelProfile profile)
+        => IsApertureProfile(profile) ? "Aperture" : null;
+
+    private static bool IsApertureProfile(ModelProfile profile)
+        => profile.ProviderId.Equals("aperture", StringComparison.OrdinalIgnoreCase) ||
+           profile.Tags.Contains("aperture", StringComparer.OrdinalIgnoreCase) ||
+           (!string.IsNullOrWhiteSpace(profile.BaseUrl) &&
+            profile.BaseUrl.Contains("aperture", StringComparison.OrdinalIgnoreCase));
+
+    private static bool AllowsTailnetIdentityAuth(string providerId, string? authMode)
+        => (providerId.Equals("aperture", StringComparison.OrdinalIgnoreCase) ||
+            providerId.Equals("openai-compatible", StringComparison.OrdinalIgnoreCase)) &&
+           string.Equals(authMode?.Trim(), "tailnet-identity", StringComparison.OrdinalIgnoreCase);
+
+    private static IReadOnlyList<string> BuildCompatibilityNotes(ModelProfile profile)
+    {
+        var notes = new List<string>();
+        if (profile.ProviderId.Equals("ollama", StringComparison.OrdinalIgnoreCase) && ProfileUsesCompatibilityTransport(profile))
+            notes.Add("Using legacy /v1 compatibility endpoint; migrate to the native Ollama base URL.");
+        if (profile.ProviderId.Equals("ollama", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(profile.PresetId))
+            notes.Add("No local preset is configured; setup and doctor guidance will be more limited until a PresetId is added.");
+
+        if (LocalModelPresetCatalog.TryGet(profile.PresetId, out var preset) && preset is not null)
+            notes.AddRange(preset.CompatibilityNotes);
+
+        return notes.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
     private static string[] NormalizeDistinct(IEnumerable<string>? values)
@@ -319,5 +483,14 @@ internal sealed class ConfiguredModelProfileRegistry : IModelProfileRegistry
 
         client = registration.Client;
         return true;
+    }
+
+    public void Dispose()
+    {
+        foreach (var registration in _registrations.Values.Distinct())
+        {
+            if (registration.OwnsClient)
+                registration.Client?.Dispose();
+        }
     }
 }

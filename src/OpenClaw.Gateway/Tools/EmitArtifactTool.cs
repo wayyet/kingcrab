@@ -2,6 +2,7 @@ using System.Text.Json;
 using OpenClaw.Channels;
 using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Models;
+using OpenClaw.Agent.Tools;
 using OpenClaw.Core.Security;
 
 namespace OpenClaw.Gateway.Tools;

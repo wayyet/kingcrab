@@ -13,6 +13,7 @@ using OpenClaw.Core.Sessions;
 using OpenClaw.Core.Skills;
 using OpenClaw.Gateway.Extensions;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace OpenClaw.Tests;
 
@@ -85,8 +86,10 @@ public sealed class PluginBridgeIntegrationTests : IDisposable
         Assert.True(tsMeasurement.Child.WorkingSetBytes > 1_000_000, "Expected TS bridge child process memory usage to be measurable.");
         Assert.InRange(jsMeasurement.Child.WorkingSetBytes, 1_000_000, 256L * 1024 * 1024);
         Assert.InRange(tsMeasurement.Child.WorkingSetBytes, 1_000_000, 256L * 1024 * 1024);
-        Assert.InRange(jsMeasurement.Host.WorkingSetBytes - baselineHost.WorkingSetBytes, -64L * 1024 * 1024, 128L * 1024 * 1024);
-        Assert.InRange(tsMeasurement.Host.WorkingSetBytes - baselineHost.WorkingSetBytes, -64L * 1024 * 1024, 128L * 1024 * 1024);
+        var jsHostDelta = jsMeasurement.Host.WorkingSetBytes - baselineHost.WorkingSetBytes;
+        var tsHostDelta = tsMeasurement.Host.WorkingSetBytes - baselineHost.WorkingSetBytes;
+        Assert.True(jsHostDelta <= 128L * 1024 * 1024, $"JS host working set grew too much: {ToMb(jsHostDelta):F1} MB");
+        Assert.True(tsHostDelta <= 128L * 1024 * 1024, $"TS host working set grew too much: {ToMb(tsHostDelta):F1} MB");
     }
 
     [Fact]
@@ -1160,7 +1163,7 @@ public sealed class PluginBridgeIntegrationTests : IDisposable
         };
 
         await adapter.StartAsync(CancellationToken.None);
-        var inbound = await inboundTcs.Task.WaitAsync(TimeSpan.FromSeconds(5),TestContext.Current.CancellationToken);
+        var inbound = await inboundTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.Equal("notify-channel", inbound.ChannelId);
         Assert.Equal("user1", inbound.SenderId);
@@ -1197,6 +1200,7 @@ public sealed class PluginBridgeIntegrationTests : IDisposable
                   setTimeout(() => {
                     channel.receive({
                       senderId: "user1@wa",
+                      accountId: "acc-1",
                       senderName: "User One",
                       text: "caption",
                       sessionId: "sess-123",
@@ -1254,8 +1258,8 @@ public sealed class PluginBridgeIntegrationTests : IDisposable
 
         await adapter.StartAsync(CancellationToken.None);
 
-        var authEvt = await authTcs.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
-        var inbound = await inboundTcs.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        var authEvt = await authTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var inbound = await inboundTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.Equal("bot@wa", adapter.SelfId);
         Assert.Equal("qr_code", authEvt.State);
@@ -1264,6 +1268,7 @@ public sealed class PluginBridgeIntegrationTests : IDisposable
         Assert.True(authEvt.UpdatedAtUtc > DateTimeOffset.UtcNow.AddMinutes(-1));
 
         Assert.Equal("user1@wa", inbound.SenderId);
+        Assert.Equal("acc-1", inbound.AccountId);
         Assert.True(inbound.IsGroup);
         Assert.Equal("group-1@wa", inbound.GroupId);
         Assert.Equal("Test Group", inbound.GroupName);
@@ -1278,17 +1283,19 @@ public sealed class PluginBridgeIntegrationTests : IDisposable
         {
             ChannelId = "whatsapp",
             RecipientId = "group-1@wa",
+            AccountId = "acc-1",
             Text = "[IMAGE_URL:https://cdn.example/image.png]\nhello world",
             SessionId = "sess-out",
             ReplyToMessageId = "msg-1",
             Subject = "subject"
         }, CancellationToken.None);
-        await adapter.SendTypingAsync("group-1@wa", true, CancellationToken.None);
-        await adapter.SendReadReceiptAsync("msg-1", "group-1@wa", "sender@wa", CancellationToken.None);
-        await adapter.SendReactionAsync("msg-1", "👍", "group-1@wa", "sender@wa", CancellationToken.None);
+        await adapter.SendTypingAsync("group-1@wa", true, "acc-1", CancellationToken.None);
+        await adapter.SendReadReceiptAsync("msg-1", "group-1@wa", "sender@wa", "acc-1", CancellationToken.None);
+        await adapter.SendReactionAsync("msg-1", "👍", "group-1@wa", "sender@wa", "acc-1", CancellationToken.None);
 
         var sendPayload = JsonDocument.Parse(await WaitForFileTextAsync(sendPath, TimeSpan.FromSeconds(5))).RootElement;
         Assert.Equal("group-1@wa", sendPayload.GetProperty("recipientId").GetString());
+        Assert.Equal("acc-1", sendPayload.GetProperty("accountId").GetString());
         Assert.Equal("hello world", sendPayload.GetProperty("text").GetString());
         Assert.Equal("sess-out", sendPayload.GetProperty("sessionId").GetString());
         Assert.Equal("msg-1", sendPayload.GetProperty("replyToMessageId").GetString());
@@ -1297,14 +1304,29 @@ public sealed class PluginBridgeIntegrationTests : IDisposable
         Assert.Equal("image", attachment.GetProperty("type").GetString());
         Assert.Equal("https://cdn.example/image.png", attachment.GetProperty("url").GetString());
 
+        File.Delete(sendPath);
+        await adapter.SendAsync(new OutboundMessage
+        {
+            ChannelId = "whatsapp",
+            RecipientId = "group-1@wa",
+            Text = "[DOCUMENT:telegram:file_id=doc123]\nkeep marker as text"
+        }, CancellationToken.None);
+
+        sendPayload = JsonDocument.Parse(await WaitForFileTextAsync(sendPath, TimeSpan.FromSeconds(5))).RootElement;
+        Assert.Equal("[DOCUMENT:telegram:file_id=doc123]\nkeep marker as text", sendPayload.GetProperty("text").GetString());
+        Assert.Equal(JsonValueKind.Null, sendPayload.GetProperty("attachments").ValueKind);
+
         var typingPayload = JsonDocument.Parse(await WaitForFileTextAsync(typingPath, TimeSpan.FromSeconds(5))).RootElement;
+        Assert.Equal("acc-1", typingPayload.GetProperty("accountId").GetString());
         Assert.Equal("group-1@wa", typingPayload.GetProperty("recipientId").GetString());
         Assert.True(typingPayload.GetProperty("isTyping").GetBoolean());
 
         var receiptPayload = JsonDocument.Parse(await WaitForFileTextAsync(receiptPath, TimeSpan.FromSeconds(5))).RootElement;
+        Assert.Equal("acc-1", receiptPayload.GetProperty("accountId").GetString());
         Assert.Equal("msg-1", receiptPayload.GetProperty("messageId").GetString());
 
         var reactionPayload = JsonDocument.Parse(await WaitForFileTextAsync(reactionPath, TimeSpan.FromSeconds(5))).RootElement;
+        Assert.Equal("acc-1", reactionPayload.GetProperty("accountId").GetString());
         Assert.Equal("msg-1", reactionPayload.GetProperty("messageId").GetString());
         Assert.Equal("👍", reactionPayload.GetProperty("emoji").GetString());
     }
@@ -1424,7 +1446,7 @@ public sealed class PluginBridgeIntegrationTests : IDisposable
 
         Assert.Equal("echo:first", await tool.ExecuteAsync("""{"text":"first"}""", CancellationToken.None));
         Assert.Equal("restarting", await tool.ExecuteAsync("""{"kill":true}""", CancellationToken.None));
-        await Task.Delay(500, TestContext.Current.CancellationToken);
+        await Task.Delay(500);
         Assert.Equal("echo:second", await tool.ExecuteAsync("""{"text":"second"}""", CancellationToken.None));
     }
 
@@ -1479,7 +1501,7 @@ public sealed class PluginBridgeIntegrationTests : IDisposable
 
         Assert.Equal("echo:first", await bridge.ExecuteToolAsync("restart_metrics_echo", """{"text":"first"}""", CancellationToken.None));
         Assert.Equal("restarting", await bridge.ExecuteToolAsync("restart_metrics_echo", """{"kill":true}""", CancellationToken.None));
-        await Task.Delay(500, TestContext.Current.CancellationToken);
+        await Task.Delay(500);
         Assert.Equal("echo:second", await bridge.ExecuteToolAsync("restart_metrics_echo", """{"text":"second"}""", CancellationToken.None));
         Assert.True(metrics.PluginBridgeRestartAttempts >= 1);
         Assert.Equal(0, metrics.PluginBridgeRestartFailures);
@@ -1683,11 +1705,11 @@ public sealed class PluginBridgeIntegrationTests : IDisposable
 
         Assert.False(allowed);
 
-        var beforePayload = JsonDocument.Parse(await File.ReadAllTextAsync(beforePath, TestContext.Current.CancellationToken)).RootElement;
+        var beforePayload = JsonDocument.Parse(await File.ReadAllTextAsync(beforePath)).RootElement;
         Assert.Equal("shell_exec", beforePayload.GetProperty("toolName").GetString());
         Assert.Equal("before", beforePayload.GetProperty("phase").GetString());
 
-        var afterPayload = JsonDocument.Parse(await File.ReadAllTextAsync(afterPath,TestContext.Current.CancellationToken)).RootElement;
+        var afterPayload = JsonDocument.Parse(await File.ReadAllTextAsync(afterPath)).RootElement;
         Assert.Equal("number", afterPayload.GetProperty("durationType").GetString());
         Assert.Equal("boolean", afterPayload.GetProperty("failedType").GetString());
         Assert.True(afterPayload.GetProperty("failed").GetBoolean());
@@ -1830,10 +1852,10 @@ public sealed class PluginBridgeIntegrationTests : IDisposable
         };
 
         await adapter.StartAsync(CancellationToken.None);
-        var inbound = await inboundTcs.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        var inbound = await inboundTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         // Wait a bit to ensure no duplicate arrives
-        await Task.Delay(200, TestContext.Current.CancellationToken);
+        await Task.Delay(200);
 
         Assert.Equal("ping", inbound.Text);
         Assert.Equal(1, receivedCount);

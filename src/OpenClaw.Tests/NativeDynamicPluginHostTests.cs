@@ -8,7 +8,6 @@ using OpenClaw.Core.Pipeline;
 using OpenClaw.Core.Plugins;
 using OpenClaw.Core.Sessions;
 using OpenClaw.Core.Skills;
-using OpenClaw.Plugins.EmploymentCoachWorkflow;
 using OpenClaw.TestPluginFixtures;
 using Xunit;
 
@@ -124,6 +123,41 @@ public sealed class NativeDynamicPluginHostTests : IDisposable
     }
 
     [Fact]
+    public async Task DisposeAsync_ClearsMemoryProviderRegistrations()
+    {
+        var pluginDir = CreateNativePlugin(
+            "native-dynamic-memory",
+            typeof(ToolAndCommandPlugin).Assembly.Location,
+            typeof(ToolAndCommandPlugin).FullName!,
+            ["memory"]);
+
+        var config = new NativeDynamicPluginsConfig
+        {
+            Enabled = true,
+            Load = new PluginLoadConfig { Paths = [pluginDir] },
+            Entries = new Dictionary<string, PluginEntryConfig>(StringComparer.Ordinal)
+            {
+                ["native-dynamic-memory"] = new()
+                {
+                    Config = JsonSerializer.SerializeToElement(new { memoryProviderId = "mempalace" })
+                }
+            }
+        };
+
+        var host = new NativeDynamicPluginHost(
+            config,
+            RuntimeModeResolver.Resolve(new RuntimeConfig { Mode = "jit" }, dynamicCodeSupported: true),
+            new TestLogger());
+
+        var providers = await host.LoadMemoryProvidersAsync(null, CancellationToken.None);
+        Assert.Single(providers);
+
+        await host.DisposeAsync();
+
+        Assert.Empty(host.MemoryProviderRegistrations);
+    }
+
+    [Fact]
     public async Task LoadAsync_AssemblyPathOutsideRoot_IsRejected()
     {
         var pluginDir = Path.Combine(_tempDir, "native-dynamic-escape");
@@ -158,59 +192,12 @@ public sealed class NativeDynamicPluginHostTests : IDisposable
         Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "assembly_outside_root");
     }
 
-    [Fact]
-    public async Task LoadAsync_JitMode_LoadsEmploymentCoachWorkflowPluginSkills()
-    {
-        var pluginDir = CreateNativePlugin(
-            "employment-coach-workflow",
-            typeof(EmploymentCoachWorkflowPlugin).Assembly.Location,
-            typeof(EmploymentCoachWorkflowPlugin).AssemblyQualifiedName!,
-            ["skills"],
-            includeSkills: false,
-            skillSourceRoot: FindEmploymentCoachWorkflowSkillRoot());
-
-        var config = new NativeDynamicPluginsConfig
-        {
-            Enabled = true,
-            Load = new PluginLoadConfig { Paths = [pluginDir] },
-            Entries = new Dictionary<string, PluginEntryConfig>(StringComparer.Ordinal)
-            {
-                ["employment-coach-workflow"] = new()
-            }
-        };
-
-        await using var host = new NativeDynamicPluginHost(
-            config,
-            RuntimeModeResolver.Resolve(new RuntimeConfig { Mode = "jit" }, dynamicCodeSupported: true),
-            new TestLogger());
-
-        var tools = await host.LoadAsync(null, CancellationToken.None);
-
-        Assert.Empty(tools);
-        var report = Assert.Single(host.Reports, r => r.PluginId == "employment-coach-workflow" && r.Loaded);
-        Assert.Equal(0, report.ToolCount);
-        Assert.DoesNotContain(PluginCapabilityPolicy.Tools, report.RequestedCapabilities);
-        Assert.Contains(PluginCapabilityPolicy.Skills, report.RequestedCapabilities);
-
-        var skills = SkillLoader.LoadAll(
-            new SkillsConfig { Load = new SkillLoadConfig { IncludeBundled = false, IncludeManaged = false, IncludeWorkspace = false } },
-            null,
-            new TestLogger(),
-            host.SkillRoots);
-        var skillNames = skills.Select(skill => skill.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        Assert.Contains("employment-coach-conversation", skillNames);
-        Assert.Contains("external-config", skillNames);
-        Assert.Contains("skill-generation", skillNames);
-        Assert.Contains("ontology-extraction", skillNames);
-    }
-
     private string CreateNativePlugin(
         string id,
         string assemblyPath,
         string typeName,
         string[] capabilities,
-        bool includeSkills = false,
-        string? skillSourceRoot = null)
+        bool includeSkills = false)
     {
         var pluginDir = Path.Combine(_tempDir, id);
         Directory.CreateDirectory(pluginDir);
@@ -233,13 +220,6 @@ public sealed class NativeDynamicPluginHostTests : IDisposable
                 """);
         }
 
-                if (!string.IsNullOrWhiteSpace(skillSourceRoot))
-                {
-                        CopyDirectory(skillSourceRoot, Path.Combine(pluginDir, "skills"));
-                }
-
-                var hasSkills = includeSkills || !string.IsNullOrWhiteSpace(skillSourceRoot);
-
         var manifest = $$"""
         {
           "id": "{{id}}",
@@ -247,43 +227,12 @@ public sealed class NativeDynamicPluginHostTests : IDisposable
           "version": "1.0.0",
           "assemblyPath": {{JsonSerializer.Serialize(localAssemblyName)}},
           "typeName": {{JsonSerializer.Serialize(typeName)}},
-                    "capabilities": {{JsonSerializer.Serialize(capabilities)}}{{(hasSkills ? ",\n  \"skills\": [\"skills\"]" : "")}},
+          "capabilities": {{JsonSerializer.Serialize(capabilities)}}{{(includeSkills ? ",\n  \"skills\": [\"skills\"]" : "")}},
           "jitOnly": true
         }
         """;
         File.WriteAllText(Path.Combine(pluginDir, "openclaw.native-plugin.json"), manifest);
         return pluginDir;
-    }
-
-    private static string FindEmploymentCoachWorkflowSkillRoot()
-    {
-        var current = AppContext.BaseDirectory;
-        while (!string.IsNullOrWhiteSpace(current))
-        {
-            var candidate = Path.Combine(current, "src", "OpenClaw.Plugins.EmploymentCoachWorkflow", "skills");
-            if (Directory.Exists(candidate))
-                return candidate;
-
-            current = Directory.GetParent(current)?.FullName;
-        }
-
-        throw new DirectoryNotFoundException("Could not locate OpenClaw.Plugins.EmploymentCoachWorkflow skills directory.");
-    }
-
-    private static void CopyDirectory(string sourceDir, string destinationDir)
-    {
-        Directory.CreateDirectory(destinationDir);
-        foreach (var directory in Directory.GetDirectories(sourceDir, "*", SearchOption.AllDirectories))
-        {
-            var relative = Path.GetRelativePath(sourceDir, directory);
-            Directory.CreateDirectory(Path.Combine(destinationDir, relative));
-        }
-
-        foreach (var file in Directory.GetFiles(sourceDir, "*", SearchOption.AllDirectories))
-        {
-            var relative = Path.GetRelativePath(sourceDir, file);
-            File.Copy(file, Path.Combine(destinationDir, relative), overwrite: true);
-        }
     }
 
     private sealed class TestLogger : ILogger

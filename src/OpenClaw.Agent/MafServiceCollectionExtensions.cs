@@ -10,7 +10,8 @@ public static class MafServiceCollectionExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        services.AddSingleton<IOptions<MafOptions>>(_ => Options.Create(CreateOptions(configuration)));
+        var options = CreateOptions(configuration);
+        services.AddSingleton<IOptions<MafOptions>>(_ => Options.Create(options));
         services.AddSingleton<MafTelemetryAdapter>();
         services.AddSingleton<MafSessionStateStore>();
         services.AddSingleton<MafAgentFactory>();
@@ -21,7 +22,15 @@ public static class MafServiceCollectionExtensions
     private static MafOptions CreateOptions(IConfiguration configuration)
     {
         var section = configuration.GetSection(MafOptions.SectionName);
-        var options = new MafOptions();
+        var legacySection = configuration.GetSection(MafOptions.LegacySectionName);
+        var legacySectionUsed = !section.Exists() && legacySection.Exists();
+        if (legacySectionUsed)
+            section = legacySection;
+
+        var options = new MafOptions
+        {
+            LegacySectionUsed = legacySectionUsed
+        };
 
         var agentName = section["AgentName"];
         if (!string.IsNullOrWhiteSpace(agentName))

@@ -17,7 +17,8 @@ public sealed class GatewayBootstrapExtensionsTests
                 ["OpenClaw:Tooling:AllowShell"] = "false",
                 ["OpenClaw:Tooling:AllowedReadRoots:0"] = "/app/workspace",
                 ["OpenClaw:Tooling:AllowedWriteRoots:0"] = "/app/workspace",
-                ["OpenClaw:Plugins:Enabled"] = "false"
+                ["OpenClaw:Plugins:Enabled"] = "false",
+                ["OpenClaw:Canvas:Enabled"] = "false"
             })
             .Build();
 
@@ -29,35 +30,71 @@ public sealed class GatewayBootstrapExtensionsTests
     }
 
     [Fact]
-    public void LoadGatewayConfig_BindsHandoffWorkflows()
+    public void ValidateOptionalFeatureCompatibility_OpenSandboxProviderConfigured_MatchesBuildFlag()
     {
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+        var config = new OpenClaw.Core.Models.GatewayConfig
+        {
+            Sandbox = new OpenClaw.Core.Models.SandboxConfig
             {
-                ["OpenClaw:Handoff:DefaultWorkflowId"] = "review-workflow",
-                ["OpenClaw:Handoff:Workflows:review-workflow:Kind"] = "review_handoff",
-                ["OpenClaw:Handoff:Workflows:review-workflow:DefaultStatus"] = "queued",
-                ["OpenClaw:Handoff:Workflows:review-workflow:NewItemStatuses:0"] = "queued",
-                ["OpenClaw:Handoff:Workflows:review-workflow:Stages:0"] = "triage",
-                ["OpenClaw:Handoff:Workflows:review-workflow:TargetSkills:0"] = "reviewer",
-                ["OpenClaw:Handoff:Workflows:review-workflow:Statuses:0"] = "queued",
-                ["OpenClaw:Handoff:Workflows:review-workflow:Statuses:1"] = "done",
-                ["OpenClaw:Handoff:Workflows:review-workflow:Transitions:queued:0"] = "done",
-                ["OpenClaw:Handoff:Workflows:review-workflow:IdPrefixes:triage"] = "r"
-            })
-            .Build();
+                Provider = OpenClaw.Core.Models.SandboxProviderNames.OpenSandbox,
+                Endpoint = "http://127.0.0.1:5000"
+            }
+        };
 
-        var config = GatewayBootstrapExtensions.LoadGatewayConfig(configuration);
+        var errors = GatewayBootstrapExtensions.ValidateOptionalFeatureCompatibility(config);
 
-        Assert.Equal("review-workflow", config.Handoff.DefaultWorkflowId);
-        var workflow = Assert.Single(config.Handoff.Workflows);
-        Assert.Equal("review-workflow", workflow.Key);
-        Assert.Equal("review_handoff", workflow.Value.Kind);
-        Assert.Equal(["queued"], workflow.Value.NewItemStatuses);
-        Assert.Equal(["triage"], workflow.Value.Stages);
-        Assert.Equal(["reviewer"], workflow.Value.TargetSkills);
-        Assert.Equal(["queued", "done"], workflow.Value.Statuses);
-        Assert.Equal(["done"], workflow.Value.Transitions["queued"]);
-        Assert.Equal("r", workflow.Value.IdPrefixes["triage"]);
+        if (OptionalFeatureSupport.OpenSandboxEnabled)
+        {
+            Assert.Empty(errors);
+        }
+        else
+        {
+            Assert.Contains(errors, error => error.Contains("OpenClawEnableOpenSandbox", StringComparison.Ordinal));
+            Assert.Contains(errors, error => error.Contains("Sandbox.Provider='None'", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public void ValidateOptionalFeatureCompatibility_SandboxDisabled_ReturnsNoError()
+    {
+        var config = new OpenClaw.Core.Models.GatewayConfig
+        {
+            Sandbox = new OpenClaw.Core.Models.SandboxConfig
+            {
+                Provider = OpenClaw.Core.Models.SandboxProviderNames.None
+            }
+        };
+
+        var errors = GatewayBootstrapExtensions.ValidateOptionalFeatureCompatibility(config);
+
+        Assert.Empty(errors);
+    }
+
+    [Fact]
+    public void CheckedInGatewayConfigs_DisableSandboxByDefault()
+    {
+        var repoRoot = FindRepositoryRoot();
+        var appSettings = File.ReadAllText(Path.Combine(repoRoot, "src", "OpenClaw.Gateway", "appsettings.json"));
+        var productionSettings = File.ReadAllText(Path.Combine(repoRoot, "src", "OpenClaw.Gateway", "appsettings.Production.json"));
+
+        Assert.Contains(@"""Provider"": ""None""", appSettings, StringComparison.Ordinal);
+        Assert.Contains(@"""Provider"": ""None""", productionSettings, StringComparison.Ordinal);
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current is not null)
+        {
+            if (File.Exists(Path.Combine(current.FullName, "README.md")) &&
+                Directory.Exists(Path.Combine(current.FullName, "src")))
+            {
+                return current.FullName;
+            }
+
+            current = current.Parent;
+        }
+
+        throw new InvalidOperationException("Could not locate repository root from test output directory.");
     }
 }

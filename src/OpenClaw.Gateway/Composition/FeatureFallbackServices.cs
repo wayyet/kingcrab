@@ -3,6 +3,9 @@ using Microsoft.Extensions.Logging.Abstractions;
 using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Features;
 using OpenClaw.Core.Models;
+using OpenClaw.Core.Observability;
+using OpenClaw.Core.Security;
+using OpenClaw.Gateway;
 using OpenClaw.Gateway.Bootstrap;
 
 namespace OpenClaw.Gateway.Composition;
@@ -29,7 +32,19 @@ internal static class FeatureFallbackServices
            ?? new GatewayAutomationService(
                startup.Config,
                services.GetService<IAutomationStore>() ?? fallbackFeatureStore,
-               heartbeat);
+               heartbeat,
+               services.GetService<AutomationRunCoordinator>()
+               ?? new AutomationRunCoordinator(
+                   services.GetService<IAutomationStore>() ?? fallbackFeatureStore,
+                   services.GetService<ContractGovernanceService>()
+                   ?? new ContractGovernanceService(
+                       startup,
+                       new ContractStore(startup.Config.Memory.StoragePath, NullLogger<ContractStore>.Instance),
+                       new RuntimeEventStore(startup.Config.Memory.StoragePath, NullLogger<RuntimeEventStore>.Instance),
+                       services.GetService<ProviderUsageTracker>() ?? new ProviderUsageTracker(),
+                       NullLogger<ContractGovernanceService>.Instance),
+                   NullLogger<AutomationRunCoordinator>.Instance),
+               proposalStore: services.GetService<ILearningProposalStore>() ?? fallbackFeatureStore);
 
     public static LearningService ResolveLearningService(
         GatewayStartupContext startup,
@@ -43,6 +58,52 @@ internal static class FeatureFallbackServices
                services.GetService<IAutomationStore>() ?? fallbackFeatureStore,
                ResolveSessionSearchStore(services),
                NullLogger<LearningService>.Instance);
+
+    public static HarnessContractService ResolveHarnessContractService(
+        GatewayStartupContext startup,
+        IServiceProvider services)
+        => services.GetService<HarnessContractService>()
+           ?? new HarnessContractService(
+               services.GetService<IHarnessContractStore>()
+               ?? new FileHarnessContractStore(startup.Config.Memory.StoragePath),
+               services.GetService<RuntimeEventStore>()
+               ?? new RuntimeEventStore(startup.Config.Memory.StoragePath, NullLogger<RuntimeEventStore>.Instance),
+               NullLogger<HarnessContractService>.Instance);
+
+    public static EvidenceBundleService ResolveEvidenceBundleService(
+        GatewayStartupContext startup,
+        IServiceProvider services)
+        => services.GetService<EvidenceBundleService>()
+           ?? new EvidenceBundleService(
+               services.GetService<IEvidenceBundleStore>()
+               ?? new FileEvidenceBundleStore(startup.Config.Memory.StoragePath),
+               services.GetService<RuntimeEventStore>()
+               ?? new RuntimeEventStore(startup.Config.Memory.StoragePath, NullLogger<RuntimeEventStore>.Instance),
+               NullLogger<EvidenceBundleService>.Instance);
+
+    public static GovernanceLedgerService ResolveGovernanceLedgerService(
+        GatewayStartupContext startup,
+        IServiceProvider services)
+        => services.GetService<GovernanceLedgerService>()
+           ?? new GovernanceLedgerService(
+               services.GetService<IGovernanceLedgerStore>()
+               ?? new FileGovernanceLedgerStore(startup.Config.Memory.StoragePath),
+               services.GetService<RuntimeEventStore>()
+               ?? new RuntimeEventStore(startup.Config.Memory.StoragePath, NullLogger<RuntimeEventStore>.Instance),
+               services.GetService<IRedactionPipeline>()
+               ?? new RedactionPipeline([new BaselineSecretRedactor()]),
+               NullLogger<GovernanceLedgerService>.Instance);
+
+    public static SharedHarnessStateService ResolveSharedHarnessStateService(
+        GatewayStartupContext startup,
+        IServiceProvider services)
+        => services.GetService<SharedHarnessStateService>()
+           ?? new SharedHarnessStateService(
+               services.GetService<ISharedHarnessStateStore>()
+               ?? new FileSharedHarnessStateStore(startup.Config.Memory.StoragePath),
+               services.GetService<RuntimeEventStore>()
+               ?? new RuntimeEventStore(startup.Config.Memory.StoragePath, NullLogger<RuntimeEventStore>.Instance),
+               NullLogger<SharedHarnessStateService>.Instance);
 }
 
 internal sealed class EmptySessionSearchStore : ISessionSearchStore

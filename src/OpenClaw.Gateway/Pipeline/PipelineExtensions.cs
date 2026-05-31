@@ -1,6 +1,8 @@
 using System.Net;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
 using OpenClaw.Channels;
 using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Middleware;
@@ -16,12 +18,62 @@ internal static class PipelineExtensions
     public static void UseOpenClawPipeline(
         this WebApplication app,
         GatewayStartupContext startup,
-        GatewayAppRuntime runtime)
+        GatewayAppRuntime runtime,
+        StartupLaunchOptions launchOptions,
+        LocalStartupSession? localSession,
+        LocalStartupStateStore stateStore)
     {
         ConfigureForwardedHeaders(app, startup);
         ConfigureCors(app, runtime);
 
         app.UseStaticFiles();
+
+        var dashboardPhysicalPath = Path.Combine(AppContext.BaseDirectory, "wwwroot", "dashboard");
+        if (Directory.Exists(dashboardPhysicalPath))
+        {
+            var contentTypeProvider = new FileExtensionContentTypeProvider();
+            var dashboardRoot = Path.GetFullPath(dashboardPhysicalPath);
+            if (!dashboardRoot.EndsWith(Path.DirectorySeparatorChar))
+                dashboardRoot += Path.DirectorySeparatorChar;
+
+            app.Map("/dashboard", dashboardApp =>
+            {
+                dashboardApp.UseStaticFiles(new StaticFileOptions
+                {
+                    FileProvider = new PhysicalFileProvider(dashboardPhysicalPath),
+                    ContentTypeProvider = contentTypeProvider
+                });
+
+                dashboardApp.Run(async context =>
+                {
+                    if (context.Request.Path.HasValue && Path.HasExtension(context.Request.Path.Value))
+                    {
+                        var relativePath = context.Request.Path.Value.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
+                        var filePath = Path.GetFullPath(Path.Combine(dashboardPhysicalPath, relativePath));
+                        if (filePath.StartsWith(dashboardRoot, StringComparison.OrdinalIgnoreCase) && File.Exists(filePath))
+                        {
+                            if (contentTypeProvider.TryGetContentType(filePath, out var contentType))
+                                context.Response.ContentType = contentType;
+                            await context.Response.SendFileAsync(filePath);
+                            return;
+                        }
+
+                        context.Response.StatusCode = StatusCodes.Status404NotFound;
+                        return;
+                    }
+
+                    var htmlPath = Path.Combine(dashboardPhysicalPath, "index.html");
+                    if (File.Exists(htmlPath))
+                    {
+                        context.Response.ContentType = "text/html";
+                        await context.Response.SendFileAsync(htmlPath);
+                        return;
+                    }
+
+                    context.Response.StatusCode = StatusCodes.Status404NotFound;
+                });
+            });
+        }
 
         app.UseWebSockets(new WebSocketOptions
         {
@@ -30,8 +82,7 @@ internal static class PipelineExtensions
 
         StartWorkers(app, startup, runtime);
         StartChannels(app, runtime);
-        RegisterShutdown(app, startup, runtime);
-        LogStartupBanner(app, startup);
+        StartupReadyReporter.Register(app, startup, launchOptions, localSession, stateStore);
     }
 
     private static void ConfigureForwardedHeaders(WebApplication app, GatewayStartupContext startup)
@@ -41,7 +92,7 @@ internal static class PipelineExtensions
 
         var opts = new ForwardedHeadersOptions
         {
-            ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost,
+            ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
             ForwardLimit = 1
         };
 
@@ -67,7 +118,7 @@ internal static class PipelineExtensions
                 if (runtime.AllowedOriginsSet.Contains(originStr))
                 {
                     ctx.Response.Headers["Access-Control-Allow-Origin"] = originStr;
-                    ctx.Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS";
+                    ctx.Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
                     ctx.Response.Headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type";
                     ctx.Response.Headers["Access-Control-Max-Age"] = "3600";
                     ctx.Response.Headers.Vary = "Origin";
@@ -87,12 +138,7 @@ internal static class PipelineExtensions
     private static void StartWorkers(WebApplication app, GatewayStartupContext startup, GatewayAppRuntime runtime)
     {
         var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Gateway");
-        // Minimum 2 workers is required: when one worker is blocked awaiting an LLM/tool
-        // response, a second worker must be available to dequeue and handle a /stop abort
-        // command immediately. With only 1 worker the /stop message would sit in the queue
-        // until the in-flight execution finishes, arriving too late to cancel anything.
-        // This matters in Docker containers where Environment.ProcessorCount is often 1.
-        var workerCount = Math.Max(2, Math.Min(Environment.ProcessorCount, 4));
+        var workerCount = Math.Max(1, Math.Min(Environment.ProcessorCount, 4));
 
         GatewayWorkers.Start(
             app.Lifetime,
@@ -119,8 +165,8 @@ internal static class PipelineExtensions
             app.Services.GetService<LearningService>(),
             app.Services.GetService<GatewayAutomationService>(),
             app.Services.GetService<ContractGovernanceService>(),
-            app.Services.GetService<MediaCacheStore>(),
-            runtime.AbortRegistry);
+            FeatureFallbackServices.ResolveGovernanceLedgerService(startup, app.Services),
+            app.Services.GetService<AudioTranscriptionService>());
     }
 
     private static void StartChannels(WebApplication app, GatewayAppRuntime runtime)
@@ -168,99 +214,4 @@ internal static class PipelineExtensions
         }
     }
 
-    private static void RegisterShutdown(WebApplication app, GatewayStartupContext startup, GatewayAppRuntime runtime)
-    {
-        var drainCompleteEvent = new ManualResetEventSlim(false);
-        var pluginDisposeTimeout = TimeSpan.FromSeconds(Math.Max(startup.Config.GracefulShutdownSeconds, 10));
-
-        app.Lifetime.ApplicationStopping.Register(() =>
-        {
-            app.Logger.LogInformation(
-                "Shutdown signal received — draining in-flight requests ({Timeout}s timeout)…",
-                startup.Config.GracefulShutdownSeconds);
-
-            if (startup.Config.GracefulShutdownSeconds > 0)
-            {
-                var deadline = DateTimeOffset.UtcNow.AddSeconds(startup.Config.GracefulShutdownSeconds);
-                var checkInterval = TimeSpan.FromMilliseconds(100);
-
-                while (DateTimeOffset.UtcNow < deadline)
-                {
-                    var allFree = true;
-                    foreach (var kvp in runtime.SessionLocks)
-                    {
-                        if (kvp.Value.CurrentCount == 0)
-                        {
-                            allFree = false;
-                            break;
-                        }
-                    }
-
-                    if (allFree)
-                    {
-                        drainCompleteEvent.Set();
-                        break;
-                    }
-
-                    var remaining = deadline - DateTimeOffset.UtcNow;
-                    if (remaining > TimeSpan.Zero)
-                        drainCompleteEvent.Wait(checkInterval < remaining ? checkInterval : remaining);
-                }
-
-                app.Logger.LogInformation("Drain complete — shutting down");
-            }
-
-            GatewayWorkers.DisposeSessionLocks(runtime.SessionLocks, app.Logger);
-            DisposePluginHostWithTimeout(runtime.PluginHost, pluginDisposeTimeout, app.Logger);
-            DisposePluginHostWithTimeout(runtime.NativeDynamicPluginHost, pluginDisposeTimeout, app.Logger);
-            DisposePluginHostWithTimeout(runtime.WhatsAppWorkerHost, pluginDisposeTimeout, app.Logger);
-            foreach (var ownerId in runtime.DynamicProviderOwners)
-            {
-                runtime.Operations.ProviderRegistry.UnregisterOwnedBy(ownerId);
-                LlmClientFactory.UnregisterProvidersOwnedBy(ownerId);
-            }
-            runtime.NativeRegistry.Dispose();
-            runtime.SkillWatcher.Dispose();
-            drainCompleteEvent.Dispose();
-        });
-    }
-
-    private static void DisposePluginHostWithTimeout(IAsyncDisposable? host, TimeSpan timeout, ILogger logger)
-    {
-        if (host is null)
-            return;
-
-        try
-        {
-            if (!host.DisposeAsync().AsTask().Wait(timeout))
-                logger.LogWarning("Plugin host disposal timed out after {Seconds}s", timeout.TotalSeconds);
-        }
-        catch (AggregateException ex)
-        {
-            logger.LogWarning(ex.InnerException, "Plugin host disposal threw an exception");
-        }
-    }
-
-    private static void LogStartupBanner(WebApplication app, GatewayStartupContext startup)
-    {
-        if (!app.Logger.IsEnabled(LogLevel.Information))
-            return;
-
-        var isAot = startup.RuntimeState.EffectiveMode == OpenClaw.Core.Models.GatewayRuntimeMode.Aot;
-        app.Logger.LogInformation(
-            """
-            ╔══════════════════════════════════════════╗
-            ║  OpenClaw.NET Gateway                    ║
-            ║  Listening: ws://{BindAddress}:{Port}/ws  ║
-            ║  Model: {Model}  ║
-            ║  Runtime Mode: {RuntimeMode}  ║
-            ║  NativeAOT: {NativeAOT}  ║
-            ╚══════════════════════════════════════════╝
-            """,
-            startup.Config.BindAddress,
-            startup.Config.Port,
-            startup.Config.Llm.Model,
-            startup.RuntimeState.EffectiveModeName,
-            isAot ? "Yes" : "No");
-    }
 }

@@ -1,6 +1,5 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
-using OpenClaw.Core.Models;
 using Microsoft.Extensions.Logging;
 
 namespace OpenClaw.Core.Skills;
@@ -47,10 +46,10 @@ public static class SkillLoader
         // 3. Managed/local skills
         if (config.Load.IncludeManaged)
         {
-            var managedDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".openclaw", "skills");
-            if (Directory.Exists(managedDir))
+            var managedDir = string.IsNullOrWhiteSpace(config.Load.ManagedRoot)
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".openclaw", "skills")
+                : NormalizeManagedRootPath(config.Load.ManagedRoot, logger);
+            if (managedDir is not null && TryDirectoryExists(managedDir))
                 ScanDirectory(managedDir, SkillSource.Managed, allSkills, logger);
         }
 
@@ -109,6 +108,52 @@ public static class SkillLoader
         return eligible;
     }
 
+    private static string? NormalizeManagedRootPath(string managedRoot, ILogger logger)
+    {
+        try
+        {
+            var normalized = managedRoot.Trim();
+
+            if (normalized.StartsWith("~", StringComparison.Ordinal))
+            {
+                var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                if (!string.IsNullOrWhiteSpace(home))
+                {
+                    var suffix = normalized[1..].TrimStart('/', '\\');
+                    normalized = suffix.Length == 0 ? home : Path.Combine(home, suffix);
+                }
+            }
+
+            if (!Path.IsPathRooted(normalized))
+                normalized = Path.GetFullPath(normalized);
+
+            return normalized;
+        }
+        catch (Exception ex) when (IsPathException(ex))
+        {
+            logger.LogWarning(ex, "Skipping invalid managed skills root '{ManagedRoot}'.", managedRoot);
+            return null;
+        }
+    }
+
+    private static bool TryDirectoryExists(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return false;
+
+        try
+        {
+            return Directory.Exists(path);
+        }
+        catch (Exception ex) when (IsPathException(ex))
+        {
+            return false;
+        }
+    }
+
+    private static bool IsPathException(Exception ex) =>
+        ex is ArgumentException or IOException or NotSupportedException or PathTooLongException or UnauthorizedAccessException;
+
     /// <summary>
     /// Scan a directory for subdirectories containing SKILL.md.
     /// </summary>
@@ -125,7 +170,7 @@ public static class SkillLoader
             {
                 try
                 {
-                    var skill = ParseSkillFile(rootSkillFile, rootDir, source, logger);
+                    var skill = ParseSkillFile(rootSkillFile, rootDir, source);
                     if (skill is not null)
                         results[skill.Name] = skill;
                 }
@@ -143,7 +188,7 @@ public static class SkillLoader
 
                 try
                 {
-                    var skill = ParseSkillFile(skillFile, skillDir, source, logger);
+                    var skill = ParseSkillFile(skillFile, skillDir, source);
                     if (skill is not null)
                     {
                         // Higher precedence sources overwrite lower ones
@@ -165,16 +210,16 @@ public static class SkillLoader
     /// <summary>
     /// Parse a SKILL.md file with YAML-like frontmatter.
     /// </summary>
-    internal static SkillDefinition? ParseSkillFile(string filePath, string skillDir, SkillSource source, ILogger? logger = null)
+    internal static SkillDefinition? ParseSkillFile(string filePath, string skillDir, SkillSource source)
     {
         var content = File.ReadAllText(filePath);
-        return ParseSkillContent(content, skillDir, source, logger);
+        return ParseSkillContent(content, skillDir, source);
     }
 
     /// <summary>
     /// Parse SKILL.md content. Separated from file I/O for testing.
     /// </summary>
-    internal static SkillDefinition? ParseSkillContent(string content, string skillDir, SkillSource source, ILogger? logger = null)
+    internal static SkillDefinition? ParseSkillContent(string content, string skillDir, SkillSource source)
     {
         // Split frontmatter from body
         if (!content.StartsWith("---"))
@@ -252,11 +297,13 @@ public static class SkillLoader
         if (homepage is not null && metadata.Homepage is null)
             metadata.Homepage = homepage;
 
-        var artifactContract = TryLoadArtifactContract(skillDir, logger);
-        var projectionContractDiscovery = TryLoadProjectionContracts(skillDir, logger);
-
         // Replace {baseDir} placeholder in instructions
         body = body.Replace("{baseDir}", skillDir);
+
+        // Progressive disclosure (level 3): surface auxiliary files under
+        // references/ and scripts/ in the manifest. The full file content is
+        // *not* loaded here — only the listing — so the model can fetch on demand.
+        var resources = ScanSkillResources(skillDir);
 
         return new SkillDefinition
         {
@@ -271,401 +318,69 @@ public static class SkillLoader
             CommandDispatch = commandDispatch,
             CommandTool = commandTool,
             CommandArgMode = commandArgMode,
-            ArtifactContract = artifactContract,
-            ProjectionContracts = projectionContractDiscovery.Contracts,
-            ProjectionDiscovery = projectionContractDiscovery.Discovery
+            Resources = resources
         };
     }
 
-    private static SkillArtifactContract? TryLoadArtifactContract(string skillDir, ILogger? logger)
+    /// <summary>
+    /// Scan a skill directory for auxiliary resources under <c>references/</c> and <c>scripts/</c>.
+    /// Returns an empty list if the skill directory does not exist (e.g. in unit tests).
+    /// </summary>
+    internal static IReadOnlyList<SkillResource> ScanSkillResources(string skillDir)
     {
-        var contractPath = Path.Combine(skillDir, "contracts", "artifacts.json");
-        if (!File.Exists(contractPath))
-            return null;
+        if (string.IsNullOrWhiteSpace(skillDir) || !TryDirectoryExists(skillDir))
+            return [];
 
-        try
-        {
-            using var stream = File.OpenRead(contractPath);
-            var contract = JsonSerializer.Deserialize(stream, CoreJsonContext.Default.SkillArtifactContract);
-            if (contract is null)
-            {
-                logger?.LogWarning("Artifact contract at {Path} is empty or invalid.", contractPath);
-                return null;
-            }
-
-            return contract;
-        }
-        catch (Exception ex)
-        {
-            logger?.LogWarning(ex, "Failed to load artifact contract from {Path}.", contractPath);
-            return null;
-        }
+        var list = new List<SkillResource>();
+        AppendResourcesFromSubdir(list, skillDir, "references", SkillResourceKind.Reference);
+        AppendResourcesFromSubdir(list, skillDir, "scripts", SkillResourceKind.Script);
+        return list;
     }
 
-    private static ProjectionContractDiscoveryResult TryLoadProjectionContracts(string skillDir, ILogger? logger)
+    private static void AppendResourcesFromSubdir(
+        List<SkillResource> sink,
+        string skillDir,
+        string subDir,
+        SkillResourceKind kind)
     {
-        var projectionsRoot = Path.Combine(skillDir, "contracts", "projections");
-        if (!Directory.Exists(projectionsRoot))
-        {
-            return new ProjectionContractDiscoveryResult(
-                [],
-                new SkillProjectionDiscovery
-                {
-                    Status = "none",
-                    IndexCount = 0,
-                    BoundCount = 0
-                });
-        }
+        var dir = Path.Combine(skillDir, subDir);
+        if (!TryDirectoryExists(dir))
+            return;
 
-        string[] indexFiles;
         try
         {
-            indexFiles = Directory.GetFiles(projectionsRoot, "contract-index.json", SearchOption.AllDirectories)
-                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-        }
-        catch (Exception ex)
-        {
-            logger?.LogWarning(ex, "Failed to enumerate projection contract indexes under {Path}", projectionsRoot);
-            return new ProjectionContractDiscoveryResult(
-                [],
-                new SkillProjectionDiscovery
-                {
-                    Status = "enumeration-failed",
-                    IndexCount = 0,
-                    BoundCount = 0,
-                    Message = ex.Message
-                });
-        }
-
-        if (indexFiles.Length == 0)
-        {
-            return new ProjectionContractDiscoveryResult(
-                [],
-                new SkillProjectionDiscovery
-                {
-                    Status = "none",
-                    IndexCount = 0,
-                    BoundCount = 0
-                });
-        }
-
-        var contracts = new List<SkillProjectionContractSet>(indexFiles.Length);
-        var failedIndexes = new List<string>();
-
-        foreach (var indexPath in indexFiles)
-        {
-            try
+            var enumerationOptions = new EnumerationOptions
             {
-                using var document = JsonDocument.Parse(File.ReadAllText(indexPath));
-                var index = ParseProjectionContractIndex(document.RootElement);
-                if (index is null)
+                RecurseSubdirectories = true,
+                IgnoreInaccessible = true,
+                AttributesToSkip = FileAttributes.ReparsePoint | FileAttributes.Hidden
+            };
+
+            foreach (var file in Directory.EnumerateFiles(dir, "*", enumerationOptions))
+            {
+                string relative;
+                try
                 {
-                    logger?.LogWarning("Failed to parse projection contract index at {Path}: missing required fields.", indexPath);
-                    failedIndexes.Add(indexPath);
+                    relative = Path.GetRelativePath(skillDir, file).Replace('\\', '/');
+                }
+                catch (Exception ex) when (IsPathException(ex))
+                {
                     continue;
                 }
 
-                contracts.Add(new SkillProjectionContractSet
+                sink.Add(new SkillResource
                 {
-                    ProducerName = index.ProducerSkill ?? Path.GetFileName(Path.GetDirectoryName(indexPath)),
-                    ProducerPriority = index.ProducerPriority,
-                    RootPath = Path.GetDirectoryName(indexPath) ?? projectionsRoot,
-                    Index = index
+                    Name = Path.GetFileName(file),
+                    RelativePath = relative,
+                    AbsolutePath = Path.GetFullPath(file),
+                    Kind = kind
                 });
             }
-            catch (Exception ex)
-            {
-                logger?.LogWarning(ex, "Failed to parse projection contract index at {Path}", indexPath);
-                failedIndexes.Add(indexPath);
-            }
         }
-
-        if (contracts.Count == 0)
+        catch (Exception ex) when (IsPathException(ex))
         {
-            return new ProjectionContractDiscoveryResult(
-                [],
-                new SkillProjectionDiscovery
-                {
-                    Status = "parse-failed",
-                    IndexCount = indexFiles.Length,
-                    BoundCount = 0,
-                    IndexPaths = [.. indexFiles],
-                    Message = failedIndexes.Count > 0
-                        ? $"Failed to parse {failedIndexes.Count} projection contract index file(s)."
-                        : "Projection contract index is missing required fields."
-                });
+            // Inaccessible subdirectory: ignore, resources stay as already-collected.
         }
-
-        return new ProjectionContractDiscoveryResult(
-            contracts,
-            new SkillProjectionDiscovery
-            {
-                Status = failedIndexes.Count == 0 ? "bound" : "partial",
-                IndexCount = indexFiles.Length,
-                BoundCount = contracts.Count,
-                IndexPaths = [.. indexFiles],
-                Message = failedIndexes.Count == 0
-                    ? null
-                    : $"Bound {contracts.Count} of {indexFiles.Length} projection contract index file(s)."
-            });
-    }
-
-    private sealed record ProjectionContractDiscoveryResult(
-        IReadOnlyList<SkillProjectionContractSet> Contracts,
-        SkillProjectionDiscovery Discovery);
-
-    private static ProjectionContractIndex? ParseProjectionContractIndex(JsonElement root)
-    {
-        if (root.ValueKind != JsonValueKind.Object)
-            return null;
-
-        return new ProjectionContractIndex
-        {
-            ProducerSkill = ReadString(root, "producer_skill"),
-            ProducerPriority = ReadInt32(root, "producer_priority", ReadInt32(root, "producer_precedence", 0)),
-            DefaultSelectionPolicy = root.TryGetProperty("default_selection_policy", out var selectionPolicy)
-                ? ParseProjectionSelectionPolicy(selectionPolicy)
-                : new ProjectionSelectionPolicy(),
-            TopicScoring = root.TryGetProperty("topic_scoring", out var topicScoring)
-                ? ParseProjectionTopicScoring(topicScoring)
-                : null,
-            TargetViewScoring = root.TryGetProperty("target_view_scoring", out var targetViewScoring)
-                ? ParseProjectionTargetViewScoring(targetViewScoring)
-                : null,
-            Topics = root.TryGetProperty("topics", out var topics)
-                ? ParseProjectionTopics(topics)
-                : []
-        };
-    }
-
-    private static ProjectionSelectionPolicy ParseProjectionSelectionPolicy(JsonElement element)
-        => new()
-        {
-            PreferReadyOnly = ReadBoolean(element, "prefer_ready_only"),
-            BlockOnOpenQuestions = ReadBoolean(element, "block_on_open_questions"),
-            FallbackOrderByTargetView = ReadStringArray(element, "fallback_order_by_target_view")
-        };
-
-    private static ProjectionTopicScoring ParseProjectionTopicScoring(JsonElement element)
-        => new()
-        {
-            ClarifyWhenScoreGapBelow = ReadInt32(element, "clarify_when_score_gap_below", 2),
-            ScoreDimensions = element.TryGetProperty("score_dimensions", out var scoreDimensions)
-                ? ParseProjectionScoreDimensions(scoreDimensions)
-                : [],
-            Topics = element.TryGetProperty("topics", out var topics)
-                ? ParseProjectionTopicSignals(topics)
-                : []
-        };
-
-    private static ProjectionTargetViewScoring ParseProjectionTargetViewScoring(JsonElement element)
-        => new()
-        {
-            ClarifyWhenScoreGapBelow = ReadInt32(element, "clarify_when_score_gap_below", 2),
-            PreferExplicitUserArtifactRequests = ReadBoolean(element, "prefer_explicit_user_artifact_requests"),
-            ScoreDimensions = element.TryGetProperty("score_dimensions", out var scoreDimensions)
-                ? ParseProjectionScoreDimensions(scoreDimensions)
-                : [],
-            Views = element.TryGetProperty("views", out var views)
-                ? ParseProjectionViewSignals(views)
-                : [],
-            WithinTopicOverrides = element.TryGetProperty("within_topic_overrides", out var overrides)
-                ? ParseProjectionTopicViewOverrides(overrides)
-                : []
-        };
-
-    private static IReadOnlyList<ProjectionScoreDimension> ParseProjectionScoreDimensions(JsonElement element)
-    {
-        if (element.ValueKind != JsonValueKind.Array)
-            return [];
-
-        var values = new List<ProjectionScoreDimension>();
-        foreach (var item in element.EnumerateArray())
-        {
-            var dimension = ReadString(item, "dimension");
-            if (string.IsNullOrWhiteSpace(dimension))
-                continue;
-
-            values.Add(new ProjectionScoreDimension
-            {
-                Dimension = dimension,
-                Score = ReadInt32(item, "score", 0)
-            });
-        }
-
-        return values;
-    }
-
-    private static IReadOnlyList<ProjectionTopicSignals> ParseProjectionTopicSignals(JsonElement element)
-    {
-        if (element.ValueKind != JsonValueKind.Array)
-            return [];
-
-        var values = new List<ProjectionTopicSignals>();
-        foreach (var item in element.EnumerateArray())
-        {
-            var domainSlug = ReadString(item, "domain_slug");
-            if (string.IsNullOrWhiteSpace(domainSlug))
-                continue;
-
-            values.Add(new ProjectionTopicSignals
-            {
-                DomainSlug = domainSlug,
-                PrimaryIntentSignals = ReadStringArray(item, "primary_intent_signals"),
-                SupportingSignals = ReadStringArray(item, "supporting_signals"),
-                ExplicitArtifactSignals = ReadStringArray(item, "explicit_artifact_signals"),
-                DemoteWhenCompetingTopicSignals = ReadStringArray(item, "demote_when_competing_topic_signals")
-            });
-        }
-
-        return values;
-    }
-
-    private static IReadOnlyList<ProjectionViewSignals> ParseProjectionViewSignals(JsonElement element)
-    {
-        if (element.ValueKind != JsonValueKind.Array)
-            return [];
-
-        var values = new List<ProjectionViewSignals>();
-        foreach (var item in element.EnumerateArray())
-        {
-            var targetView = ReadString(item, "target_view");
-            if (string.IsNullOrWhiteSpace(targetView))
-                continue;
-
-            values.Add(new ProjectionViewSignals
-            {
-                TargetView = targetView,
-                ExplicitOutputSignals = ReadStringArray(item, "explicit_output_signals"),
-                StrongSignals = ReadStringArray(item, "strong_signals"),
-                SupportingSignals = ReadStringArray(item, "supporting_signals"),
-                DemoteWhenCompetingViewSignals = ReadStringArray(item, "demote_when_competing_view_signals")
-            });
-        }
-
-        return values;
-    }
-
-    private static IReadOnlyList<ProjectionTopicViewOverride> ParseProjectionTopicViewOverrides(JsonElement element)
-    {
-        if (element.ValueKind != JsonValueKind.Array)
-            return [];
-
-        var values = new List<ProjectionTopicViewOverride>();
-        foreach (var item in element.EnumerateArray())
-        {
-            var domainSlug = ReadString(item, "domain_slug");
-            if (string.IsNullOrWhiteSpace(domainSlug))
-                continue;
-
-            values.Add(new ProjectionTopicViewOverride
-            {
-                DomainSlug = domainSlug,
-                Bonuses = item.TryGetProperty("bonuses", out var bonuses)
-                    ? ParseProjectionTopicViewBonuses(bonuses)
-                    : []
-            });
-        }
-
-        return values;
-    }
-
-    private static IReadOnlyList<ProjectionTopicViewBonus> ParseProjectionTopicViewBonuses(JsonElement element)
-    {
-        if (element.ValueKind != JsonValueKind.Array)
-            return [];
-
-        var values = new List<ProjectionTopicViewBonus>();
-        foreach (var item in element.EnumerateArray())
-        {
-            var targetView = ReadString(item, "target_view");
-            if (string.IsNullOrWhiteSpace(targetView))
-                continue;
-
-            values.Add(new ProjectionTopicViewBonus
-            {
-                TargetView = targetView,
-                WhenRequestSignals = ReadStringArray(item, "when_request_signals"),
-                Score = ReadInt32(item, "score", 0)
-            });
-        }
-
-        return values;
-    }
-
-    private static IReadOnlyList<ProjectionTopicRecord> ParseProjectionTopics(JsonElement element)
-    {
-        if (element.ValueKind != JsonValueKind.Array)
-            return [];
-
-        var values = new List<ProjectionTopicRecord>();
-        foreach (var item in element.EnumerateArray())
-        {
-            var domainSlug = ReadString(item, "domain_slug");
-            var defaultTargetView = ReadString(item, "default_target_view");
-            if (string.IsNullOrWhiteSpace(domainSlug) || string.IsNullOrWhiteSpace(defaultTargetView))
-                continue;
-
-            values.Add(new ProjectionTopicRecord
-            {
-                DomainSlug = domainSlug,
-                DefaultTargetView = defaultTargetView,
-                Views = item.TryGetProperty("views", out var views)
-                    ? ParseProjectionViews(views)
-                    : []
-            });
-        }
-
-        return values;
-    }
-
-    private static IReadOnlyList<ProjectionViewRecord> ParseProjectionViews(JsonElement element)
-    {
-        if (element.ValueKind != JsonValueKind.Array)
-            return [];
-
-        var values = new List<ProjectionViewRecord>();
-        foreach (var item in element.EnumerateArray())
-        {
-            var targetView = ReadString(item, "target_view");
-            var status = ReadString(item, "status");
-            var path = ReadString(item, "path");
-            if (string.IsNullOrWhiteSpace(targetView) || string.IsNullOrWhiteSpace(status) || string.IsNullOrWhiteSpace(path))
-                continue;
-
-            values.Add(new ProjectionViewRecord
-            {
-                TargetView = targetView,
-                Status = status,
-                Path = path
-            });
-        }
-
-        return values;
-    }
-
-    private static string ReadString(JsonElement element, string propertyName)
-        => element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
-            ? property.GetString() ?? string.Empty
-            : string.Empty;
-
-    private static bool ReadBoolean(JsonElement element, string propertyName)
-        => element.TryGetProperty(propertyName, out var property) &&
-           (property.ValueKind == JsonValueKind.True || property.ValueKind == JsonValueKind.False) &&
-           property.GetBoolean();
-
-    private static int ReadInt32(JsonElement element, string propertyName, int fallback)
-        => element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.Number && property.TryGetInt32(out var value)
-            ? value
-            : fallback;
-
-    private static IReadOnlyList<string> ReadStringArray(JsonElement element, string propertyName)
-    {
-        if (!element.TryGetProperty(propertyName, out var property))
-            return [];
-
-        return ReadStringArray(property);
     }
 
     /// <summary>

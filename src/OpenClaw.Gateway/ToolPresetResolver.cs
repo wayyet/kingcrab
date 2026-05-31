@@ -20,7 +20,6 @@ internal sealed class ToolPresetResolver : IToolPresetResolver
         "shell",
         "process",
         "write_file",
-        "publish_file",
         "code_exec",
         "git",
         "automation",
@@ -33,10 +32,10 @@ internal sealed class ToolPresetResolver : IToolPresetResolver
 
     private static readonly string[] CodingPresetAllow =
     [
-        "shell", "read_file", "write_file", "publish_file", "edit_file", "apply_patch", "process", "git",
+        "shell", "read_file", "write_file", "edit_file", "apply_patch", "process", "git",
         "code_exec", "browser", "memory", "memory_search", "memory_get", "project_memory",
         "sessions", "session_search", "session_status", "delegate_agent",
-        "web_search", "web_fetch", "pdf_parse", "image_analyze"
+        "web_search", "web_fetch", "pdf_read", "image_gen", "vision_analyze"
     ];
 
     private static readonly string[] MessagingPresetAllow =
@@ -49,7 +48,7 @@ internal sealed class ToolPresetResolver : IToolPresetResolver
     private static readonly Dictionary<string, ToolsetConfig> BuiltInToolsets = new(StringComparer.OrdinalIgnoreCase)
     {
         ["group:runtime"] = new() { AllowTools = ["shell", "process", "code_exec"] },
-        ["group:fs"] = new() { AllowTools = ["read_file", "write_file", "publish_file", "edit_file", "apply_patch"] },
+        ["group:fs"] = new() { AllowTools = ["read_file", "write_file", "edit_file", "apply_patch"] },
         ["group:sessions"] = new() { AllowTools = ["sessions", "sessions_history", "sessions_send", "sessions_spawn", "session_status", "session_search", "agents_list"] },
         ["group:memory"] = new() { AllowTools = ["memory", "memory_search", "memory_get", "project_memory"] },
         ["group:web"] = new() { AllowTools = ["web_search", "web_fetch", "x_search", "browser"] },
@@ -103,6 +102,12 @@ internal sealed class ToolPresetResolver : IToolPresetResolver
 
     private string InferSurface(Session session)
     {
+        var aliasedSurface = session.ChannelId switch
+        {
+            "openai-http" or "openai-responses" => "openai-http",
+            _ => session.ChannelId
+        };
+
         if (_config.Tooling.SurfaceBindings.Count > 0 &&
             _config.Tooling.SurfaceBindings.TryGetValue(session.ChannelId, out var mappedPreset) &&
             !string.IsNullOrWhiteSpace(mappedPreset))
@@ -110,8 +115,15 @@ internal sealed class ToolPresetResolver : IToolPresetResolver
             return session.ChannelId;
         }
 
-        if (string.Equals(session.ChannelId, "openai-http", StringComparison.OrdinalIgnoreCase))
-            return "cli";
+        if (!string.Equals(aliasedSurface, session.ChannelId, StringComparison.OrdinalIgnoreCase) &&
+            _config.Tooling.SurfaceBindings.TryGetValue(aliasedSurface, out mappedPreset) &&
+            !string.IsNullOrWhiteSpace(mappedPreset))
+        {
+            return aliasedSurface;
+        }
+
+        if (string.Equals(aliasedSurface, "openai-http", StringComparison.OrdinalIgnoreCase))
+            return "openai-http";
         if (string.Equals(session.ChannelId, "websocket", StringComparison.OrdinalIgnoreCase))
             return "web";
         if (session.ChannelId.Contains("telegram", StringComparison.OrdinalIgnoreCase))
@@ -120,7 +132,7 @@ internal sealed class ToolPresetResolver : IToolPresetResolver
             || session.Id.StartsWith("automation:", StringComparison.OrdinalIgnoreCase))
             return "automation";
 
-        return session.ChannelId;
+        return aliasedSurface;
     }
 
     private string ResolvePresetIdForSurface(string surface)
@@ -132,6 +144,7 @@ internal sealed class ToolPresetResolver : IToolPresetResolver
         return surface switch
         {
             "cli" => "cli",
+            "openai-http" => "web",
             "web" => "web",
             "telegram" => "telegram",
             "automation" => "automation",

@@ -20,24 +20,14 @@ public sealed class Session
     private long _totalCacheWriteTokens;
 
     public required string Id { get; init; }
-    // ChannelId / SenderId describe the *current* routing identity of the conversation party.
-    // They must be mutable because a persisted session can be reactivated by a fresh connection
-    // (e.g. a WebSocket reconnect produces a new Connection.Id) and mid-turn envelope routing
-    // (artifact, stage gate) consults Session.SenderId to look up the live socket.
-    public required string ChannelId { get; set; }
-    public required string SenderId { get; set; }
+    public required string ChannelId { get; init; }
+    public required string SenderId { get; init; }
+    public StableSessionBindingInfo? StableSessionBinding { get; set; }
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset LastActiveAt { get; set; } = DateTimeOffset.UtcNow;
     public List<ChatTurn> History { get; init; } = [];
     public SessionState State { get; set; } = SessionState.Active;
     
-    /// <summary>
-    /// Authenticated user identity from the identity provider (e.g. Keycloak JWT <c>sub</c> claim).
-    /// Set once per connection when the channel verifies an OIDC token; <c>null</c> for anonymous channels.
-    /// Must NOT be used for routing — use <see cref="SenderId"/> for that.
-    /// </summary>
-    public string? AuthenticatedUserId { get; set; }
-
     /// <summary>Optional model override for this specific session (set via /model command).</summary>
     public string? ModelOverride { get; set; }
 
@@ -67,6 +57,9 @@ public sealed class Session
 
     /// <summary>When true, shows tool calls and token counts in responses. Set via /verbose command.</summary>
     public bool VerboseMode { get; set; }
+
+    /// <summary>Response style preference for this session.</summary>
+    public string ResponseMode { get; set; } = SessionResponseModes.Default;
 
     /// <summary>Total input tokens consumed across all turns in this session.</summary>
     public long TotalInputTokens
@@ -99,6 +92,12 @@ public sealed class Session
     /// <summary>Optional contract policy governing this session's execution limits.</summary>
     public ContractPolicy? ContractPolicy { get; set; }
 
+    /// <summary>Structured metadata for sessions created by delegate_agent.</summary>
+    public SessionDelegationMetadata? Delegation { get; set; }
+
+    /// <summary>Summaries of delegated child sessions spawned from this session.</summary>
+    public List<SessionDelegationChildSummary> DelegatedSessions { get; init; } = [];
+
     /// <summary>Timestamp when the current contract was attached to this session.</summary>
     public DateTimeOffset? ContractAttachedAtUtc { get; set; }
 
@@ -111,6 +110,9 @@ public sealed class Session
 
     /// <summary>Accumulated USD cost incurred since the current contract was attached.</summary>
     public decimal ContractAccumulatedCostUsd { get; set; }
+
+    /// <summary>Last durable execution checkpoint written by the agent runtime.</summary>
+    public SessionExecutionCheckpoint? ExecutionCheckpoint { get; set; }
 
     public void AddTokenUsage(long inputTokens, long outputTokens)
     {
@@ -132,6 +134,14 @@ public sealed class Session
         => TotalInputTokens + TotalOutputTokens;
 }
 
+public sealed class StableSessionBindingInfo
+{
+    public string ExternalSessionId { get; set; } = "";
+    public string Namespace { get; set; } = "";
+    public string OwnerKey { get; set; } = "";
+    public DateTimeOffset BoundAtUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
 public enum SessionState : byte
 {
     Active,
@@ -149,37 +159,159 @@ public sealed record ChatTurn
 
 public sealed record ToolInvocation
 {
+    public string? CallId { get; init; }
     public required string ToolName { get; init; }
     public required string Arguments { get; init; }
     public string? Result { get; init; }
     public TimeSpan Duration { get; init; }
+    public string? ResultStatus { get; init; }
+    public string? FailureCode { get; init; }
+    public string? FailureMessage { get; init; }
+    public string? NextStep { get; init; }
+    public bool? GovernanceAllowed { get; init; }
+    public string? GovernanceAction { get; init; }
+    public string? GovernanceReason { get; init; }
+    public string? GovernancePolicyId { get; init; }
+    public string? GovernanceRuleId { get; init; }
+    public double? GovernanceTrustScore { get; init; }
+    public double? GovernanceEvaluationMs { get; init; }
+    public bool? GovernanceUnavailable { get; init; }
+}
+
+public static class SessionCheckpointKinds
+{
+    public const string ToolBatch = "tool_batch";
+}
+
+public static class SessionCheckpointStates
+{
+    public const string ReadyToResume = "ready_to_resume";
+    public const string Completed = "completed";
+    public const string Failed = "failed";
+}
+
+public sealed class SessionExecutionCheckpoint
+{
+    public required string CheckpointId { get; init; }
+    public string Kind { get; init; } = SessionCheckpointKinds.ToolBatch;
+    public string State { get; set; } = SessionCheckpointStates.ReadyToResume;
+    public int Sequence { get; init; }
+    public int Iteration { get; init; }
+    public int HistoryCount { get; init; }
+    public string? CorrelationId { get; init; }
+    public DateTimeOffset CreatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? PersistedAtUtc { get; set; }
+    public DateTimeOffset? LastResumeAttemptAtUtc { get; set; }
+    public DateTimeOffset? CompletedAtUtc { get; set; }
+    public string? CompletionReason { get; set; }
+    public List<SessionCheckpointToolCall> ToolCalls { get; init; } = [];
+}
+
+public sealed class SessionCheckpointToolCall
+{
+    public string? CallId { get; init; }
+    public required string ToolName { get; init; }
+    public string ResultStatus { get; init; } = ToolResultStatuses.Completed;
+    public string? FailureCode { get; init; }
+    public long DurationMs { get; init; }
+    public int ArgumentsBytes { get; init; }
+    public int ResultBytes { get; init; }
+}
+
+public sealed class SessionDelegationMetadata
+{
+    public string? ParentSessionId { get; set; }
+    public string? ParentChannelId { get; set; }
+    public string? ParentSenderId { get; set; }
+    public string Profile { get; set; } = "";
+    public string RequestedTask { get; set; } = "";
+    public string[] AllowedTools { get; set; } = [];
+    public int Depth { get; set; }
+    public DateTimeOffset StartedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? CompletedAtUtc { get; set; }
+    public string Status { get; set; } = "running";
+    public string? FinalResponsePreview { get; set; }
+    public IReadOnlyList<SessionDelegationToolUsage> ToolUsage { get; set; } = [];
+    public IReadOnlyList<SessionDelegationChangeSummary> ProposedChanges { get; set; } = [];
+}
+
+public sealed class SessionDelegationToolUsage
+{
+    public required string ToolName { get; init; }
+    public string Action { get; init; } = "";
+    public string Summary { get; init; } = "";
+    public bool IsMutation { get; init; }
+    public int Count { get; init; }
+}
+
+public sealed class SessionDelegationChangeSummary
+{
+    public required string ToolName { get; init; }
+    public string Action { get; init; } = "";
+    public string Summary { get; init; } = "";
+}
+
+public sealed class SessionDelegationChildSummary
+{
+    public required string SessionId { get; init; }
+    public string Profile { get; set; } = "";
+    public string TaskPreview { get; set; } = "";
+    public DateTimeOffset StartedAtUtc { get; init; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? CompletedAtUtc { get; set; }
+    public string Status { get; set; } = "running";
+    public IReadOnlyList<SessionDelegationToolUsage> ToolUsage { get; set; } = [];
+    public IReadOnlyList<SessionDelegationChangeSummary> ProposedChanges { get; set; } = [];
+    public string? FinalResponsePreview { get; set; }
 }
 
 /// <summary>
 /// AOT-compatible JSON serialization context for all core models.
 /// </summary>
 [JsonSerializable(typeof(Session))]
+[JsonSerializable(typeof(StableSessionBindingInfo))]
 [JsonSerializable(typeof(ChatTurn))]
 [JsonSerializable(typeof(ToolInvocation))]
 [JsonSerializable(typeof(List<ToolInvocation>))]
+[JsonSerializable(typeof(SessionExecutionCheckpoint))]
+[JsonSerializable(typeof(SessionCheckpointToolCall))]
+[JsonSerializable(typeof(List<SessionCheckpointToolCall>))]
+[JsonSerializable(typeof(SessionDelegationMetadata))]
+[JsonSerializable(typeof(SessionDelegationToolUsage))]
+[JsonSerializable(typeof(List<SessionDelegationToolUsage>))]
+[JsonSerializable(typeof(SessionDelegationChangeSummary))]
+[JsonSerializable(typeof(List<SessionDelegationChangeSummary>))]
+[JsonSerializable(typeof(SessionDelegationChildSummary))]
+[JsonSerializable(typeof(List<SessionDelegationChildSummary>))]
 [JsonSerializable(typeof(InboundMessage))]
 [JsonSerializable(typeof(OutboundMessage))]
 [JsonSerializable(typeof(WsClientEnvelope))]
 [JsonSerializable(typeof(WsServerEnvelope))]
-[JsonSerializable(typeof(SkillArtifact))]
-[JsonSerializable(typeof(SkillStageGateEvent))]
-[JsonSerializable(typeof(SkillArtifactContract))]
-[JsonSerializable(typeof(SkillArtifactStageContract))]
-[JsonSerializable(typeof(SkillArtifactStageGateContract))]
-[JsonSerializable(typeof(SkillArtifactTypeContract))]
 [JsonSerializable(typeof(GatewayConfig))]
 [JsonSerializable(typeof(RuntimeConfig))]
+[JsonSerializable(typeof(CanvasConfig))]
+[JsonSerializable(typeof(DeploymentConfig))]
 [JsonSerializable(typeof(GatewayRuntimeState))]
 [JsonSerializable(typeof(LlmProviderConfig))]
+[JsonSerializable(typeof(LocalInferenceConfig))]
 [JsonSerializable(typeof(PromptCachingConfig))]
 [JsonSerializable(typeof(DiagnosticsConfig))]
 [JsonSerializable(typeof(PromptCacheTraceConfig))]
 [JsonSerializable(typeof(ModelsConfig))]
+[JsonSerializable(typeof(LocalModelPresetDefinition))]
+[JsonSerializable(typeof(List<LocalModelPresetDefinition>))]
+[JsonSerializable(typeof(LocalModelPresetListResponse))]
+[JsonSerializable(typeof(LocalModelRuntimeDefaults))]
+[JsonSerializable(typeof(LocalModelPackageFileDefinition))]
+[JsonSerializable(typeof(List<LocalModelPackageFileDefinition>))]
+[JsonSerializable(typeof(LocalModelPackageDefinition))]
+[JsonSerializable(typeof(List<LocalModelPackageDefinition>))]
+[JsonSerializable(typeof(LocalModelInstallFileManifest))]
+[JsonSerializable(typeof(List<LocalModelInstallFileManifest>))]
+[JsonSerializable(typeof(LocalModelInstallManifest))]
+[JsonSerializable(typeof(LocalModelPackageFileStatus))]
+[JsonSerializable(typeof(List<LocalModelPackageFileStatus>))]
+[JsonSerializable(typeof(LocalModelPackageStatus))]
+[JsonSerializable(typeof(List<LocalModelPackageStatus>))]
 [JsonSerializable(typeof(ModelProfileConfig))]
 [JsonSerializable(typeof(List<ModelProfileConfig>))]
 [JsonSerializable(typeof(ModelCapabilities))]
@@ -201,15 +333,83 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(Dictionary<string, TokenCostRateConfig>))]
 [JsonSerializable(typeof(MemoryConfig))]
 [JsonSerializable(typeof(MemorySqliteConfig))]
+[JsonSerializable(typeof(MemoryMempalaceConfig))]
+[JsonSerializable(typeof(FractalMemoryConfig))]
 [JsonSerializable(typeof(MemoryRecallConfig))]
 [JsonSerializable(typeof(MemoryRetentionConfig))]
+[JsonSerializable(typeof(StructuredMemoryStatusResponse))]
+[JsonSerializable(typeof(StructuredMemorySearchResult))]
+[JsonSerializable(typeof(StructuredMemoryOpenResult))]
+[JsonSerializable(typeof(StructuredMemoryRecentResult))]
+[JsonSerializable(typeof(StructuredMemoryExportResult))]
+[JsonSerializable(typeof(StructuredMemoryHandoffResult))]
+[JsonSerializable(typeof(StructuredMemoryValidationResult))]
+[JsonSerializable(typeof(StructuredMemoryValidationIssue))]
+[JsonSerializable(typeof(StructuredMemorySourceRef))]
+[JsonSerializable(typeof(List<StructuredMemorySourceRef>))]
+[JsonSerializable(typeof(List<StructuredMemoryValidationIssue>))]
+[JsonSerializable(typeof(StructuredMemoryContextRequest))]
+[JsonSerializable(typeof(StructuredMemoryContextResult))]
+[JsonSerializable(typeof(StructuredMemoryPathRequest))]
 [JsonSerializable(typeof(SecurityConfig))]
+[JsonSerializable(typeof(UrlSafetyConfig))]
 [JsonSerializable(typeof(WebSocketConfig))]
-[JsonSerializable(typeof(HandoffConfig))]
-[JsonSerializable(typeof(HandoffWorkflowConfig))]
-[JsonSerializable(typeof(Dictionary<string, HandoffWorkflowConfig>))]
-[JsonSerializable(typeof(Dictionary<string, string[]>))]
 [JsonSerializable(typeof(ToolingConfig))]
+[JsonSerializable(typeof(HarnessConfig))]
+[JsonSerializable(typeof(PlanExecuteVerifyOptions))]
+[JsonSerializable(typeof(PlanExecuteVerifyRun))]
+[JsonSerializable(typeof(List<PlanExecuteVerifyRun>))]
+[JsonSerializable(typeof(PlanExecuteVerifyDecision))]
+[JsonSerializable(typeof(HarnessVerificationResult))]
+[JsonSerializable(typeof(HarnessVerificationCheck))]
+[JsonSerializable(typeof(List<HarnessVerificationCheck>))]
+[JsonSerializable(typeof(PlanExecuteVerifyRunListResponse))]
+[JsonSerializable(typeof(PlanExecuteVerifyRunDetailResponse))]
+[JsonSerializable(typeof(PlanExecuteVerifyRunMutationResponse))]
+[JsonSerializable(typeof(ToolGovernanceConfig))]
+[JsonSerializable(typeof(GovernanceAction))]
+[JsonSerializable(typeof(ToolGovernanceRiskLevel))]
+[JsonSerializable(typeof(GovernanceDecision))]
+[JsonSerializable(typeof(ToolGovernanceDescriptor))]
+[JsonSerializable(typeof(ToolGovernanceContext))]
+[JsonSerializable(typeof(ToolGovernanceExecutionResult))]
+[JsonSerializable(typeof(ToolGovernanceSidecarRequest))]
+[JsonSerializable(typeof(ToolGovernanceSidecarResponse))]
+[JsonSerializable(typeof(ToolGovernanceSidecarResultRequest))]
+[JsonSerializable(typeof(PaymentConfig))]
+[JsonSerializable(typeof(PaymentPolicyConfig))]
+[JsonSerializable(typeof(PaymentMockProviderConfig))]
+[JsonSerializable(typeof(PaymentStripeLinkConfig))]
+[JsonSerializable(typeof(PaymentMachineConfig))]
+[JsonSerializable(typeof(ExternalCliOptions))]
+[JsonSerializable(typeof(ExternalCliConnectorOptions))]
+[JsonSerializable(typeof(Dictionary<string, ExternalCliConnectorOptions>))]
+[JsonSerializable(typeof(ExternalCliCommandOptions))]
+[JsonSerializable(typeof(Dictionary<string, ExternalCliCommandOptions>))]
+[JsonSerializable(typeof(ExternalCliStatusCommandOptions))]
+[JsonSerializable(typeof(ExternalCliParameterOptions))]
+[JsonSerializable(typeof(Dictionary<string, ExternalCliParameterOptions>))]
+[JsonSerializable(typeof(ExternalCliPreviewRequest))]
+[JsonSerializable(typeof(ExternalCliExecuteRequest))]
+[JsonSerializable(typeof(ExternalCliToolRequest))]
+[JsonSerializable(typeof(ExternalCliConnectorSummary))]
+[JsonSerializable(typeof(List<ExternalCliConnectorSummary>))]
+[JsonSerializable(typeof(ExternalCliConnectorListResponse))]
+[JsonSerializable(typeof(ExternalCliPresetSummary))]
+[JsonSerializable(typeof(List<ExternalCliPresetSummary>))]
+[JsonSerializable(typeof(ExternalCliPresetListResponse))]
+[JsonSerializable(typeof(ExternalCliCommandSummary))]
+[JsonSerializable(typeof(List<ExternalCliCommandSummary>))]
+[JsonSerializable(typeof(ExternalCliCommandListResponse))]
+[JsonSerializable(typeof(ExternalCliCommandSchemaResponse))]
+[JsonSerializable(typeof(ExternalCliInvocationPreview))]
+[JsonSerializable(typeof(ExternalCliPreviewResponse))]
+[JsonSerializable(typeof(ExternalCliExecutionResult))]
+[JsonSerializable(typeof(ExternalCliConnectorStatus))]
+[JsonSerializable(typeof(ExternalCliAuditEntry))]
+[JsonSerializable(typeof(List<ExternalCliAuditEntry>))]
+[JsonSerializable(typeof(ExternalCliRuntimeEvent))]
+[JsonSerializable(typeof(JsonElement))]
 [JsonSerializable(typeof(ToolsetConfig))]
 [JsonSerializable(typeof(Dictionary<string, ToolsetConfig>))]
 [JsonSerializable(typeof(ToolPresetConfig))]
@@ -271,6 +471,8 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(BackendFileWriteEvent))]
 [JsonSerializable(typeof(BackendErrorEvent))]
 [JsonSerializable(typeof(BackendSessionCompletedEvent))]
+[JsonSerializable(typeof(AudioTranscriptionConfig))]
+[JsonSerializable(typeof(VideoProcessingConfig))]
 [JsonSerializable(typeof(TextToSpeechConfig))]
 [JsonSerializable(typeof(GeminiLiveConfig))]
 [JsonSerializable(typeof(ElevenLabsConfig))]
@@ -334,7 +536,6 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(CodeExecConfig))]
 [JsonSerializable(typeof(ImageGenConfig))]
 [JsonSerializable(typeof(PdfReadConfig))]
-[JsonSerializable(typeof(MinerUPdfConfig))]
 [JsonSerializable(typeof(CalendarConfig))]
 [JsonSerializable(typeof(EmailConfig))]
 [JsonSerializable(typeof(DatabaseConfig))]
@@ -352,17 +553,22 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(AgentProfile))]
 [JsonSerializable(typeof(DelegationConfig))]
 [JsonSerializable(typeof(Dictionary<string, AgentProfile>))]
+[JsonSerializable(typeof(WorkflowsConfig))]
+[JsonSerializable(typeof(WorkflowBackendConfig))]
+[JsonSerializable(typeof(Dictionary<string, WorkflowBackendConfig>))]
 [JsonSerializable(typeof(TelegramChannelConfig))]
 [JsonSerializable(typeof(CronConfig))]
 [JsonSerializable(typeof(CronJobConfig))]
 [JsonSerializable(typeof(AutomationsConfig))]
+[JsonSerializable(typeof(AutomationRetryPolicy))]
 [JsonSerializable(typeof(AutomationDefinition))]
 [JsonSerializable(typeof(List<AutomationDefinition>))]
 [JsonSerializable(typeof(AutomationRunState))]
-[JsonSerializable(typeof(RunHistoryEntry))]
-[JsonSerializable(typeof(List<RunHistoryEntry>))]
+[JsonSerializable(typeof(AutomationRunRecord))]
+[JsonSerializable(typeof(List<AutomationRunRecord>))]
 [JsonSerializable(typeof(AutomationTemplate))]
 [JsonSerializable(typeof(List<AutomationTemplate>))]
+[JsonSerializable(typeof(AutomationTemplateListResponse))]
 [JsonSerializable(typeof(AutomationValidationIssue))]
 [JsonSerializable(typeof(List<AutomationValidationIssue>))]
 [JsonSerializable(typeof(AutomationPreview))]
@@ -378,6 +584,126 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(LearningConfig))]
 [JsonSerializable(typeof(LearningProposal))]
 [JsonSerializable(typeof(List<LearningProposal>))]
+[JsonSerializable(typeof(AutomationSuggestionIntent))]
+[JsonSerializable(typeof(AutomationSuggestionQualityDimension))]
+[JsonSerializable(typeof(AutomationSuggestionQualityDimension[]))]
+[JsonSerializable(typeof(AutomationSuggestionQualityResult))]
+[JsonSerializable(typeof(LearningAutomationSuggestionPreview))]
+[JsonSerializable(typeof(LearningProposalFeedbackEvent))]
+[JsonSerializable(typeof(LearningProposalFeedbackEvent[]))]
+[JsonSerializable(typeof(IReadOnlyList<LearningProposalFeedbackEvent>))]
+[JsonSerializable(typeof(IReadOnlyList<AutomationSuggestionQualityDimension>))]
+[JsonSerializable(typeof(LearningToolObservation))]
+[JsonSerializable(typeof(List<LearningToolObservation>))]
+[JsonSerializable(typeof(ManagedLearningSkillMetadata))]
+[JsonSerializable(typeof(HarnessEvolutionProposal))]
+[JsonSerializable(typeof(HarnessEvolutionProposalCreateRequest))]
+[JsonSerializable(typeof(HarnessEvolutionDetectionRequest))]
+[JsonSerializable(typeof(HarnessEvolutionDetectionResponse))]
+[JsonSerializable(typeof(HarnessContract))]
+[JsonSerializable(typeof(List<HarnessContract>))]
+[JsonSerializable(typeof(HarnessContractAction))]
+[JsonSerializable(typeof(List<HarnessContractAction>))]
+[JsonSerializable(typeof(HarnessContractToolRequirement))]
+[JsonSerializable(typeof(List<HarnessContractToolRequirement>))]
+[JsonSerializable(typeof(HarnessContractResourceRef))]
+[JsonSerializable(typeof(List<HarnessContractResourceRef>))]
+[JsonSerializable(typeof(HarnessContractVerificationStep))]
+[JsonSerializable(typeof(List<HarnessContractVerificationStep>))]
+[JsonSerializable(typeof(HarnessContractRollbackStep))]
+[JsonSerializable(typeof(List<HarnessContractRollbackStep>))]
+[JsonSerializable(typeof(HarnessContractAssumption))]
+[JsonSerializable(typeof(List<HarnessContractAssumption>))]
+[JsonSerializable(typeof(HarnessContractConstraint))]
+[JsonSerializable(typeof(List<HarnessContractConstraint>))]
+[JsonSerializable(typeof(HarnessContractMetadata))]
+[JsonSerializable(typeof(HarnessContractListQuery))]
+[JsonSerializable(typeof(HarnessContractStatusUpdateRequest))]
+[JsonSerializable(typeof(HarnessContractListResponse))]
+[JsonSerializable(typeof(HarnessContractDetailResponse))]
+[JsonSerializable(typeof(HarnessContractMutationResponse))]
+[JsonSerializable(typeof(EvidenceBundle))]
+[JsonSerializable(typeof(List<EvidenceBundle>))]
+[JsonSerializable(typeof(EvidenceItem))]
+[JsonSerializable(typeof(List<EvidenceItem>))]
+[JsonSerializable(typeof(EvidenceCheck))]
+[JsonSerializable(typeof(List<EvidenceCheck>))]
+[JsonSerializable(typeof(EvidenceRisk))]
+[JsonSerializable(typeof(List<EvidenceRisk>))]
+[JsonSerializable(typeof(EvidenceAssumption))]
+[JsonSerializable(typeof(List<EvidenceAssumption>))]
+[JsonSerializable(typeof(EvidenceUntestedArea))]
+[JsonSerializable(typeof(List<EvidenceUntestedArea>))]
+[JsonSerializable(typeof(EvidenceHumanReview))]
+[JsonSerializable(typeof(List<EvidenceHumanReview>))]
+[JsonSerializable(typeof(EvidenceSource))]
+[JsonSerializable(typeof(EvidenceBundleMetadata))]
+[JsonSerializable(typeof(EvidenceBundleListQuery))]
+[JsonSerializable(typeof(EvidenceBundleListResponse))]
+[JsonSerializable(typeof(EvidenceBundleDetailResponse))]
+[JsonSerializable(typeof(EvidenceBundleMutationResponse))]
+[JsonSerializable(typeof(GovernanceLedgerEntry))]
+[JsonSerializable(typeof(List<GovernanceLedgerEntry>))]
+[JsonSerializable(typeof(GovernancePolicyHint))]
+[JsonSerializable(typeof(GovernanceLedgerMetadata))]
+[JsonSerializable(typeof(GovernanceLedgerListQuery))]
+[JsonSerializable(typeof(GovernanceLedgerRevokeRequest))]
+[JsonSerializable(typeof(GovernanceLedgerListResponse))]
+[JsonSerializable(typeof(GovernanceLedgerDetailResponse))]
+[JsonSerializable(typeof(GovernanceLedgerMutationResponse))]
+[JsonSerializable(typeof(SharedHarnessState))]
+[JsonSerializable(typeof(List<SharedHarnessState>))]
+[JsonSerializable(typeof(HarnessParticipant))]
+[JsonSerializable(typeof(List<HarnessParticipant>))]
+[JsonSerializable(typeof(HarnessStateAction))]
+[JsonSerializable(typeof(List<HarnessStateAction>))]
+[JsonSerializable(typeof(HarnessReadWriteSet))]
+[JsonSerializable(typeof(HarnessResourceRef))]
+[JsonSerializable(typeof(List<HarnessResourceRef>))]
+[JsonSerializable(typeof(HarnessAssumption))]
+[JsonSerializable(typeof(List<HarnessAssumption>))]
+[JsonSerializable(typeof(HarnessVersionDependency))]
+[JsonSerializable(typeof(List<HarnessVersionDependency>))]
+[JsonSerializable(typeof(HarnessVerifierObligation))]
+[JsonSerializable(typeof(List<HarnessVerifierObligation>))]
+[JsonSerializable(typeof(HarnessConflict))]
+[JsonSerializable(typeof(List<HarnessConflict>))]
+[JsonSerializable(typeof(SharedHarnessStateListQuery))]
+[JsonSerializable(typeof(SharedHarnessStateListResponse))]
+[JsonSerializable(typeof(SharedHarnessStateDetailResponse))]
+[JsonSerializable(typeof(SharedHarnessStateMutationResponse))]
+[JsonSerializable(typeof(CodebaseHarnessMap))]
+[JsonSerializable(typeof(CodebaseMapSummary))]
+[JsonSerializable(typeof(CodebaseProject))]
+[JsonSerializable(typeof(List<CodebaseProject>))]
+[JsonSerializable(typeof(CodebaseModule))]
+[JsonSerializable(typeof(List<CodebaseModule>))]
+[JsonSerializable(typeof(CodebaseArtifact))]
+[JsonSerializable(typeof(List<CodebaseArtifact>))]
+[JsonSerializable(typeof(CodebaseEndpoint))]
+[JsonSerializable(typeof(List<CodebaseEndpoint>))]
+[JsonSerializable(typeof(CodebaseToolSurface))]
+[JsonSerializable(typeof(List<CodebaseToolSurface>))]
+[JsonSerializable(typeof(CodebaseProviderSurface))]
+[JsonSerializable(typeof(List<CodebaseProviderSurface>))]
+[JsonSerializable(typeof(CodebaseChannelSurface))]
+[JsonSerializable(typeof(List<CodebaseChannelSurface>))]
+[JsonSerializable(typeof(CodebaseConfigSurface))]
+[JsonSerializable(typeof(List<CodebaseConfigSurface>))]
+[JsonSerializable(typeof(CodebaseTestSurface))]
+[JsonSerializable(typeof(List<CodebaseTestSurface>))]
+[JsonSerializable(typeof(CodebaseEvidenceLink))]
+[JsonSerializable(typeof(List<CodebaseEvidenceLink>))]
+[JsonSerializable(typeof(CodebaseContractLink))]
+[JsonSerializable(typeof(List<CodebaseContractLink>))]
+[JsonSerializable(typeof(CodebaseSharedStateLink))]
+[JsonSerializable(typeof(List<CodebaseSharedStateLink>))]
+[JsonSerializable(typeof(CodebaseRuntimeTraceLink))]
+[JsonSerializable(typeof(List<CodebaseRuntimeTraceLink>))]
+[JsonSerializable(typeof(CodebaseMapDiagnostic))]
+[JsonSerializable(typeof(List<CodebaseMapDiagnostic>))]
+[JsonSerializable(typeof(CodebaseMapOptions))]
+[JsonSerializable(typeof(CodebaseMapQuery))]
 [JsonSerializable(typeof(WebhooksConfig))]
 [JsonSerializable(typeof(WebhookEndpointConfig))]
 [JsonSerializable(typeof(List<string>))]
@@ -386,6 +712,8 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(OpenAiChatCompletionRequest))]
 [JsonSerializable(typeof(OpenAiChatCompletionResponse))]
 [JsonSerializable(typeof(OpenAiMessage))]
+[JsonSerializable(typeof(OpenAiMessageContent))]
+[JsonSerializable(typeof(OpenAiMessageContentPart))]
 [JsonSerializable(typeof(OpenAiChoice))]
 [JsonSerializable(typeof(OpenAiResponseMessage))]
 [JsonSerializable(typeof(OpenAiUsage))]
@@ -449,6 +777,7 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(WhatsAppWorkerAccountConfig))]
 [JsonSerializable(typeof(List<WhatsAppWorkerAccountConfig>))]
 [JsonSerializable(typeof(AuthSessionRequest))]
+[JsonSerializable(typeof(OperatorTokenExchangeRequest))]
 [JsonSerializable(typeof(PairingApproveResponse))]
 [JsonSerializable(typeof(PairingRevokeResponse))]
 [JsonSerializable(typeof(AllowlistSnapshotResponse))]
@@ -456,6 +785,7 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(CountMutationResponse))]
 [JsonSerializable(typeof(SkillsReloadResponse))]
 [JsonSerializable(typeof(AuthSessionResponse))]
+[JsonSerializable(typeof(OperatorTokenExchangeResponse))]
 [JsonSerializable(typeof(ApprovalListResponse))]
 [JsonSerializable(typeof(ApprovalHistoryQuery))]
 [JsonSerializable(typeof(ApprovalHistoryEntry))]
@@ -478,6 +808,18 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(HeartbeatRunStatusDto))]
 [JsonSerializable(typeof(HeartbeatPreviewResponse))]
 [JsonSerializable(typeof(HeartbeatStatusResponse))]
+[JsonSerializable(typeof(PulseConfig))]
+[JsonSerializable(typeof(PulseActiveHoursConfig))]
+[JsonSerializable(typeof(PulseVisibilityConfig))]
+[JsonSerializable(typeof(PulseRunRequest))]
+[JsonSerializable(typeof(PulseRunResponse))]
+[JsonSerializable(typeof(PulseStatusResponse))]
+[JsonSerializable(typeof(PulseAlertDto))]
+[JsonSerializable(typeof(List<PulseAlertDto>))]
+[JsonSerializable(typeof(PulseState))]
+[JsonSerializable(typeof(PulseTaskDefinition))]
+[JsonSerializable(typeof(List<PulseTaskDefinition>))]
+[JsonSerializable(typeof(Dictionary<string, DateTimeOffset>))]
 [JsonSerializable(typeof(SessionSummary))]
 [JsonSerializable(typeof(PagedSessionList))]
 [JsonSerializable(typeof(SessionListQuery))]
@@ -492,6 +834,19 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(AdminSummaryRetention))]
 [JsonSerializable(typeof(AdminSummaryPlugins))]
 [JsonSerializable(typeof(AdminSummaryUsage))]
+[JsonSerializable(typeof(OperatorDashboardSnapshot))]
+[JsonSerializable(typeof(DashboardNamedMetric))]
+[JsonSerializable(typeof(List<DashboardNamedMetric>))]
+[JsonSerializable(typeof(DashboardSessionSummary))]
+[JsonSerializable(typeof(DashboardApprovalSummary))]
+[JsonSerializable(typeof(DashboardMemorySummary))]
+[JsonSerializable(typeof(DashboardAutomationItem))]
+[JsonSerializable(typeof(List<DashboardAutomationItem>))]
+[JsonSerializable(typeof(DashboardAutomationSummary))]
+[JsonSerializable(typeof(DashboardLearningSummary))]
+[JsonSerializable(typeof(DashboardDelegationSummary))]
+[JsonSerializable(typeof(DashboardChannelSummary))]
+[JsonSerializable(typeof(DashboardPluginSummary))]
 [JsonSerializable(typeof(OpenClaw.Core.Observability.ProviderUsageSnapshot))]
 [JsonSerializable(typeof(List<OpenClaw.Core.Observability.ProviderUsageSnapshot>))]
 [JsonSerializable(typeof(MutationResponse))]
@@ -529,6 +884,8 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(IntegrationApprovalHistoryResponse))]
 [JsonSerializable(typeof(IntegrationProvidersResponse))]
 [JsonSerializable(typeof(IntegrationPluginsResponse))]
+[JsonSerializable(typeof(IntegrationCompatibilityCatalogResponse))]
+[JsonSerializable(typeof(IntegrationCompatibilityExportResponse))]
 [JsonSerializable(typeof(IntegrationOperatorAuditResponse))]
 [JsonSerializable(typeof(IntegrationDashboardResponse))]
 [JsonSerializable(typeof(IntegrationSessionSearchResponse))]
@@ -536,6 +893,19 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(IntegrationProfileResponse))]
 [JsonSerializable(typeof(IntegrationAutomationsResponse))]
 [JsonSerializable(typeof(IntegrationAutomationDetailResponse))]
+[JsonSerializable(typeof(IntegrationAutomationRunsResponse))]
+[JsonSerializable(typeof(IntegrationAutomationRunDetailResponse))]
+[JsonSerializable(typeof(IntegrationWorkflowsResponse))]
+[JsonSerializable(typeof(AgentWorkflowBackendSummary))]
+[JsonSerializable(typeof(List<AgentWorkflowBackendSummary>))]
+[JsonSerializable(typeof(AgentWorkflowRequest))]
+[JsonSerializable(typeof(AgentWorkflowResponse))]
+[JsonSerializable(typeof(AgentWorkflowRunResult))]
+[JsonSerializable(typeof(AgentWorkflowRunSnapshot))]
+[JsonSerializable(typeof(AgentWorkflowEvent))]
+[JsonSerializable(typeof(List<AgentWorkflowEvent>))]
+[JsonSerializable(typeof(AgentWorkflowPendingInput))]
+[JsonSerializable(typeof(List<AgentWorkflowPendingInput>))]
 [JsonSerializable(typeof(LearningProposalListResponse))]
 [JsonSerializable(typeof(IntegrationToolPresetsResponse))]
 [JsonSerializable(typeof(RuntimeEventQuery))]
@@ -547,6 +917,15 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(PluginHealthSnapshot))]
 [JsonSerializable(typeof(List<PluginHealthSnapshot>))]
 [JsonSerializable(typeof(PluginListResponse))]
+[JsonSerializable(typeof(CompatibilityCatalogEntry))]
+[JsonSerializable(typeof(List<CompatibilityCatalogEntry>))]
+[JsonSerializable(typeof(CompatibilityCatalogResponse))]
+[JsonSerializable(typeof(SkillHealthSnapshot))]
+[JsonSerializable(typeof(List<SkillHealthSnapshot>))]
+[JsonSerializable(typeof(SkillListResponse))]
+[JsonSerializable(typeof(SkillCostBreakdown))]
+[JsonSerializable(typeof(List<SkillCostBreakdown>))]
+[JsonSerializable(typeof(SkillCostEstimateResponse))]
 [JsonSerializable(typeof(PluginMutationRequest))]
 [JsonSerializable(typeof(ToolApprovalGrant))]
 [JsonSerializable(typeof(List<ToolApprovalGrant>))]
@@ -555,16 +934,97 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(OperatorAuditEntry))]
 [JsonSerializable(typeof(List<OperatorAuditEntry>))]
 [JsonSerializable(typeof(OperatorAuditListResponse))]
+[JsonSerializable(typeof(OperatorIdentitySnapshot))]
+[JsonSerializable(typeof(OperatorAccountSummary))]
+[JsonSerializable(typeof(List<OperatorAccountSummary>))]
+[JsonSerializable(typeof(OperatorAccountTokenSummary))]
+[JsonSerializable(typeof(List<OperatorAccountTokenSummary>))]
+[JsonSerializable(typeof(OperatorAccountListResponse))]
+[JsonSerializable(typeof(OperatorAccountDetailResponse))]
+[JsonSerializable(typeof(OperatorAccountCreateRequest))]
+[JsonSerializable(typeof(OperatorAccountUpdateRequest))]
+[JsonSerializable(typeof(OperatorAccountTokenCreateRequest))]
+[JsonSerializable(typeof(OperatorAccountTokenCreateResponse))]
+[JsonSerializable(typeof(OrganizationPolicySnapshot))]
+[JsonSerializable(typeof(OrganizationPolicyResponse))]
+[JsonSerializable(typeof(SetupArtifactStatusItem))]
+[JsonSerializable(typeof(List<SetupArtifactStatusItem>))]
+[JsonSerializable(typeof(BrowserToolCapabilitySummary))]
+[JsonSerializable(typeof(TailscaleServeStatusResponse))]
+[JsonSerializable(typeof(SetupStatusResponse))]
+[JsonSerializable(typeof(MaintenanceFinding))]
+[JsonSerializable(typeof(List<MaintenanceFinding>))]
+[JsonSerializable(typeof(MaintenancePromptBudgetSnapshot))]
+[JsonSerializable(typeof(MaintenanceStorageSnapshot))]
+[JsonSerializable(typeof(MaintenanceDriftSnapshot))]
+[JsonSerializable(typeof(MaintenanceReportResponse))]
+[JsonSerializable(typeof(MaintenanceFixRequest))]
+[JsonSerializable(typeof(MaintenanceFixAction))]
+[JsonSerializable(typeof(List<MaintenanceFixAction>))]
+[JsonSerializable(typeof(MaintenanceFixResponse))]
+[JsonSerializable(typeof(ReliabilityFactor))]
+[JsonSerializable(typeof(List<ReliabilityFactor>))]
+[JsonSerializable(typeof(ReliabilityRecommendation))]
+[JsonSerializable(typeof(List<ReliabilityRecommendation>))]
+[JsonSerializable(typeof(ReliabilitySnapshot))]
+[JsonSerializable(typeof(MaintenanceHistorySnapshot))]
+[JsonSerializable(typeof(List<MaintenanceHistorySnapshot>))]
+[JsonSerializable(typeof(SetupVerificationCheck))]
+[JsonSerializable(typeof(List<SetupVerificationCheck>))]
+[JsonSerializable(typeof(SetupVerificationResponse))]
+[JsonSerializable(typeof(SetupVerificationSnapshot))]
+[JsonSerializable(typeof(UpgradeRollbackSnapshotArtifact))]
+[JsonSerializable(typeof(List<UpgradeRollbackSnapshotArtifact>))]
+[JsonSerializable(typeof(UpgradeRollbackSnapshot))]
+[JsonSerializable(typeof(DoctorCheckItem))]
+[JsonSerializable(typeof(List<DoctorCheckItem>))]
+[JsonSerializable(typeof(DoctorReportResponse))]
+[JsonSerializable(typeof(ObservabilityMetricPoint))]
+[JsonSerializable(typeof(List<ObservabilityMetricPoint>))]
+[JsonSerializable(typeof(ObservabilitySummaryCard))]
+[JsonSerializable(typeof(List<ObservabilitySummaryCard>))]
+[JsonSerializable(typeof(ObservabilitySummaryResponse))]
+[JsonSerializable(typeof(OperatorInsightsResponse))]
+[JsonSerializable(typeof(OperatorInsightsTotals))]
+[JsonSerializable(typeof(OperatorInsightsSessionCounts))]
+[JsonSerializable(typeof(OperatorInsightsProviderUsage))]
+[JsonSerializable(typeof(List<OperatorInsightsProviderUsage>))]
+[JsonSerializable(typeof(OperatorInsightsToolFrequency))]
+[JsonSerializable(typeof(List<OperatorInsightsToolFrequency>))]
+[JsonSerializable(typeof(ObservabilitySeriesResponse))]
+[JsonSerializable(typeof(AuditExportManifest))]
+[JsonSerializable(typeof(TrajectoryExportRecord))]
+[JsonSerializable(typeof(UpstreamMigrationCompatibilityItem))]
+[JsonSerializable(typeof(List<UpstreamMigrationCompatibilityItem>))]
+[JsonSerializable(typeof(UpstreamMigrationSkillItem))]
+[JsonSerializable(typeof(List<UpstreamMigrationSkillItem>))]
+[JsonSerializable(typeof(UpstreamMigrationPluginItem))]
+[JsonSerializable(typeof(List<UpstreamMigrationPluginItem>))]
+[JsonSerializable(typeof(UpstreamMigrationReport))]
+[JsonSerializable(typeof(MemoryNoteItem))]
+[JsonSerializable(typeof(List<MemoryNoteItem>))]
+[JsonSerializable(typeof(MemoryNoteListResponse))]
+[JsonSerializable(typeof(MemoryNoteDetailResponse))]
+[JsonSerializable(typeof(MemoryNoteUpsertRequest))]
+[JsonSerializable(typeof(MemoryConsoleExportBundle))]
+[JsonSerializable(typeof(MemoryConsoleImportResponse))]
+[JsonSerializable(typeof(ManagedSkillBundleItem))]
+[JsonSerializable(typeof(List<ManagedSkillBundleItem>))]
+[JsonSerializable(typeof(AgentBundleExportBundle))]
+[JsonSerializable(typeof(AgentBundleImportResponse))]
+[JsonSerializable(typeof(LearningProposalProvenance))]
+[JsonSerializable(typeof(ProfileDiffEntry))]
+[JsonSerializable(typeof(List<ProfileDiffEntry>))]
+[JsonSerializable(typeof(LearningProposalDetailResponse))]
+[JsonSerializable(typeof(ProfileExportBundle))]
+[JsonSerializable(typeof(ProfileImportResponse))]
 [JsonSerializable(typeof(SessionMetadataSnapshot))]
 [JsonSerializable(typeof(List<SessionMetadataSnapshot>))]
 [JsonSerializable(typeof(SessionTodoItem))]
 [JsonSerializable(typeof(List<SessionTodoItem>))]
-[JsonSerializable(typeof(SessionHandoffItem))]
-[JsonSerializable(typeof(List<SessionHandoffItem>))]
-[JsonSerializable(typeof(SessionHandoffListResponse))]
-[JsonSerializable(typeof(SessionHandoffMutationResponse))]
-[JsonSerializable(typeof(SessionHandoffRemoveResponse))]
 [JsonSerializable(typeof(SessionMetadataUpdateRequest))]
+[JsonSerializable(typeof(SessionPromotionRequest))]
+[JsonSerializable(typeof(SessionPromotionResponse))]
 [JsonSerializable(typeof(SessionDiffResponse))]
 [JsonSerializable(typeof(SessionTimelineResponse))]
 [JsonSerializable(typeof(SessionExportItem))]
@@ -598,8 +1058,15 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(ContractStatusResponse))]
 [JsonSerializable(typeof(ContractListResponse))]
 [JsonSerializable(typeof(Dictionary<string, decimal>))]
+[JsonSerializable(typeof(VerificationPolicy))]
+[JsonSerializable(typeof(VerificationCheckDefinition))]
+[JsonSerializable(typeof(VerificationCheckDefinition[]))]
+[JsonSerializable(typeof(VerificationCheckResult))]
+[JsonSerializable(typeof(List<VerificationCheckResult>))]
 [JsonSerializable(typeof(ToolUsageSnapshot))]
 [JsonSerializable(typeof(List<ToolUsageSnapshot>))]
+[JsonSerializable(typeof(OpenClaw.Core.Observability.ToolAuditEntry))]
+[JsonSerializable(typeof(IReadOnlyList<OpenClaw.Core.Observability.ToolAuditEntry>))]
 [JsonSerializable(typeof(OpenClaw.Core.Plugins.BridgeMediaAttachment))]
 [JsonSerializable(typeof(OpenClaw.Core.Plugins.BridgeMediaAttachment[]))]
 [JsonSerializable(typeof(OpenClaw.Core.Plugins.BridgeChannelTypingRequest))]
@@ -610,23 +1077,25 @@ public sealed record ToolInvocation
 [JsonSerializable(typeof(ChannelAuthStatusItem))]
 [JsonSerializable(typeof(WhatsAppSetupRequest))]
 [JsonSerializable(typeof(WhatsAppSetupResponse))]
-[JsonSerializable(typeof(SkillInstallRequest))]
-[JsonSerializable(typeof(SkillInfoDto))]
-[JsonSerializable(typeof(List<SkillInfoDto>))]
-[JsonSerializable(typeof(SkillsDetailResponse))]
-[JsonSerializable(typeof(SkillMutationResponse))]
-[JsonSerializable(typeof(DigitalEmployeeUploadResponse))]
-[JsonSerializable(typeof(WorkspaceUploadResponse))]
-[JsonSerializable(typeof(WorkspaceTreeEntry))]
-[JsonSerializable(typeof(List<WorkspaceTreeEntry>))]
-[JsonSerializable(typeof(WorkspaceTreeResponse))]
-[JsonSerializable(typeof(List<string>))]
 [JsonSerializable(typeof(SlackChannelConfig))]
 [JsonSerializable(typeof(DiscordChannelConfig))]
 [JsonSerializable(typeof(SignalChannelConfig))]
 [JsonSerializable(typeof(FeishuChannelConfig))]
 [JsonSerializable(typeof(DingTalkChannelConfig))]
 [JsonSerializable(typeof(WeComChannelConfig))]
+[JsonSerializable(typeof(SkillArtifact))]
+[JsonSerializable(typeof(SkillStageGateEvent))]
+[JsonSerializable(typeof(SessionHandoffItem))]
+[JsonSerializable(typeof(IReadOnlyList<SessionHandoffItem>))]
+[JsonSerializable(typeof(SessionHandoffListResponse))]
+[JsonSerializable(typeof(SessionHandoffMutationResponse))]
+[JsonSerializable(typeof(SessionHandoffRemoveResponse))]
+[JsonSerializable(typeof(HandoffConfig))]
+[JsonSerializable(typeof(HandoffWorkflowConfig))]
+[JsonSerializable(typeof(DigitalEmployeeUploadResponse))]
+[JsonSerializable(typeof(WorkspaceUploadResponse))]
+[JsonSerializable(typeof(WorkspaceTreeEntry))]
+[JsonSerializable(typeof(WorkspaceTreeResponse))]
 [JsonSerializable(typeof(RoutingConfig))]
 [JsonSerializable(typeof(AgentRouteConfig))]
 [JsonSerializable(typeof(TailscaleConfig))]

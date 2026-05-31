@@ -1,7 +1,9 @@
-using Cronos;
 using OpenClaw.Core.Security;
 using OpenClaw.Core.Models;
+using OpenClaw.Core.Setup;
 using OpenClaw.Core.Plugins;
+using OpenClaw.Core.ExternalCli;
+using System.Text.RegularExpressions;
 
 namespace OpenClaw.Core.Validation;
 
@@ -21,11 +23,13 @@ public static class ConfigValidator
         "ollama",
         "azure-openai",
         "openai-compatible",
+        "aperture",
         "anthropic-vertex",
         "amazon-bedrock",
         "groq",
         "together",
-        "lmstudio"
+        "lmstudio",
+        "embedded"
     };
 
     public static IReadOnlyList<string> Validate(Models.GatewayConfig config)
@@ -51,18 +55,32 @@ public static class ConfigValidator
             errors.Add($"Llm.TimeoutSeconds must be >= 0 (got {config.Llm.TimeoutSeconds}).");
         if (config.Llm.RetryCount < 0)
             errors.Add($"Llm.RetryCount must be >= 0 (got {config.Llm.RetryCount}).");
+        if (config.LocalInference.Port is < 0 or > 65535)
+            errors.Add($"LocalInference.Port must be between 0 and 65535 (got {config.LocalInference.Port}).");
+        if (config.LocalInference.ContextSize < 0)
+            errors.Add($"LocalInference.ContextSize must be >= 0 (got {config.LocalInference.ContextSize}).");
+        if (config.LocalInference.StartupTimeoutSeconds < 1)
+            errors.Add($"LocalInference.StartupTimeoutSeconds must be >= 1 (got {config.LocalInference.StartupTimeoutSeconds}).");
+        if (config.LocalInference.ReasoningBudget < -1)
+            errors.Add($"LocalInference.ReasoningBudget must be >= -1 (got {config.LocalInference.ReasoningBudget}).");
         if (config.Llm.CircuitBreakerThreshold < 1)
             errors.Add($"Llm.CircuitBreakerThreshold must be >= 1 (got {config.Llm.CircuitBreakerThreshold}).");
         if (config.Llm.CircuitBreakerCooldownSeconds < 1)
             errors.Add($"Llm.CircuitBreakerCooldownSeconds must be >= 1 (got {config.Llm.CircuitBreakerCooldownSeconds}).");
+        if (!IsValidProviderAuthMode(config.Llm.AuthMode))
+            errors.Add("Llm.AuthMode must be 'bearer' or 'tailnet-identity'.");
+        else if (IsTailnetIdentityAuth(config.Llm.AuthMode) && !SupportsTailnetIdentity(config.Llm.Provider))
+            errors.Add($"Llm.AuthMode 'tailnet-identity' is not supported for provider '{config.Llm.Provider}'.");
+        ValidateApertureProviderConfig("Llm", "Endpoint", config.Llm.Provider, config.Llm.Endpoint, config.Llm.ApiKey, config.Llm.AuthMode, errors);
         ValidatePromptCaching("Llm.PromptCaching", config.Llm.Provider, config.Llm.PromptCaching, errors, isDynamicProvider: false);
         ValidateModelProfiles(config, errors, pluginBackedProvidersPossible);
 
         // Memory
         if (!string.Equals(config.Memory.Provider, "file", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(config.Memory.Provider, "sqlite", StringComparison.OrdinalIgnoreCase))
+            !string.Equals(config.Memory.Provider, "sqlite", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(config.Memory.Provider, "mempalace", StringComparison.OrdinalIgnoreCase))
         {
-            errors.Add($"Memory.Provider '{config.Memory.Provider}' must be 'file' or 'sqlite'.");
+            errors.Add($"Memory.Provider '{config.Memory.Provider}' must be 'file', 'sqlite', or 'mempalace'.");
         }
         if (string.IsNullOrWhiteSpace(config.Memory.StoragePath))
             errors.Add("Memory.StoragePath must be set.");
@@ -79,6 +97,7 @@ public static class ConfigValidator
             if (config.Memory.CompactionThreshold <= config.Memory.MaxHistoryTurns)
                 errors.Add("Memory.CompactionThreshold must be greater than MaxHistoryTurns when EnableCompaction=true.");
         }
+        ValidateFractalMemory(config.Memory.Fractal, errors);
 
         if (config.Memory.Retention.SweepIntervalMinutes < 5)
             errors.Add($"Memory.Retention.SweepIntervalMinutes must be >= 5 (got {config.Memory.Retention.SweepIntervalMinutes}).");
@@ -108,6 +127,11 @@ public static class ConfigValidator
         // Tooling
         if (config.Tooling.ToolTimeoutSeconds < 0)
             errors.Add($"Tooling.ToolTimeoutSeconds must be >= 0 (got {config.Tooling.ToolTimeoutSeconds}).");
+        ValidateExternalCli(config.ExternalCli, errors);
+
+        ValidateUrlSafety("Tooling.UrlSafety", config.Tooling.UrlSafety, errors);
+        if (config.Plugins.Native.WebFetch.UrlSafety is not null)
+            ValidateUrlSafety("Plugins.Native.WebFetch.UrlSafety", config.Plugins.Native.WebFetch.UrlSafety, errors);
 
         if (config.Tooling.WorkspaceOnly)
         {
@@ -191,6 +215,8 @@ public static class ConfigValidator
             }
         }
 
+        ValidateWorkflows(config.Workflows, errors);
+
         // Middleware
         if (config.SessionTokenBudget < 0)
             errors.Add($"SessionTokenBudget must be >= 0 (got {config.SessionTokenBudget}).");
@@ -211,8 +237,8 @@ public static class ConfigValidator
             errors.Add("Runtime.Mode must be 'auto', 'aot', or 'jit'.");
 
         var runtimeOrchestrator = RuntimeOrchestrator.Normalize(config.Runtime.Orchestrator);
-        if (runtimeOrchestrator is not RuntimeOrchestrator.Maf)
-            errors.Add("Runtime.Orchestrator must be 'maf'.");
+        if (runtimeOrchestrator is not (RuntimeOrchestrator.Native or RuntimeOrchestrator.Maf))
+            errors.Add("Runtime.Orchestrator must be 'native' or 'maf'.");
 
         ValidateNotionConfig(config.Plugins.Native.Notion, errors);
         // MCP plugin servers
@@ -378,6 +404,29 @@ public static class ConfigValidator
         return errors;
     }
 
+    private static void ValidateFractalMemory(FractalMemoryConfig config, List<string> errors)
+    {
+        if (!IsOneOf(config.Mode, "mcp"))
+            errors.Add("Memory.Fractal.Mode must be 'mcp'.");
+        if (config.Enabled && string.IsNullOrWhiteSpace(config.McpCommand))
+            errors.Add("Memory.Fractal.McpCommand must be set when Fractal Memory is enabled.");
+        if (config.DefaultDepth is < 0 or > 3)
+            errors.Add($"Memory.Fractal.DefaultDepth must be between 0 and 3 (got {config.DefaultDepth}).");
+        if (!IsOneOf(config.DefaultView, "index", "state", "timeline", "decisions", "children"))
+            errors.Add("Memory.Fractal.DefaultView must be one of 'index', 'state', 'timeline', 'decisions', or 'children'.");
+        if (!IsOneOf(config.DefaultExportMode, "compact", "standard", "verbose"))
+            errors.Add("Memory.Fractal.DefaultExportMode must be one of 'compact', 'standard', or 'verbose'.");
+        if (!IsOneOf(config.AutoContextMode, "off", "manual", "pulse", "auto"))
+            errors.Add("Memory.Fractal.AutoContextMode must be one of 'off', 'manual', 'pulse', or 'auto'.");
+        if (config.MaxContextChars < 1024)
+            errors.Add($"Memory.Fractal.MaxContextChars must be >= 1024 (got {config.MaxContextChars}).");
+        if (config.MaxContextTokens < 256)
+            errors.Add($"Memory.Fractal.MaxContextTokens must be >= 256 (got {config.MaxContextTokens}).");
+    }
+
+    private static bool IsOneOf(string? value, params string[] allowed)
+        => allowed.Any(candidate => string.Equals(value?.Trim(), candidate, StringComparison.OrdinalIgnoreCase));
+
     private static void ValidateCodingBackends(CodingBackendsConfig config, List<string> errors)
     {
         var backendIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -417,6 +466,28 @@ public static class ConfigValidator
         }
     }
 
+    private static void ValidateUrlSafety(string path, UrlSafetyConfig config, List<string> errors)
+    {
+        foreach (var cidr in config.BlockedCidrs)
+        {
+            if (string.IsNullOrWhiteSpace(cidr))
+                continue;
+
+            var parts = cidr.Split('/', 2, StringSplitOptions.TrimEntries);
+            if (parts.Length != 2 ||
+                !System.Net.IPAddress.TryParse(parts[0], out var address) ||
+                !int.TryParse(parts[1], out var prefixLength))
+            {
+                errors.Add($"{path}.BlockedCidrs entry '{cidr}' must be a valid CIDR block.");
+                continue;
+            }
+
+            var maxPrefix = address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? 32 : 128;
+            if (prefixLength < 0 || prefixLength > maxPrefix)
+                errors.Add($"{path}.BlockedCidrs entry '{cidr}' has an invalid prefix length.");
+        }
+    }
+
     private static void ValidateNotionConfig(NotionConfig config, List<string> errors)
     {
         if (!config.Enabled)
@@ -451,15 +522,72 @@ public static class ConfigValidator
         if (string.IsNullOrWhiteSpace(expression))
             return false;
 
-        try
-        {
-            CronExpression.Parse(expression, CronFormat.Standard);
-            return true;
-        }
-        catch (CronFormatException)
-        {
+        expression = NormalizeCronExpression(expression);
+
+        var parts = expression.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length != 5)
             return false;
+
+        return IsValidCronField(parts[0], 0, 59) &&
+               IsValidCronField(parts[1], 0, 23) &&
+               IsValidCronField(parts[2], 1, 31) &&
+               IsValidCronField(parts[3], 1, 12) &&
+               IsValidCronField(parts[4], 0, 6);
+    }
+
+    private static string NormalizeCronExpression(string expression)
+        => expression.Trim().ToLowerInvariant() switch
+        {
+            "@hourly" => "0 * * * *",
+            "@daily" => "0 0 * * *",
+            "@weekly" => "0 0 * * 0",
+            "@monthly" => "0 0 1 * *",
+            _ => expression
+        };
+
+    private static bool IsValidCronField(string field, int min, int max)
+    {
+        if (string.IsNullOrWhiteSpace(field))
+            return false;
+
+        if (field == "*")
+            return true;
+
+        if (field == "L")
+            return min == 1;
+
+        if (int.TryParse(field, out var exact))
+            return exact >= min && exact <= max;
+
+        if (field.Contains(','))
+        {
+            var options = field.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            return options.Length > 0 && options.All(option => IsValidCronField(option, min, max));
         }
+
+        if (field.Contains('/'))
+        {
+            var stepParts = field.Split('/');
+            if (stepParts.Length != 2 || !int.TryParse(stepParts[1], out var step) || step <= 0)
+                return false;
+
+            return stepParts[0] == "*" || IsValidCronField(stepParts[0], min, max);
+        }
+
+        if (field.Contains('-'))
+        {
+            var rangeParts = field.Split('-');
+            if (rangeParts.Length != 2 ||
+                !int.TryParse(rangeParts[0], out var start) ||
+                !int.TryParse(rangeParts[1], out var end))
+            {
+                return false;
+            }
+
+            return start >= min && start <= max && end >= min && end <= max;
+        }
+
+        return false;
     }
 
     private static void ValidateDmPolicy(string field, string? value, ICollection<string> errors)
@@ -527,6 +655,26 @@ public static class ConfigValidator
 
             if (string.IsNullOrWhiteSpace(profile.Model))
                 errors.Add($"Models.Profiles.{profile.Id}.Model must be set.");
+            if (!string.IsNullOrWhiteSpace(profile.AuthMode) && !IsValidProviderAuthMode(profile.AuthMode))
+                errors.Add($"Models.Profiles.{profile.Id}.AuthMode must be 'bearer' or 'tailnet-identity'.");
+            else if (IsTailnetIdentityAuth(profile.AuthMode) && !SupportsTailnetIdentity(profile.Provider))
+                errors.Add($"Models.Profiles.{profile.Id}.AuthMode 'tailnet-identity' is not supported for provider '{profile.Provider}'.");
+            ValidateApertureProviderConfig(
+                $"Models.Profiles.{profile.Id}",
+                "BaseUrl",
+                profile.Provider,
+                profile.BaseUrl,
+                profile.ApiKey,
+                profile.AuthMode,
+                errors);
+            if (!string.IsNullOrWhiteSpace(profile.PresetId))
+            {
+                if (!LocalModelPresetCatalog.TryGet(profile.PresetId, out _))
+                    errors.Add($"Models.Profiles.{profile.Id}.PresetId '{profile.PresetId}' is not a known local model preset.");
+                else if (LocalModelPresetCatalog.TryGet(profile.PresetId, out var preset) &&
+                         !string.Equals(profile.Provider, preset?.Provider, StringComparison.OrdinalIgnoreCase))
+                    errors.Add($"Models.Profiles.{profile.Id}.PresetId '{profile.PresetId}' requires Provider='{preset?.Provider}'.");
+            }
             if (profile.Capabilities?.MaxContextTokens < 0)
                 errors.Add($"Models.Profiles.{profile.Id}.Capabilities.MaxContextTokens must be >= 0.");
             if (profile.Capabilities?.MaxOutputTokens < 0)
@@ -573,6 +721,161 @@ public static class ConfigValidator
     private static string ResolveConfiguredPath(string? path)
         => ConfigPathResolver.Resolve(path);
 
+    private static void ValidateApertureProviderConfig(
+        string path,
+        string endpointPropertyName,
+        string? provider,
+        string? endpoint,
+        string? apiKey,
+        string? authMode,
+        ICollection<string> errors)
+    {
+        if (!string.Equals(provider, "aperture", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        if (string.IsNullOrWhiteSpace(endpoint))
+        {
+            errors.Add($"{path}.{endpointPropertyName} must be set when Provider='aperture'.");
+        }
+        else if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri) ||
+                 (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            errors.Add($"{path}.{endpointPropertyName} must be an absolute http(s) URL when Provider='aperture'.");
+        }
+
+        if (!IsTailnetIdentityAuth(authMode) && string.IsNullOrWhiteSpace(apiKey))
+            errors.Add($"{path}.ApiKey must be set when Provider='aperture' and AuthMode is not 'tailnet-identity'.");
+    }
+
+    private static void ValidateWorkflows(WorkflowsConfig config, List<string> errors)
+    {
+        if (!config.Enabled)
+            return;
+
+        if (config.Backends.Count == 0)
+        {
+            errors.Add("Workflows is enabled but no backends are configured.");
+            return;
+        }
+
+        foreach (var (backendId, backend) in config.Backends)
+        {
+            var path = $"Workflows.Backends.{backendId}";
+            if (string.IsNullOrWhiteSpace(backendId))
+            {
+                errors.Add("Workflows.Backends contains an empty backend id.");
+                path = "Workflows.Backends.<empty>";
+            }
+
+            if (!backend.Enabled)
+                continue;
+
+            var kind = string.IsNullOrWhiteSpace(backend.Kind)
+                ? AgentWorkflowBackendKinds.MafDurableHttp
+                : backend.Kind.Trim();
+            if (!string.Equals(kind, AgentWorkflowBackendKinds.MafDurableHttp, StringComparison.OrdinalIgnoreCase))
+                errors.Add($"{path}.Kind must be '{AgentWorkflowBackendKinds.MafDurableHttp}'.");
+
+            if (!Uri.TryCreate(backend.BaseUrl, UriKind.Absolute, out var baseUrl) ||
+                (baseUrl.Scheme != Uri.UriSchemeHttp && baseUrl.Scheme != Uri.UriSchemeHttps))
+            {
+                errors.Add($"{path}.BaseUrl must be an absolute http(s) URL.");
+            }
+
+            if (backend.PollIntervalSeconds < 1)
+                errors.Add($"{path}.PollIntervalSeconds must be >= 1 (got {backend.PollIntervalSeconds}).");
+            if (backend.TimeoutSeconds < 5)
+                errors.Add($"{path}.TimeoutSeconds must be >= 5 (got {backend.TimeoutSeconds}).");
+        }
+    }
+
+    private static void ValidateExternalCli(ExternalCliOptions config, List<string> errors)
+    {
+        if (config.DefaultTimeoutSeconds < 1)
+            errors.Add($"ExternalCli.DefaultTimeoutSeconds must be >= 1 (got {config.DefaultTimeoutSeconds}).");
+        if (config.MaxStdoutBytes < 1)
+            errors.Add($"ExternalCli.MaxStdoutBytes must be >= 1 (got {config.MaxStdoutBytes}).");
+        if (config.MaxStderrBytes < 1)
+            errors.Add($"ExternalCli.MaxStderrBytes must be >= 1 (got {config.MaxStderrBytes}).");
+        if (config.AllowFreeformCommands)
+            errors.Add("ExternalCli.AllowFreeformCommands is not supported by this native connector; use named allowlisted commands.");
+
+        var presetIds = config.Presets ?? [];
+        for (var i = 0; i < presetIds.Length; i++)
+        {
+            if (string.IsNullOrWhiteSpace(presetIds[i]))
+                errors.Add($"ExternalCli.Presets[{i}] must not be empty.");
+        }
+
+        foreach (var presetId in ExternalCliPresetCatalog.FindUnknownPresetIds(config))
+            errors.Add($"ExternalCli.Presets contains unknown preset '{presetId}'.");
+
+        var effectiveConfig = ExternalCliPresetCatalog.Apply(config);
+        foreach (var (connectorName, connector) in effectiveConfig.Connectors)
+        {
+            if (string.IsNullOrWhiteSpace(connectorName))
+                errors.Add("ExternalCli.Connectors contains an empty connector name.");
+            if (connector.Enabled && string.IsNullOrWhiteSpace(connector.Executable))
+                errors.Add($"ExternalCli.Connectors.{connectorName}.Executable must be set when connector is enabled.");
+
+            var defaultFormat = ExternalCliOutputFormat.Normalize(connector.DefaultOutputFormat);
+            if (!string.Equals(defaultFormat, connector.DefaultOutputFormat, StringComparison.OrdinalIgnoreCase))
+                errors.Add($"ExternalCli.Connectors.{connectorName}.DefaultOutputFormat must be one of: json, ndjson, csv, text, table.");
+            ValidateRegexList($"ExternalCli.Connectors.{connectorName}.RedactionRules", connector.RedactionRules, errors);
+
+            foreach (var (commandName, command) in connector.Commands)
+            {
+                if (string.IsNullOrWhiteSpace(commandName))
+                    errors.Add($"ExternalCli.Connectors.{connectorName}.Commands contains an empty command name.");
+                if (command.ArgsTemplate.Length == 0)
+                    errors.Add($"ExternalCli.Connectors.{connectorName}.Commands.{commandName}.ArgsTemplate must contain at least one argument.");
+                if (command.SupportsDryRun && command.DryRunArgsTemplate.Length == 0)
+                    errors.Add($"ExternalCli.Connectors.{connectorName}.Commands.{commandName}.DryRunArgsTemplate must be set when SupportsDryRun=true.");
+                if (command.TimeoutSeconds is <= 0)
+                    errors.Add($"ExternalCli.Connectors.{connectorName}.Commands.{commandName}.TimeoutSeconds must be >= 1 when set.");
+
+                var risk = ExternalCliRiskLevel.Normalize(command.RiskLevel);
+                if (!string.Equals(risk, command.RiskLevel, StringComparison.OrdinalIgnoreCase))
+                    errors.Add($"ExternalCli.Connectors.{connectorName}.Commands.{commandName}.RiskLevel must be low, medium, or high.");
+
+                if (!string.IsNullOrWhiteSpace(command.StructuredOutput))
+                {
+                    var format = ExternalCliOutputFormat.Normalize(command.StructuredOutput);
+                    if (!string.Equals(format, command.StructuredOutput, StringComparison.OrdinalIgnoreCase))
+                        errors.Add($"ExternalCli.Connectors.{connectorName}.Commands.{commandName}.StructuredOutput must be one of: json, ndjson, csv, text, table.");
+                }
+
+                ValidateRegexList($"ExternalCli.Connectors.{connectorName}.Commands.{commandName}.RedactionRules", command.RedactionRules, errors);
+                foreach (var (parameterName, parameter) in command.Parameters)
+                {
+                    if (!string.IsNullOrWhiteSpace(parameter.Pattern))
+                        ValidateRegexPattern($"ExternalCli.Connectors.{connectorName}.Commands.{commandName}.Parameters.{parameterName}.Pattern", parameter.Pattern, errors);
+                }
+            }
+        }
+    }
+
+    private static void ValidateRegexList(string path, IReadOnlyList<string> patterns, List<string> errors)
+    {
+        for (var i = 0; i < patterns.Count; i++)
+        {
+            if (!string.IsNullOrWhiteSpace(patterns[i]))
+                ValidateRegexPattern($"{path}[{i}]", patterns[i], errors);
+        }
+    }
+
+    private static void ValidateRegexPattern(string path, string pattern, List<string> errors)
+    {
+        try
+        {
+            _ = new Regex(pattern, RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(250));
+        }
+        catch (ArgumentException ex)
+        {
+            errors.Add($"{path} is not a valid regex: {ex.Message}");
+        }
+    }
+
     private static void ValidatePromptCaching(
         string prefix,
         string? providerId,
@@ -594,6 +897,7 @@ public static class ConfigValidator
         var provider = (providerId ?? string.Empty).Trim();
         var requireExplicitDialect =
             provider.Equals("openai-compatible", StringComparison.OrdinalIgnoreCase)
+            || provider.Equals("aperture", StringComparison.OrdinalIgnoreCase)
             || provider.Equals("groq", StringComparison.OrdinalIgnoreCase)
             || provider.Equals("together", StringComparison.OrdinalIgnoreCase)
             || provider.Equals("lmstudio", StringComparison.OrdinalIgnoreCase)
@@ -613,6 +917,20 @@ public static class ConfigValidator
             }
         }
     }
+
+    private static bool IsValidProviderAuthMode(string? authMode)
+    {
+        var normalized = string.IsNullOrWhiteSpace(authMode) ? "bearer" : authMode.Trim().ToLowerInvariant();
+        return normalized is "bearer" or "tailnet-identity";
+    }
+
+    private static bool IsTailnetIdentityAuth(string? authMode)
+        => string.Equals(authMode?.Trim(), "tailnet-identity", StringComparison.OrdinalIgnoreCase);
+
+    private static bool SupportsTailnetIdentity(string? provider)
+        => provider is not null &&
+           (provider.Equals("aperture", StringComparison.OrdinalIgnoreCase) ||
+            provider.Equals("openai-compatible", StringComparison.OrdinalIgnoreCase));
 
     private static bool SupportsExplicitCacheTtl(string? providerId, string? dialect)
     {

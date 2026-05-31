@@ -2,7 +2,24 @@
 
 All notable changes to this project are tracked in this file.
 
-## [Unreleased] - 2026-03-04
+## [Unreleased] - 2026-03-05
+
+### openclaw.net 迁入 kingcrab（结构性合并）
+- 新增 9 个 A 组项目（整项拷贝）：`OpenClaw.SkillKit`、`OpenClaw.SkillKit.Abstractions`、`OpenClaw.Payments.Abstractions`、`OpenClaw.Payments.Core`、`OpenClaw.Payments.StripeLink`、`OpenClaw.Plugins.Payment`、`OpenClaw.Dashboard`（Blazor WASM）、`OpenClaw.Testing`，并注册到 `OpenClaw.Net.slnx`。
+- 排除（B 组）：`OpenClaw.MicrosoftAgentFrameworkAdapter`（已合并进 kingcrab `OpenClaw.Agent`）、`OpenClaw.Providers.MicrosoftExtensionsAI`（MEAI Provider）、`OpenClaw.SemanticKernelAdapter`（SK 适配器）。
+- 排除（C 组）：`OpenClaw.Embeddings.Onnx`（源代码缺失）、`whatsapp-whatsmeow-worker/`（保留 kingcrab 现有 Baileys Worker）、`samples/*`（不引入 samples 目录）。
+- 公共项目（D 组）按文件级 diff 合并：`only-in-openclaw` 文件批量拷贝（328 copied / 7 skipped），`common` 文件保留 kingcrab 已修复版本不动；详细差异报告见 `docs/migration/diff-*.md`。
+- 因 kingcrab 与 openclaw.net 在 `OperatorDashboardModels`、`OperatorGovernanceModels`、`FractalMemoryConfig`、`UrlSafetyConfig`、`SkillResource`、`MemoryNoteCatalog`、`HarnessRegressionScenarios` 等内部抽象上分叉，迁移期已剔除依赖缺失类型的 only-in-openclaw 源文件（清单见 `docs/migration/build-logs/deleted.txt`），优先保证 kingcrab 现有补丁不被回退。
+- 移除 `OpenClaw.Plugins.Mempalace` 整项（因 `IMemoryNoteCatalog`、`MemoryMempalaceConfig`、`NativeDynamicMemoryProviderContext` 等抽象在 kingcrab 不存在，且核心两类文件不可独立编译；如未来需要 MemPalace，可基于 kingcrab `IMemoryStore` 重新实现）。
+- 移除 `OpenClaw.Agent\Tools\ToolPathPolicy.cs`（与 kingcrab 既有 `OpenClaw.Core.Security.ToolPathPolicy` 命名冲突）。
+- `OpenClaw.Payments.Core/PaymentServiceCollectionExtensions.cs` 与 `OpenClaw.Payments.StripeLink/LinkCliCommandRunner.cs` 中的 `ISensitiveDataRedactor` / `PaymentSensitiveDataRedactor` 绑定改为本地 stub（直通输出），原因同上。
+- `OpenClaw.Testing/HarnessRegressionRunner.cs` 默认场景列表改为空集（原依赖的 `HarnessRegressionScenarios` 因引用 kingcrab 不存在的多种 API 已删除）。
+- `Directory.Build.props` 增补 Gateway 的 `OpenClawFeatureVariant` 输出目录隔离规则（来自 openclaw.net）。
+- `OpenClaw.Gateway/Endpoints/OpenAiEndpoints.cs` 顶层类型加 `partial` 修饰符，与新引入的 `OpenAiEndpoints.ChatCompletions.cs` / `OpenAiEndpoints.Responses.cs` 配套。
+- 包版本对齐：`Payments.Core` 与 `Payments.StripeLink` 的 `Microsoft.Extensions.DependencyInjection.Abstractions` / `Microsoft.Extensions.Logging.Abstractions` 升级到 `10.0.7`，避免 NU1605 降级冲突。
+- Aspire AppHost 暂未注册 `OpenClaw.Dashboard`（Blazor WASM 独立工程，缺独立服务宿主），后续如需托管再单独评估。
+
+## [Previously Unreleased] - 2026-03-04
 
 ### Integration API, MCP, and SDK
 - Added a gateway-hosted typed integration API under `/api/integration` for operational reads and inbound message enqueueing.

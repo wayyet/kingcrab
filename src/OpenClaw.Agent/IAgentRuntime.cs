@@ -1,14 +1,9 @@
 using System.Text.Json;
 using Microsoft.Extensions.AI;
-using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Models;
+using OpenClaw.Core.Skills;
 
 namespace OpenClaw.Agent;
-
-/// <summary>
-/// Delegate for interactive tool approval. Returns true to allow, false to deny.
-/// </summary>
-public delegate ValueTask<bool> ToolApprovalCallback(string toolName, string arguments, CancellationToken ct);
 
 public interface IAgentRuntime
 {
@@ -16,10 +11,16 @@ public interface IAgentRuntime
     IReadOnlyList<string> LoadedSkillNames { get; }
 
     /// <summary>
-    /// The full set of AI tools currently available to this runtime, including name,
-    /// description, and JSON schema. Populated after skill/plugin loading completes.
+    /// Snapshot of the currently loaded skill definitions. Used by the
+    /// <c>load_skill</c> tool to resolve a skill body on demand (progressive disclosure).
     /// </summary>
-    IReadOnlyList<AITool> LoadedTools { get; }
+    IReadOnlyList<SkillDefinition> LoadedSkills { get; }
+
+    /// <summary>
+    /// Snapshot of the currently registered AITool declarations (kingcrab extension,
+    /// used by the dev UI / observability endpoints).
+    /// </summary>
+    IReadOnlyList<AITool> LoadedTools => [];
 
     Task<string> RunAsync(
         Session session,
@@ -32,20 +33,13 @@ public interface IAgentRuntime
     Task<IReadOnlyList<string>> ReloadSkillsAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// Raised after <see cref="ReloadSkillsAsync"/> applies a fresh skill set, allowing
-    /// auxiliary subsystems (e.g., artifact runtime) to refresh their state without
-    /// re-running <c>SkillLoader</c>.
-    /// </summary>
-    event Action<IReadOnlyList<Core.Skills.SkillDefinition>>? SkillsReloaded;
-
-    /// <summary>
-    /// Applies a diff of workspace MCP tools: registers <paramref name="toAdd"/> and
-    /// unregisters <paramref name="toRemove"/> (by tool name) without restarting.
+    /// Hot-swap the workspace MCP tool surface. kingcrab extension consumed by
+    /// <c>McpWorkspaceWatcherService</c> when MCP servers are added or removed.
     /// </summary>
     Task ApplyMcpToolChangesAsync(
-        IReadOnlyList<ITool> toAdd,
+        IReadOnlyList<OpenClaw.Core.Abstractions.ITool> toAdd,
         IReadOnlyList<string> toRemove,
-        CancellationToken ct = default);
+        CancellationToken ct = default) => Task.CompletedTask;
 
     IAsyncEnumerable<AgentStreamEvent> RunStreamingAsync(
         Session session,

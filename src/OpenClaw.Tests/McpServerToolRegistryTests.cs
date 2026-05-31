@@ -17,6 +17,7 @@ using Xunit;
 
 namespace OpenClaw.Tests;
 
+[Collection(EnvironmentVariableCollection.Name)]
 public sealed class McpServerToolRegistryTests : IAsyncDisposable
 {
     private readonly List<WebApplication> _apps = [];
@@ -222,7 +223,7 @@ public sealed class McpServerToolRegistryTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task LoadAsync_WhenOneServerFails_SkipsFailedServerAndLoadsTools()
+    public async Task LoadAsync_WhenFirstAttemptFails_AllowsRetryAndLoadsTools()
     {
         var (serverUrl, _) = await StartMcpServerAsync<DemoMcpTools>();
         var config = new McpPluginsConfig
@@ -244,11 +245,16 @@ public sealed class McpServerToolRegistryTests : IAsyncDisposable
         using var registry = new McpServerToolRegistry(config, NullLogger<McpServerToolRegistry>.Instance);
         using var nativeRegistry = new NativePluginRegistry(new NativePluginsConfig(), NullLogger.Instance, new ToolingConfig());
 
-        await registry.RegisterToolsAsync(nativeRegistry, CancellationToken.None);
-
+        await Assert.ThrowsAsync<InvalidOperationException>(() => registry.RegisterToolsAsync(nativeRegistry, CancellationToken.None));
         var clientsField = typeof(McpServerToolRegistry).GetField("_clients", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-        var clientsAfterLoad = Assert.IsType<List<ModelContextProtocol.Client.McpClient>>(clientsField?.GetValue(registry));
-        Assert.Single(clientsAfterLoad);
+        var clientsAfterFailure = Assert.IsType<List<ModelContextProtocol.Client.McpClient>>(clientsField?.GetValue(registry));
+        Assert.Empty(clientsAfterFailure);
+
+        config.Servers["broken"].Enabled = false;
+
+        await registry.RegisterToolsAsync(nativeRegistry, CancellationToken.None);
+        var clientsAfterSuccess = Assert.IsType<List<ModelContextProtocol.Client.McpClient>>(clientsField?.GetValue(registry));
+        Assert.Single(clientsAfterSuccess);
 
         var tool = Assert.Single(nativeRegistry.Tools);
         Assert.Equal("demo.echo", tool.Name);
@@ -299,6 +305,22 @@ public sealed class McpServerToolRegistryTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task LoadAsync_AfterDisposeAsync_ThrowsObjectDisposedException()
+    {
+        var registry = new McpServerToolRegistry(
+            new McpPluginsConfig
+            {
+                Enabled = true,
+                Servers = new Dictionary<string, McpServerConfig>(StringComparer.Ordinal)
+            },
+            NullLogger<McpServerToolRegistry>.Instance);
+
+        await registry.DisposeAsync();
+
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => registry.LoadAsync(CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Dispose_MayBeCalledTwice_AfterToolRegistration()
     {
         var (serverUrl, _) = await StartMcpServerAsync<DemoMcpTools>();
@@ -324,6 +346,37 @@ public sealed class McpServerToolRegistryTests : IAsyncDisposable
         {
             registry.Dispose();
             registry.Dispose();
+        });
+
+        Assert.Null(ex);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_MayBeCalledTwice_AfterToolRegistration()
+    {
+        var (serverUrl, _) = await StartMcpServerAsync<DemoMcpTools>();
+        var registry = new McpServerToolRegistry(
+            new McpPluginsConfig
+            {
+                Enabled = true,
+                Servers = new Dictionary<string, McpServerConfig>(StringComparer.Ordinal)
+                {
+                    ["demo"] = new()
+                    {
+                        Transport = "http",
+                        Url = serverUrl
+                    }
+                }
+            },
+            NullLogger<McpServerToolRegistry>.Instance);
+        using var nativeRegistry = new NativePluginRegistry(new NativePluginsConfig(), NullLogger.Instance, new ToolingConfig());
+
+        await registry.RegisterToolsAsync(nativeRegistry, CancellationToken.None);
+
+        var ex = await Record.ExceptionAsync(async () =>
+        {
+            await registry.DisposeAsync();
+            await registry.DisposeAsync();
         });
 
         Assert.Null(ex);

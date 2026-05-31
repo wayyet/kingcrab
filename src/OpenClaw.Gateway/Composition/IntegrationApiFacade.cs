@@ -1,7 +1,10 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using OpenClaw.Core.Compatibility;
 using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Models;
 using OpenClaw.Gateway.Bootstrap;
+using OpenClaw.Gateway.Workflows;
 
 namespace OpenClaw.Gateway.Composition;
 
@@ -14,8 +17,11 @@ internal sealed class IntegrationApiFacade
     private readonly IUserProfileStore _profileStore;
     private readonly GatewayAutomationService _automationService;
     private readonly LearningService _learningService;
+    private readonly IMemoryNoteCatalog? _memoryCatalog;
     private readonly IToolPresetResolver? _toolPresetResolver;
     private readonly TextToSpeechService? _textToSpeechService;
+    private readonly GatewayMaintenanceRuntimeService? _maintenanceService;
+    private readonly AgentWorkflowRegistry _workflows;
 
     public static IntegrationApiFacade Create(
         GatewayStartupContext startup,
@@ -30,8 +36,12 @@ internal sealed class IntegrationApiFacade
             ?? throw new InvalidOperationException("HeartbeatService must be registered before mapping integration endpoints.");
         var automationService = FeatureFallbackServices.ResolveAutomationService(startup, services, heartbeat, fallbackFeatureStore);
         var learningService = FeatureFallbackServices.ResolveLearningService(startup, services, fallbackFeatureStore);
+        var memoryCatalog = services.GetService<IMemoryStore>() as IMemoryNoteCatalog;
         var toolPresetResolver = services.GetService<IToolPresetResolver>();
         var textToSpeechService = services.GetService<TextToSpeechService>();
+        var maintenanceService = services.GetService<GatewayMaintenanceRuntimeService>();
+        var workflows = services.GetService<AgentWorkflowRegistry>()
+            ?? new AgentWorkflowRegistry(new GatewayConfig(), runtime.Operations.RuntimeEvents, NullLoggerFactory.Instance);
 
         return new IntegrationApiFacade(
             startup,
@@ -41,8 +51,11 @@ internal sealed class IntegrationApiFacade
             profileStore,
             automationService,
             learningService,
+            memoryCatalog,
             toolPresetResolver,
-            textToSpeechService);
+            textToSpeechService,
+            maintenanceService,
+            workflows);
     }
 
     public IntegrationApiFacade(
@@ -53,8 +66,11 @@ internal sealed class IntegrationApiFacade
         IUserProfileStore profileStore,
         GatewayAutomationService automationService,
         LearningService learningService,
+        IMemoryNoteCatalog? memoryCatalog,
         IToolPresetResolver? toolPresetResolver,
-        TextToSpeechService? textToSpeechService)
+        TextToSpeechService? textToSpeechService,
+        GatewayMaintenanceRuntimeService? maintenanceService,
+        AgentWorkflowRegistry workflows)
     {
         _startup = startup;
         _runtime = runtime;
@@ -63,8 +79,11 @@ internal sealed class IntegrationApiFacade
         _profileStore = profileStore;
         _automationService = automationService;
         _learningService = learningService;
+        _memoryCatalog = memoryCatalog;
         _toolPresetResolver = toolPresetResolver;
         _textToSpeechService = textToSpeechService;
+        _maintenanceService = maintenanceService;
+        _workflows = workflows;
     }
 
     public IntegrationStatusResponse BuildStatusResponse()
@@ -101,6 +120,9 @@ internal sealed class IntegrationApiFacade
                 Id = session.Id,
                 ChannelId = session.ChannelId,
                 SenderId = session.SenderId,
+                StableSessionId = session.StableSessionBinding?.ExternalSessionId,
+                StableSessionNamespace = session.StableSessionBinding?.Namespace,
+                StableSessionOwnerKey = session.StableSessionBinding?.OwnerKey,
                 CreatedAt = session.CreatedAt,
                 LastActiveAt = session.LastActiveAt,
                 State = session.State,
@@ -192,6 +214,27 @@ internal sealed class IntegrationApiFacade
             Items = _runtime.Operations.PluginHealth.ListSnapshots()
         };
 
+    public IntegrationCompatibilityCatalogResponse GetCompatibilityCatalog(
+        string? compatibilityStatus,
+        string? kind,
+        string? category)
+        => new()
+        {
+            Catalog = PublicCompatibilityCatalog.GetCatalog(compatibilityStatus, kind, category)
+        };
+
+    public IntegrationCompatibilityExportResponse GetCompatibilityExport()
+        => new()
+        {
+            RequestedRuntimeMode = _startup.RuntimeState.RequestedMode,
+            EffectiveRuntimeMode = _startup.RuntimeState.EffectiveModeName,
+            DynamicCodeSupported = _startup.RuntimeState.DynamicCodeSupported,
+            Posture = SecurityPostureBuilder.Build(_startup, _runtime),
+            Channels = MapChannelReadiness(ChannelReadinessEvaluator.Evaluate(_startup.Config, _startup.IsNonLoopbackBind)),
+            Plugins = _runtime.Operations.PluginHealth.ListSnapshots(),
+            Catalog = PublicCompatibilityCatalog.GetCatalog()
+        };
+
     public IntegrationOperatorAuditResponse GetOperatorAudit(OperatorAuditQuery query)
         => new()
         {
@@ -208,9 +251,265 @@ internal sealed class IntegrationApiFacade
             ApprovalHistory = GetApprovalHistory(new ApprovalHistoryQuery { Limit = 12 }),
             Providers = GetProviders(recentTurnsLimit: 20),
             Plugins = GetPlugins(),
-            Events = QueryRuntimeEvents(new RuntimeEventQuery { Limit = 20 })
+            Events = QueryRuntimeEvents(new RuntimeEventQuery { Limit = 20 }),
+            Operator = await GetOperatorDashboardAsync(cancellationToken)
         };
     }
+
+    public async Task<OperatorDashboardSnapshot> GetOperatorDashboardAsync(CancellationToken cancellationToken)
+        => await GetOperatorDashboardAsync(reliability: null, cancellationToken);
+
+    public async Task<OperatorDashboardSnapshot> GetOperatorDashboardAsync(ReliabilitySnapshot? reliability, CancellationToken cancellationToken)
+    {
+        var metadataById = _runtime.Operations.SessionMetadata.GetAll();
+        var persistedSessions = await SessionAdminPersistedListing.ListAllMatchingSummariesAsync(
+            _sessionAdminStore,
+            new SessionListQuery(),
+            metadataById,
+            cancellationToken);
+        var activeSessions = (await _runtime.SessionManager.ListActiveAsync(cancellationToken))
+            .Select(static session => new SessionSummary
+            {
+                Id = session.Id,
+                ChannelId = session.ChannelId,
+                SenderId = session.SenderId,
+                StableSessionId = session.StableSessionBinding?.ExternalSessionId,
+                StableSessionNamespace = session.StableSessionBinding?.Namespace,
+                StableSessionOwnerKey = session.StableSessionBinding?.OwnerKey,
+                CreatedAt = session.CreatedAt,
+                LastActiveAt = session.LastActiveAt,
+                State = session.State,
+                HistoryTurns = session.History.Count,
+                TotalInputTokens = session.TotalInputTokens,
+                TotalOutputTokens = session.TotalOutputTokens,
+                IsActive = true
+            })
+            .ToArray();
+
+        var sessionMap = new Dictionary<string, SessionSummary>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in persistedSessions)
+            sessionMap[item.Id] = item;
+        foreach (var item in activeSessions)
+            sessionMap[item.Id] = item;
+
+        var allSessions = sessionMap.Values.ToArray();
+        var now = DateTimeOffset.UtcNow;
+        var approvalHistory = _runtime.ApprovalAuditStore.Query(new ApprovalHistoryQuery { Limit = 200 });
+        var pendingApprovals = _runtime.ToolApprovalService.ListPending();
+        var learningProposals = await _learningService.ListAsync(status: null, kind: null, cancellationToken);
+        var automations = await _automationService.ListAsync(cancellationToken);
+        var runningAutomationIds = new HashSet<string>(_automationService.ListRunningIds(), StringComparer.OrdinalIgnoreCase);
+        var automationItems = new List<DashboardAutomationItem>(automations.Count);
+        var enabledAutomations = 0;
+        var draftAutomations = 0;
+        var neverRunAutomations = 0;
+        var queuedOrRunningAutomations = 0;
+        var failingAutomations = 0;
+
+        foreach (var automation in automations.OrderByDescending(static item => item.UpdatedAtUtc).Take(10))
+        {
+            var runState = await _automationService.GetRunStateAsync(automation.Id, cancellationToken);
+            var outcome = runState?.Outcome ?? "never";
+            var lifecycle = runState?.LifecycleState ?? AutomationLifecycleStates.Never;
+            var isQueuedOrRunning = runningAutomationIds.Contains(automation.Id) ||
+                string.Equals(lifecycle, AutomationLifecycleStates.Queued, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(lifecycle, AutomationLifecycleStates.Running, StringComparison.OrdinalIgnoreCase);
+            var isFailing = string.Equals(runState?.HealthState, AutomationHealthStates.Degraded, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(runState?.HealthState, AutomationHealthStates.Quarantined, StringComparison.OrdinalIgnoreCase);
+
+            if (automation.Enabled)
+                enabledAutomations++;
+            if (automation.IsDraft)
+                draftAutomations++;
+            if (string.Equals(outcome, "never", StringComparison.OrdinalIgnoreCase))
+                neverRunAutomations++;
+            if (isQueuedOrRunning)
+                queuedOrRunningAutomations++;
+            if (isFailing)
+                failingAutomations++;
+
+            automationItems.Add(new DashboardAutomationItem
+            {
+                Id = automation.Id,
+                Name = automation.Name,
+                Enabled = automation.Enabled,
+                IsDraft = automation.IsDraft,
+                DeliveryChannelId = automation.DeliveryChannelId,
+                TemplateKey = automation.TemplateKey,
+                Outcome = outcome,
+                LastRunAtUtc = runState?.LastRunAtUtc
+            });
+        }
+
+        foreach (var automation in automations.Skip(automationItems.Count))
+        {
+            var runState = await _automationService.GetRunStateAsync(automation.Id, cancellationToken);
+            var outcome = runState?.Outcome ?? "never";
+            var lifecycle = runState?.LifecycleState ?? AutomationLifecycleStates.Never;
+            if (automation.Enabled)
+                enabledAutomations++;
+            if (automation.IsDraft)
+                draftAutomations++;
+            if (string.Equals(outcome, "never", StringComparison.OrdinalIgnoreCase))
+                neverRunAutomations++;
+            if (runningAutomationIds.Contains(automation.Id) ||
+                string.Equals(lifecycle, AutomationLifecycleStates.Queued, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(lifecycle, AutomationLifecycleStates.Running, StringComparison.OrdinalIgnoreCase))
+            {
+                queuedOrRunningAutomations++;
+            }
+            if (string.Equals(runState?.HealthState, AutomationHealthStates.Degraded, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(runState?.HealthState, AutomationHealthStates.Quarantined, StringComparison.OrdinalIgnoreCase))
+            {
+                failingAutomations++;
+            }
+        }
+
+        var readiness = MapChannelReadiness(ChannelReadinessEvaluator.Evaluate(_startup.Config, _startup.IsNonLoopbackBind));
+        var pluginHealth = _runtime.Operations.PluginHealth.ListSnapshots();
+        var memoryEntries = _memoryCatalog is null
+            ? []
+            : await _memoryCatalog.ListNotesAsync(prefix: "", limit: 500, cancellationToken);
+        var memoryNotes = memoryEntries
+            .Select(static entry => MapMemoryNoteItem(entry.Key, entry.PreviewContent, entry.UpdatedAt))
+            .ToArray();
+        var memoryEvents = _runtime.Operations.RuntimeEvents.Query(new RuntimeEventQuery { Limit = 20, Component = "memory" });
+
+        var snapshot = new OperatorDashboardSnapshot
+        {
+            Sessions = new DashboardSessionSummary
+            {
+                Active = activeSessions.Length,
+                Persisted = persistedSessions.Count,
+                UniqueTotal = allSessions.Length,
+                Last24Hours = allSessions.Count(item => item.LastActiveAt >= now.AddHours(-24)),
+                Last7Days = allSessions.Count(item => item.LastActiveAt >= now.AddDays(-7)),
+                Starred = metadataById.Values.Count(item => item.Starred && sessionMap.ContainsKey(item.SessionId)),
+                Channels = BuildMetrics(
+                    allSessions.GroupBy(static item => item.ChannelId, StringComparer.OrdinalIgnoreCase)
+                        .Select(static group => (Key: group.Key, Label: group.Key, Count: group.Count()))),
+                States = BuildMetrics(
+                    allSessions.GroupBy(static item => item.State.ToString(), StringComparer.OrdinalIgnoreCase)
+                        .Select(static group => (Key: group.Key, Label: group.Key, Count: group.Count())))
+            },
+            Approvals = new DashboardApprovalSummary
+            {
+                Pending = pendingApprovals.Count,
+                DecisionsLast24Hours = approvalHistory.Count(static item =>
+                    string.Equals(item.EventType, "decision", StringComparison.OrdinalIgnoreCase) &&
+                    item.TimestampUtc >= DateTimeOffset.UtcNow.AddHours(-24)),
+                ApprovedLast24Hours = approvalHistory.Count(static item =>
+                    string.Equals(item.EventType, "decision", StringComparison.OrdinalIgnoreCase) &&
+                    item.Approved == true &&
+                    item.TimestampUtc >= DateTimeOffset.UtcNow.AddHours(-24)),
+                RejectedLast24Hours = approvalHistory.Count(static item =>
+                    string.Equals(item.EventType, "decision", StringComparison.OrdinalIgnoreCase) &&
+                    item.Approved == false &&
+                    item.TimestampUtc >= DateTimeOffset.UtcNow.AddHours(-24)),
+                PendingByTool = BuildMetrics(
+                    pendingApprovals.GroupBy(static item => item.ToolName, StringComparer.OrdinalIgnoreCase)
+                        .Select(static group => (Key: group.Key, Label: group.Key, Count: group.Count()))),
+                PendingByChannel = BuildMetrics(
+                    pendingApprovals.GroupBy(static item => item.ChannelId, StringComparer.OrdinalIgnoreCase)
+                        .Select(static group => (Key: group.Key, Label: group.Key, Count: group.Count())))
+            },
+            Memory = new DashboardMemorySummary
+            {
+                ListedNotes = memoryNotes.Length,
+                CatalogTruncated = memoryEntries.Count >= 500,
+                ByClass = BuildMetrics(
+                    memoryNotes.GroupBy(static item => item.MemoryClass, StringComparer.OrdinalIgnoreCase)
+                        .Select(static group => (Key: group.Key, Label: group.Key, Count: group.Count()))),
+                RecentNotes = memoryNotes.Take(8).ToArray(),
+                RecentActivity = memoryEvents
+            },
+            Automations = new DashboardAutomationSummary
+            {
+                Total = automations.Count,
+                Enabled = enabledAutomations,
+                Drafts = draftAutomations,
+                NeverRun = neverRunAutomations,
+                QueuedOrRunning = queuedOrRunningAutomations,
+                Failing = failingAutomations,
+                Items = automationItems,
+                Templates = _automationService.GetTemplates()
+            },
+            Learning = new DashboardLearningSummary
+            {
+                Pending = learningProposals.Count(item => string.Equals(item.Status, LearningProposalStatus.Pending, StringComparison.OrdinalIgnoreCase)),
+                Approved = learningProposals.Count(item => string.Equals(item.Status, LearningProposalStatus.Approved, StringComparison.OrdinalIgnoreCase)),
+                Rejected = learningProposals.Count(item => string.Equals(item.Status, LearningProposalStatus.Rejected, StringComparison.OrdinalIgnoreCase)),
+                RolledBack = learningProposals.Count(item => string.Equals(item.Status, LearningProposalStatus.RolledBack, StringComparison.OrdinalIgnoreCase)),
+                PendingByKind = BuildMetrics(
+                    learningProposals
+                        .Where(static item => string.Equals(item.Status, LearningProposalStatus.Pending, StringComparison.OrdinalIgnoreCase))
+                        .GroupBy(static item => item.Kind, StringComparer.OrdinalIgnoreCase)
+                        .Select(static group => (Key: group.Key, Label: group.Key, Count: group.Count()))),
+                Recent = learningProposals
+                    .OrderByDescending(static item => item.UpdatedAtUtc)
+                    .Take(8)
+                    .ToArray()
+            },
+            Delegation = new DashboardDelegationSummary
+            {
+                Enabled = _startup.Config.Delegation.Enabled,
+                MaxDepth = _startup.Config.Delegation.MaxDepth,
+                Last24Hours = allSessions.Count(static item => string.Equals(item.ChannelId, "delegation", StringComparison.OrdinalIgnoreCase) &&
+                    item.LastActiveAt >= DateTimeOffset.UtcNow.AddHours(-24)),
+                Profiles = _startup.Config.Delegation.Profiles.Keys
+                    .OrderBy(static item => item, StringComparer.OrdinalIgnoreCase)
+                    .ToArray()
+            },
+            Channels = new DashboardChannelSummary
+            {
+                Ready = readiness.Count(static item => string.Equals(item.Status, "ready", StringComparison.OrdinalIgnoreCase)),
+                Degraded = readiness.Count(static item => string.Equals(item.Status, "degraded", StringComparison.OrdinalIgnoreCase)),
+                Misconfigured = readiness.Count(static item => string.Equals(item.Status, "misconfigured", StringComparison.OrdinalIgnoreCase)),
+                Items = readiness
+            },
+            Plugins = new DashboardPluginSummary
+            {
+                Total = pluginHealth.Count,
+                Loaded = pluginHealth.Count(static item => item.Loaded),
+                Disabled = pluginHealth.Count(static item => item.Disabled),
+                Quarantined = pluginHealth.Count(static item => item.Quarantined),
+                NeedsReview = pluginHealth.Count(static item => !item.Reviewed),
+                WarningCount = pluginHealth.Sum(static item => item.WarningCount),
+                ErrorCount = pluginHealth.Sum(static item => item.ErrorCount),
+                TrustLevels = BuildMetrics(
+                    pluginHealth.GroupBy(static item => item.TrustLevel, StringComparer.OrdinalIgnoreCase)
+                        .Select(static group => (Key: group.Key, Label: group.Key, Count: group.Count()))),
+                CompatibilityStatuses = BuildMetrics(
+                    pluginHealth.GroupBy(static item => item.CompatibilityStatus, StringComparer.OrdinalIgnoreCase)
+                        .Select(static group => (Key: group.Key, Label: group.Key, Count: group.Count())))
+            }
+        };
+
+        if (reliability is not null)
+            return CloneWithReliability(snapshot, reliability);
+
+        if (_maintenanceService is null)
+            return snapshot;
+
+        var maintenance = await _maintenanceService.ScanAsync(setupStatus: null, cancellationToken);
+        return CloneWithReliability(snapshot, maintenance.Reliability);
+    }
+
+    private static OperatorDashboardSnapshot CloneWithReliability(
+        OperatorDashboardSnapshot snapshot,
+        ReliabilitySnapshot reliability)
+        => new()
+        {
+            Sessions = snapshot.Sessions,
+            Approvals = snapshot.Approvals,
+            Memory = snapshot.Memory,
+            Automations = snapshot.Automations,
+            Learning = snapshot.Learning,
+            Delegation = snapshot.Delegation,
+            Channels = snapshot.Channels,
+            Plugins = snapshot.Plugins,
+            Reliability = reliability
+        };
 
     public async Task<IntegrationSessionSearchResponse> SearchSessionsAsync(SessionSearchQuery query, CancellationToken cancellationToken)
         => new()
@@ -282,11 +581,59 @@ internal sealed class IntegrationApiFacade
             Items = _toolPresetResolver?.ListPresets(_runtime.RegisteredToolNames) ?? []
         };
 
+    public IntegrationWorkflowsResponse ListWorkflows()
+        => new()
+        {
+            Items = _workflows.List()
+        };
+
+    public Task<AgentWorkflowRunResult> RunWorkflowAsync(
+        string workflowId,
+        AgentWorkflowRequest request,
+        CancellationToken cancellationToken)
+        => _workflows.RunAsync(workflowId, request, cancellationToken);
+
+    public Task<AgentWorkflowRunSnapshot> GetWorkflowRunAsync(
+        string workflowId,
+        string runId,
+        CancellationToken cancellationToken)
+        => _workflows.GetAsync(workflowId, runId, cancellationToken);
+
+    public Task<AgentWorkflowRunSnapshot> RespondWorkflowRunAsync(
+        string workflowId,
+        string runId,
+        AgentWorkflowResponse response,
+        CancellationToken cancellationToken)
+        => _workflows.RespondAsync(workflowId, runId, response, cancellationToken);
+
     public async Task<IntegrationAutomationDetailResponse> GetAutomationAsync(string automationId, CancellationToken cancellationToken)
         => new()
         {
             Automation = await _automationService.GetAsync(automationId, cancellationToken),
             RunState = await _automationService.GetRunStateAsync(automationId, cancellationToken)
+        };
+
+    public async Task<IntegrationAutomationRunsResponse> GetAutomationRunsAsync(string automationId, CancellationToken cancellationToken)
+        => new()
+        {
+            AutomationId = automationId,
+            RunState = await _automationService.GetRunStateAsync(automationId, cancellationToken),
+            Items = await _automationService.ListRunRecordsAsync(automationId, limit: 50, cancellationToken)
+        };
+
+    public async Task<IntegrationAutomationRunDetailResponse> GetAutomationRunAsync(string automationId, string runId, CancellationToken cancellationToken)
+        => new()
+        {
+            AutomationId = automationId,
+            Automation = await _automationService.GetAsync(automationId, cancellationToken),
+            RunState = await _automationService.GetRunStateAsync(automationId, cancellationToken),
+            Run = await _automationService.GetRunRecordAsync(automationId, runId, cancellationToken)
+        };
+
+    public AutomationTemplateListResponse ListAutomationTemplates()
+        => new()
+        {
+            Items = _automationService.GetTemplates()
         };
 
     public async Task<MutationResponse> RunAutomationAsync(string automationId, bool dryRun, CancellationToken cancellationToken)
@@ -311,37 +658,82 @@ internal sealed class IntegrationApiFacade
         }
 
         var result = await _automationService.RunNowAsync(automationId, _runtime.Pipeline, cancellationToken);
-        if (result == RunNowResult.Queued)
+        if (string.Equals(result.Status, "queued", StringComparison.Ordinal))
         {
-            var existing = await _automationService.GetRunStateAsync(automationId, cancellationToken);
-            await _automationService.SaveRunStateAsync(new AutomationRunState
-            {
-                AutomationId = automationId,
-                Outcome = "queued",
-                LastRunAtUtc = DateTimeOffset.UtcNow,
-                LastDeliveredAtUtc = existing?.LastDeliveredAtUtc,
-                DeliverySuppressed = existing?.DeliverySuppressed ?? false,
-                InputTokens = existing?.InputTokens ?? 0,
-                OutputTokens = existing?.OutputTokens ?? 0,
-                SessionId = string.IsNullOrWhiteSpace(automation.SessionId) ? $"automation:{automation.Id}" : automation.SessionId,
-                MessagePreview = automation.Prompt.Length > 180 ? automation.Prompt[..180] : automation.Prompt,
-                RecentRuns = existing?.RecentRuns ?? []
-            }, cancellationToken);
-
             AppendRuntimeEvent(
                 component: "automations",
                 action: "queued",
-                summary: $"Automation '{automationId}' queued for execution.",
+                summary: string.IsNullOrWhiteSpace(result.RunId)
+                    ? $"Automation '{automationId}' queued for execution."
+                    : $"Automation '{automationId}' queued for execution as run '{result.RunId}'.",
                 sessionId: automation.SessionId,
                 channelId: automation.DeliveryChannelId,
                 senderId: automation.DeliveryRecipientId);
         }
 
-        return result switch
+        return result.Status switch
         {
-            RunNowResult.Queued => new MutationResponse { Success = true, Message = "Automation queued." },
-            RunNowResult.AlreadyRunning => new MutationResponse { Success = false, Error = "Automation is already running." },
+            "queued" => new MutationResponse { Success = true, Message = "Automation queued." },
+            "already_running" => new MutationResponse { Success = false, Error = "Automation is already running." },
+            "quarantined" => new MutationResponse { Success = false, Error = "Automation is quarantined and cannot be scheduled automatically." },
             _ => new MutationResponse { Success = false, Error = "Automation could not be queued." }
+        };
+    }
+
+    public async Task<MutationResponse> ReplayAutomationRunAsync(string automationId, string runId, CancellationToken cancellationToken)
+    {
+        var automation = await _automationService.GetAsync(automationId, cancellationToken);
+        if (automation is null)
+            return new MutationResponse { Success = false, Error = "Automation not found." };
+
+        var result = await _automationService.ReplayAsync(automationId, runId, _runtime.Pipeline, cancellationToken);
+        return result.Status switch
+        {
+            "queued" => new MutationResponse { Success = true, Message = "Automation replay queued." },
+            "already_running" => new MutationResponse { Success = false, Error = "Automation is already running." },
+            _ => new MutationResponse { Success = false, Error = "Automation replay could not be queued." }
+        };
+    }
+
+    public async Task<MutationResponse> ClearAutomationQuarantineAsync(string automationId, CancellationToken cancellationToken)
+    {
+        var automation = await _automationService.GetAsync(automationId, cancellationToken);
+        if (automation is null)
+            return new MutationResponse { Success = false, Error = "Automation not found." };
+
+        await _automationService.ClearQuarantineAsync(automationId, cancellationToken);
+        return new MutationResponse
+        {
+            Success = true,
+            Message = "Automation quarantine cleared."
+        };
+    }
+
+    public async Task<MutationResponse> DeleteAutomationAsync(string automationId, CancellationToken cancellationToken)
+    {
+        var existing = await _automationService.GetAsync(automationId, cancellationToken);
+        if (existing is null)
+        {
+            return new MutationResponse
+            {
+                Success = false,
+                Error = "Automation not found."
+            };
+        }
+
+        await _automationService.DeleteAsync(automationId, cancellationToken);
+        AppendRuntimeEvent(
+            component: "automations",
+            action: "deleted",
+            summary: $"Automation '{automationId}' deleted.",
+            sessionId: existing.SessionId,
+            channelId: existing.DeliveryChannelId,
+            senderId: existing.DeliveryRecipientId);
+
+        return new MutationResponse
+        {
+            Success = true,
+            Message = "Automation deleted."
         };
     }
 
@@ -350,6 +742,9 @@ internal sealed class IntegrationApiFacade
         {
             Items = await _learningService.ListAsync(status, kind, cancellationToken)
         };
+
+    public async Task<LearningProposalDetailResponse?> GetLearningProposalDetailAsync(string proposalId, CancellationToken cancellationToken)
+        => await _learningService.GetDetailAsync(proposalId, cancellationToken);
 
     public async Task<LearningProposal?> ApproveLearningProposalAsync(string proposalId, CancellationToken cancellationToken)
     {
@@ -415,6 +810,75 @@ internal sealed class IntegrationApiFacade
             SessionId = effectiveSessionId,
             MessageId = request.MessageId
         };
+    }
+
+    private static IReadOnlyList<DashboardNamedMetric> BuildMetrics(IEnumerable<(string Key, string Label, int Count)> source, int limit = 6)
+        => source
+            .Where(static item => !string.IsNullOrWhiteSpace(item.Key))
+            .OrderByDescending(static item => item.Count)
+            .ThenBy(static item => item.Label, StringComparer.OrdinalIgnoreCase)
+            .Take(limit)
+            .Select(static item => new DashboardNamedMetric
+            {
+                Key = item.Key,
+                Label = item.Label,
+                Count = item.Count
+            })
+            .ToArray();
+
+    private static IReadOnlyList<ChannelReadinessDto> MapChannelReadiness(IReadOnlyList<ChannelReadinessState> states)
+        => states.Select(static state => new ChannelReadinessDto
+        {
+            ChannelId = state.ChannelId,
+            DisplayName = state.DisplayName,
+            Mode = state.Mode,
+            Status = state.Status,
+            Enabled = state.Enabled,
+            Ready = state.Ready,
+            MissingRequirements = state.MissingRequirements,
+            Warnings = state.Warnings,
+            FixGuidance = state.FixGuidance.Select(static guidance => new ChannelFixGuidanceDto
+            {
+                Label = guidance.Label,
+                Href = guidance.Href,
+                Reference = guidance.Reference
+            }).ToArray()
+        }).ToArray();
+
+    private static MemoryNoteItem MapMemoryNoteItem(string key, string content, DateTimeOffset updatedAt)
+    {
+        var classification = ClassifyMemoryNoteKey(key);
+        var preview = content.Length <= 512 ? content : content[..512] + "…";
+        return new MemoryNoteItem
+        {
+            Key = key,
+            DisplayKey = classification.DisplayKey,
+            MemoryClass = classification.MemoryClass,
+            ProjectId = classification.ProjectId,
+            Preview = preview,
+            UpdatedAtUtc = updatedAt
+        };
+    }
+
+    private static (string MemoryClass, string? ProjectId, string DisplayKey) ClassifyMemoryNoteKey(string key)
+    {
+        if (key.StartsWith("project:", StringComparison.Ordinal))
+        {
+            var segments = key.Split(':', 3, StringSplitOptions.None);
+            if (segments.Length == 3)
+                return (MemoryNoteClass.ProjectFact, segments[1], segments[2]);
+        }
+
+        if (key.StartsWith("runbook:", StringComparison.Ordinal))
+            return (MemoryNoteClass.OperationalRunbook, null, key["runbook:".Length..]);
+
+        if (key.StartsWith("skill:", StringComparison.Ordinal))
+            return (MemoryNoteClass.ApprovedSkill, null, key["skill:".Length..]);
+
+        if (key.StartsWith("automation:", StringComparison.Ordinal))
+            return (MemoryNoteClass.ApprovedAutomation, null, key["automation:".Length..]);
+
+        return (MemoryNoteClass.General, null, key);
     }
 
     private void AppendRuntimeEvent(

@@ -1,4 +1,3 @@
-using System.Net.Mime;
 using System.Text.Json;
 
 namespace OpenClaw.Client;
@@ -111,7 +110,7 @@ public sealed class McpResourceDefinition
     public required string Uri { get; init; }
     public required string Name { get; init; }
     public string? Description { get; init; }
-    public string MimeType { get; init; } = MediaTypeNames.Application.Json;
+    public string MimeType { get; init; } = "application/json";
 }
  
 public sealed class McpResourceListResult
@@ -124,7 +123,7 @@ public sealed class McpResourceTemplateDefinition
     public required string UriTemplate { get; init; }
     public required string Name { get; init; }
     public string? Description { get; init; }
-    public string MimeType { get; init; } = MediaTypeNames.Application.Json;
+    public string MimeType { get; init; } = "application/json";
 }
  
 public sealed class McpResourceTemplateListResult
@@ -140,7 +139,7 @@ public sealed class McpReadResourceRequest
 public sealed class McpResourceTextContents
 {
     public required string Uri { get; init; }
-    public string MimeType { get; init; } = MediaTypeNames.Application.Json;
+    public string MimeType { get; init; } = "application/json";
     public required string Text { get; init; }
 }
  

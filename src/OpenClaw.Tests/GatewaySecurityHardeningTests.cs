@@ -60,6 +60,29 @@ public sealed class GatewaySecurityHardeningTests
     }
 
     [Fact]
+    public void EnforcePublicBindHardening_CanvasEnabledOnPublicBind_Throws()
+    {
+        var config = CreatePublicBindSafeBaseConfig();
+        config.Canvas.Enabled = true;
+        config.Canvas.AllowOnPublicBind = false;
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            GatewaySecurityExtensions.EnforcePublicBindHardening(config, isNonLoopbackBind: true));
+
+        Assert.Contains("Canvas command forwarding", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EnforcePublicBindHardening_CanvasPublicBindOptIn_IsAllowed()
+    {
+        var config = CreatePublicBindSafeBaseConfig();
+        config.Canvas.Enabled = true;
+        config.Canvas.AllowOnPublicBind = true;
+
+        GatewaySecurityExtensions.EnforcePublicBindHardening(config, isNonLoopbackBind: true);
+    }
+
+    [Fact]
     public void EnforcePublicBindHardening_Loopback_DoesNotApplyPublicChecks()
     {
         var config = new GatewayConfig();
@@ -83,6 +106,11 @@ public sealed class GatewaySecurityHardeningTests
                 {
                     Mode = nameof(ToolSandboxMode.Require),
                     Template = "ghcr.io/example/shell:latest"
+                },
+                ["process"] = new()
+                {
+                    Mode = nameof(ToolSandboxMode.Require),
+                    Template = "ghcr.io/example/process:latest"
                 }
             }
         };
@@ -115,6 +143,119 @@ public sealed class GatewaySecurityHardeningTests
         Assert.Contains("unsafe tooling settings", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void EnforcePublicBindHardening_ProcessFallsBackToUnsafeLocalExecution_Throws()
+    {
+        var config = CreatePublicBindSafeBaseConfig();
+        config.Tooling.AllowShell = true;
+        config.Sandbox = new SandboxConfig
+        {
+            Provider = SandboxProviderNames.OpenSandbox,
+            Endpoint = "http://localhost:5000",
+            Tools = new Dictionary<string, SandboxToolConfig>(StringComparer.Ordinal)
+            {
+                ["shell"] = new()
+                {
+                    Mode = nameof(ToolSandboxMode.Require),
+                    Template = "ghcr.io/example/shell:latest"
+                }
+            }
+        };
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            GatewaySecurityExtensions.EnforcePublicBindHardening(config, isNonLoopbackBind: true));
+
+        Assert.Contains("unsafe tooling settings", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void EnforcePublicBindHardening_TwilioWithoutSignatureValidation_Throws()
+    {
+        var config = CreatePublicBindSafeBaseConfig();
+        config.Channels.Sms.Twilio = new TwilioSmsConfig
+        {
+            Enabled = true,
+            ValidateSignature = false,
+            AuthTokenRef = "env:TWILIO_AUTH_TOKEN",
+            WebhookPublicBaseUrl = "https://example.com"
+        };
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            GatewaySecurityExtensions.EnforcePublicBindHardening(config, isNonLoopbackBind: true));
+
+        Assert.Contains("Twilio SMS webhooks", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EnforcePublicBindHardening_TelegramWithoutSignatureValidation_Throws()
+    {
+        var config = CreatePublicBindSafeBaseConfig();
+        config.Channels.Telegram.Enabled = true;
+        config.Channels.Telegram.ValidateSignature = false;
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            GatewaySecurityExtensions.EnforcePublicBindHardening(config, isNonLoopbackBind: true));
+
+        Assert.Contains("Telegram webhooks", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EnforcePublicBindHardening_TeamsWithoutTokenValidation_Throws()
+    {
+        var config = CreatePublicBindSafeBaseConfig();
+        config.Channels.Teams.Enabled = true;
+        config.Channels.Teams.ValidateToken = false;
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            GatewaySecurityExtensions.EnforcePublicBindHardening(config, isNonLoopbackBind: true));
+
+        Assert.Contains("Teams inbound webhooks", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EnforcePublicBindHardening_SlackWithoutSignatureValidation_Throws()
+    {
+        var config = CreatePublicBindSafeBaseConfig();
+        config.Channels.Slack.Enabled = true;
+        config.Channels.Slack.ValidateSignature = false;
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            GatewaySecurityExtensions.EnforcePublicBindHardening(config, isNonLoopbackBind: true));
+
+        Assert.Contains("Slack webhooks", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EnforcePublicBindHardening_DiscordWithoutSignatureValidation_Throws()
+    {
+        var config = CreatePublicBindSafeBaseConfig();
+        config.Channels.Discord.Enabled = true;
+        config.Channels.Discord.ValidateSignature = false;
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            GatewaySecurityExtensions.EnforcePublicBindHardening(config, isNonLoopbackBind: true));
+
+        Assert.Contains("Discord interactions", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ApplyStrictPublicBindProfile_EnablesSaferPublicDefaults()
+    {
+        var config = CreatePublicBindSafeBaseConfig();
+        config.Security.StrictPublicBindProfile = true;
+        config.Tooling.RequireToolApproval = false;
+        config.Tooling.ApprovalRequiredTools = [];
+        config.Security.RequireRequesterMatchForHttpToolApproval = false;
+
+        GatewaySecurityExtensions.ApplyStrictPublicBindProfile(config, isNonLoopbackBind: true);
+
+        Assert.True(config.Security.RequireRequesterMatchForHttpToolApproval);
+        Assert.True(config.Tooling.RequireToolApproval);
+        Assert.False(config.Canvas.Enabled);
+        Assert.Contains("process", config.Tooling.ApprovalRequiredTools, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("shell", config.Tooling.ApprovalRequiredTools, StringComparer.OrdinalIgnoreCase);
+    }
+
     private static GatewayConfig CreatePublicBindSafeBaseConfig()
     {
         var config = new GatewayConfig
@@ -124,6 +265,10 @@ public sealed class GatewaySecurityHardeningTests
                 AllowShell = false,
                 AllowedReadRoots = ["/tmp/openclaw-read"],
                 AllowedWriteRoots = ["/tmp/openclaw-write"]
+            },
+            Canvas = new CanvasConfig
+            {
+                Enabled = false
             },
             Channels = new ChannelsConfig
             {

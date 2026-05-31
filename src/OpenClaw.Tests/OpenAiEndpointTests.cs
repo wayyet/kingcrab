@@ -64,6 +64,42 @@ public class OpenAiEndpointTests
         Assert.False(req.Stream);
     }
 
+    [Fact]
+    public void ChatCompletionRequest_Deserializes_MultimodalContentPartsAsPromptMarkers()
+    {
+        const string json = """
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            { "type": "text", "text": "What is in this image?" },
+                            { "type": "image_url", "image_url": { "url": "data:image/png;base64,AAAA" } }
+                        ]
+                    }
+                ]
+            }
+            """;
+
+        var req = JsonSerializer.Deserialize(json, CoreJsonContext.Default.OpenAiChatCompletionRequest);
+
+        Assert.NotNull(req);
+        var content = req.Messages[0].Content.ToPromptText();
+        Assert.Contains("What is in this image?", content, StringComparison.Ordinal);
+        Assert.Contains("[IMAGE_URL:data:image/png;base64,AAAA]", content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ChatCompletionRequest_Deserializes_NullContentAsEmptyPromptText()
+    {
+        const string json = """{"messages":[{"role":"assistant","content":null}]}""";
+
+        var req = JsonSerializer.Deserialize(json, CoreJsonContext.Default.OpenAiChatCompletionRequest);
+
+        Assert.NotNull(req);
+        Assert.Equal(string.Empty, req.Messages[0].Content.ToPromptText());
+    }
+
     // ── Response Serialization ──────────────────────────────────────────
 
     [Fact]
@@ -259,7 +295,11 @@ public class OpenAiEndpointTests
                         {
                             CallId = "call_openclaw_1",
                             ToolName = "stream_echo",
-                            Content = "abc"
+                            Content = "abc",
+                            ResultStatus = ToolResultStatuses.Blocked,
+                            FailureCode = ToolFailureCodes.OperatorAuthRequired,
+                            FailureMessage = "Operator authentication required.",
+                            NextStep = "Authenticate and retry."
                         }
                     }
                 }
@@ -276,6 +316,10 @@ public class OpenAiEndpointTests
         Assert.Equal("call_openclaw_1", toolResult.GetProperty("callId").GetString());
         Assert.Equal("stream_echo", toolResult.GetProperty("toolName").GetString());
         Assert.Equal("abc", toolResult.GetProperty("content").GetString());
+        Assert.Equal(ToolResultStatuses.Blocked, toolResult.GetProperty("resultStatus").GetString());
+        Assert.Equal(ToolFailureCodes.OperatorAuthRequired, toolResult.GetProperty("failureCode").GetString());
+        Assert.Equal("Operator authentication required.", toolResult.GetProperty("failureMessage").GetString());
+        Assert.Equal("Authenticate and retry.", toolResult.GetProperty("nextStep").GetString());
     }
 
     [Fact]
@@ -627,7 +671,11 @@ public class OpenAiEndpointTests
             ItemId = "fc_456",
             CallId = "call_openclaw_1",
             ToolName = "stream_echo",
-            Content = "abc"
+            Content = "abc",
+            ResultStatus = ToolResultStatuses.Blocked,
+            FailureCode = ToolFailureCodes.OperatorAuthRequired,
+            FailureMessage = "Operator authentication required.",
+            NextStep = "Authenticate and retry."
         };
 
         var json = JsonSerializer.Serialize(resultEvent, CoreJsonContext.Default.OpenAiResponseToolResultEvent);
@@ -639,6 +687,10 @@ public class OpenAiEndpointTests
         Assert.Equal("call_openclaw_1", root.GetProperty("call_id").GetString());
         Assert.Equal("stream_echo", root.GetProperty("tool_name").GetString());
         Assert.Equal("abc", root.GetProperty("content").GetString());
+        Assert.Equal(ToolResultStatuses.Blocked, root.GetProperty("result_status").GetString());
+        Assert.Equal(ToolFailureCodes.OperatorAuthRequired, root.GetProperty("failure_code").GetString());
+        Assert.Equal("Operator authentication required.", root.GetProperty("failure_message").GetString());
+        Assert.Equal("Authenticate and retry.", root.GetProperty("next_step").GetString());
     }
 
     // ── Round-trip ──────────────────────────────────────────────────────

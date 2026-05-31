@@ -52,6 +52,6 @@ public sealed class FileWriteTool : ITool
             throw;
         }
 
-        return $"Written {content.Length} characters to {path}\n[FILE_PATH:{resolvedPath}]";
+        return $"Written {content.Length} characters to {path}";
     }
 }

@@ -1,5 +1,3 @@
-using OpenSandbox.Config;
-
 namespace OpenClawNet.Sandbox.OpenSandbox;
 
 public sealed class OpenSandboxOptions
@@ -8,33 +6,13 @@ public sealed class OpenSandboxOptions
     public string? ApiKey { get; set; }
     public int DefaultTTL { get; set; } = 300;
 
-    /// <summary>
-    /// How long to wait (seconds) for a newly created sandbox to reach Running state.
-    /// Maps to <see cref="SandboxCreateOptions.ReadyTimeoutSeconds"/>.
-    /// SDK default is 30 s; 60 s gives room for image pulls on first use.
-    /// </summary>
-    public int ReadyTimeoutSeconds { get; set; } = 60;
-
-    /// <summary>
-    /// Builds a <see cref="ConnectionConfig"/> from <see cref="Endpoint"/> and <see cref="ApiKey"/>.
-    /// Endpoint format: http[s]://host[:port]
-    /// </summary>
-    public ConnectionConfig BuildConnectionConfig()
+    public Uri GetApiBaseUri()
     {
-        var uri = new Uri(Endpoint.Trim());
-        var protocol = uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase)
-            ? ConnectionProtocol.Https
-            : ConnectionProtocol.Http;
+        var normalized = Endpoint.Trim().TrimEnd('/');
+        if (!normalized.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+            normalized += "/v1";
 
-        // ConnectionConfigOptions.Domain expects "host" or "host:port"
-        var domain = uri.IsDefaultPort ? uri.Host : $"{uri.Host}:{uri.Port}";
-
-        return new ConnectionConfig(new ConnectionConfigOptions
-        {
-            Domain = domain,
-            Protocol = protocol,
-            ApiKey = string.IsNullOrWhiteSpace(ApiKey) ? null : ApiKey,
-        });
+        return new Uri(normalized + "/", UriKind.Absolute);
     }
 }
 

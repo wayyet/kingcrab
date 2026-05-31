@@ -204,7 +204,7 @@ public sealed class GatewayWorkersTests
         var wsChannel = new WebSocketChannel(config.WebSocket);
         await using var adapter = new RecordingChannelAdapter("telegram");
         var agentRuntime = Substitute.For<IAgentRuntime>();
-        agentRuntime.RunAsync(Arg.Any<Session>(), Arg.Any<string>(), Arg.Any<CancellationToken>(), Arg.Any<ToolApprovalCallback?>(), Arg.Any<System.Text.Json.JsonElement?>(), Arg.Any<bool>())
+        agentRuntime.RunAsync(Arg.Any<Session>(), Arg.Any<string>(), Arg.Any<CancellationToken>(), Arg.Any<ToolApprovalCallback?>(), Arg.Any<System.Text.Json.JsonElement?>())
             .Returns(async callInfo =>
             {
                 var callback = callInfo.ArgAt<ToolApprovalCallback?>(3);
@@ -339,7 +339,7 @@ public sealed class GatewayWorkersTests
         await using var adapter = new RecordingChannelAdapter("telegram");
         var agentRuntime = Substitute.For<IAgentRuntime>();
         Session? capturedSession = null;
-        agentRuntime.RunAsync(Arg.Any<Session>(), Arg.Any<string>(), Arg.Any<CancellationToken>(), Arg.Any<ToolApprovalCallback?>(), Arg.Any<System.Text.Json.JsonElement?>(), Arg.Any<bool>())
+        agentRuntime.RunAsync(Arg.Any<Session>(), Arg.Any<string>(), Arg.Any<CancellationToken>(), Arg.Any<ToolApprovalCallback?>(), Arg.Any<System.Text.Json.JsonElement?>())
             .Returns(callInfo =>
             {
                 capturedSession = callInfo.Arg<Session>();
@@ -565,7 +565,7 @@ public sealed class GatewayWorkersTests
         var wsChannel = new WebSocketChannel(config.WebSocket);
         await using var adapter = new RecordingChannelAdapter("telegram");
         var agentRuntime = Substitute.For<IAgentRuntime>();
-        agentRuntime.RunAsync(Arg.Any<Session>(), Arg.Any<string>(), Arg.Any<CancellationToken>(), Arg.Any<ToolApprovalCallback?>(), Arg.Any<System.Text.Json.JsonElement?>(), Arg.Any<bool>())
+        agentRuntime.RunAsync(Arg.Any<Session>(), Arg.Any<string>(), Arg.Any<CancellationToken>(), Arg.Any<ToolApprovalCallback?>(), Arg.Any<System.Text.Json.JsonElement?>())
             .Returns(async callInfo =>
             {
                 var callback = callInfo.ArgAt<ToolApprovalCallback?>(3)
@@ -680,7 +680,7 @@ public sealed class GatewayWorkersTests
         var wsChannel = new WebSocketChannel(config.WebSocket);
         await using var adapter = new RecordingChannelAdapter("cron");
         var agentRuntime = Substitute.For<IAgentRuntime>();
-        agentRuntime.RunAsync(Arg.Any<Session>(), Arg.Any<string>(), Arg.Any<CancellationToken>(), Arg.Any<ToolApprovalCallback?>(), Arg.Any<System.Text.Json.JsonElement?>(), Arg.Any<bool>())
+        agentRuntime.RunAsync(Arg.Any<Session>(), Arg.Any<string>(), Arg.Any<CancellationToken>(), Arg.Any<ToolApprovalCallback?>(), Arg.Any<System.Text.Json.JsonElement?>())
             .Returns("HEARTBEAT_OK");
         var toolApprovalService = new ToolApprovalService();
         var approvalAuditStore = new ApprovalAuditStore(storagePath, NullLogger<ApprovalAuditStore>.Instance);
@@ -784,7 +784,7 @@ public sealed class GatewayWorkersTests
         var wsChannel = new WebSocketChannel(config.WebSocket);
         await using var adapter = new RecordingChannelAdapter("cron");
         var agentRuntime = Substitute.For<IAgentRuntime>();
-        agentRuntime.RunAsync(Arg.Any<Session>(), Arg.Any<string>(), Arg.Any<CancellationToken>(), Arg.Any<ToolApprovalCallback?>(), Arg.Any<System.Text.Json.JsonElement?>(), Arg.Any<bool>())
+        agentRuntime.RunAsync(Arg.Any<Session>(), Arg.Any<string>(), Arg.Any<CancellationToken>(), Arg.Any<ToolApprovalCallback?>(), Arg.Any<System.Text.Json.JsonElement?>())
             .Returns("Urgent competitor alert");
         var toolApprovalService = new ToolApprovalService();
         var approvalAuditStore = new ApprovalAuditStore(storagePath, NullLogger<ApprovalAuditStore>.Instance);
@@ -894,7 +894,7 @@ public sealed class GatewayWorkersTests
         var wsChannel = new WebSocketChannel(config.WebSocket);
         await using var adapter = new ThrowingChannelAdapter("cron");
         var agentRuntime = Substitute.For<IAgentRuntime>();
-        agentRuntime.RunAsync(Arg.Any<Session>(), Arg.Any<string>(), Arg.Any<CancellationToken>(), Arg.Any<ToolApprovalCallback?>(), Arg.Any<System.Text.Json.JsonElement?>(), Arg.Any<bool>())
+        agentRuntime.RunAsync(Arg.Any<Session>(), Arg.Any<string>(), Arg.Any<CancellationToken>(), Arg.Any<ToolApprovalCallback?>(), Arg.Any<System.Text.Json.JsonElement?>())
             .Returns("Urgent competitor alert");
         var toolApprovalService = new ToolApprovalService();
         var approvalAuditStore = new ApprovalAuditStore(storagePath, NullLogger<ApprovalAuditStore>.Instance);
@@ -999,7 +999,7 @@ public sealed class GatewayWorkersTests
         var wsChannel = new WebSocketChannel(config.WebSocket);
         await using var adapter = new RecordingChannelAdapter("cron");
         var agentRuntime = Substitute.For<IAgentRuntime>();
-        agentRuntime.RunAsync(Arg.Any<Session>(), Arg.Any<string>(), Arg.Any<CancellationToken>(), Arg.Any<ToolApprovalCallback?>(), Arg.Any<System.Text.Json.JsonElement?>(), Arg.Any<bool>())
+        agentRuntime.RunAsync(Arg.Any<Session>(), Arg.Any<string>(), Arg.Any<CancellationToken>(), Arg.Any<ToolApprovalCallback?>(), Arg.Any<System.Text.Json.JsonElement?>())
             .Returns<Task<string>>(_ => throw new InvalidOperationException("boom"));
         var toolApprovalService = new ToolApprovalService();
         var approvalAuditStore = new ApprovalAuditStore(storagePath, NullLogger<ApprovalAuditStore>.Instance);
@@ -1108,7 +1108,7 @@ public sealed class GatewayWorkersTests
         var wsChannel = new WebSocketChannel(config.WebSocket);
         await using var adapter = new RecordingBridgedChannelAdapter("whatsapp");
         var agentRuntime = Substitute.For<IAgentRuntime>();
-        agentRuntime.RunAsync(Arg.Any<Session>(), Arg.Any<string>(), Arg.Any<CancellationToken>(), Arg.Any<ToolApprovalCallback?>(), Arg.Any<System.Text.Json.JsonElement?>(), Arg.Any<bool>())
+        agentRuntime.RunAsync(Arg.Any<Session>(), Arg.Any<string>(), Arg.Any<CancellationToken>(), Arg.Any<ToolApprovalCallback?>(), Arg.Any<System.Text.Json.JsonElement?>())
             .Returns("group-response");
         var toolApprovalService = new ToolApprovalService();
         var approvalAuditStore = new ApprovalAuditStore(storagePath, NullLogger<ApprovalAuditStore>.Instance);
@@ -1238,7 +1238,7 @@ public sealed class GatewayWorkersTests
         var wsChannel = new WebSocketChannel(config.WebSocket);
         await using var adapter = new RecordingBridgedChannelAdapter("whatsapp");
         var agentRuntime = Substitute.For<IAgentRuntime>();
-        agentRuntime.RunAsync(Arg.Any<Session>(), Arg.Any<string>(), Arg.Any<CancellationToken>(), Arg.Any<ToolApprovalCallback?>(), Arg.Any<System.Text.Json.JsonElement?>(), Arg.Any<bool>())
+        agentRuntime.RunAsync(Arg.Any<Session>(), Arg.Any<string>(), Arg.Any<CancellationToken>(), Arg.Any<ToolApprovalCallback?>(), Arg.Any<System.Text.Json.JsonElement?>())
             .Returns<Task<string>>(_ => throw new InvalidOperationException("boom"));
         var toolApprovalService = new ToolApprovalService();
         var approvalAuditStore = new ApprovalAuditStore(storagePath, NullLogger<ApprovalAuditStore>.Instance);
@@ -1349,7 +1349,7 @@ public sealed class GatewayWorkersTests
         var wsChannel = new WebSocketChannel(config.WebSocket);
         await using var adapter = new RecordingBridgedChannelAdapter("whatsapp");
         var agentRuntime = Substitute.For<IAgentRuntime>();
-        agentRuntime.RunAsync(Arg.Any<Session>(), Arg.Any<string>(), Arg.Any<CancellationToken>(), Arg.Any<ToolApprovalCallback?>(), Arg.Any<System.Text.Json.JsonElement?>(), Arg.Any<bool>())
+        agentRuntime.RunAsync(Arg.Any<Session>(), Arg.Any<string>(), Arg.Any<CancellationToken>(), Arg.Any<ToolApprovalCallback?>(), Arg.Any<System.Text.Json.JsonElement?>())
             .Returns<Task<string>>(_ => throw new OperationCanceledException("simulated cancellation"));
         var toolApprovalService = new ToolApprovalService();
         var approvalAuditStore = new ApprovalAuditStore(storagePath, NullLogger<ApprovalAuditStore>.Instance);

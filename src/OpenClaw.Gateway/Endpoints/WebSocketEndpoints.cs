@@ -1,6 +1,7 @@
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using OpenClaw.Core.Security;
 using OpenClaw.Gateway.Bootstrap;
 using OpenClaw.Gateway.Composition;
 using OpenClaw.Core.Models;
@@ -21,13 +22,7 @@ internal static class WebSocketEndpoints
 
             var ws = await ctx.WebSockets.AcceptWebSocketAsync();
             var clientId = ctx.Connection.Id;
-            // ASP.NET Core JWT 中间件默认把 sub 映射为 ClaimTypes.NameIdentifier（长 URL 形式），
-            // 同时保留原始 "sub"。两者都尝试以兼容不同的 claim 映射配置。
-            var userId = ctx.User.Identity?.IsAuthenticated == true
-                ? (ctx.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)
-                   ?? ctx.User.FindFirst("sub"))?.Value
-                : null;
-            await runtime.WebSocketChannel.HandleConnectionAsync(ws, clientId, ctx.Connection.RemoteIpAddress, ctx.RequestAborted, userId);
+            await runtime.WebSocketChannel.HandleConnectionAsync(ws, clientId, ctx.Connection.RemoteIpAddress, ctx.RequestAborted);
         });
 
         app.Map("/ws/live", async (HttpContext ctx) =>
@@ -83,7 +78,7 @@ internal static class WebSocketEndpoints
             return false;
         }
 
-        if (startup.IsNonLoopbackBind && !EndpointHelpers.IsAuthorizedRequest(ctx, startup.Config, startup.IsNonLoopbackBind))
+        if (startup.IsNonLoopbackBind && !IsAuthorizedTokenRequest(ctx, startup))
         {
             ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return false;
@@ -96,6 +91,30 @@ internal static class WebSocketEndpoints
         }
 
         return true;
+    }
+
+    private static bool IsAuthorizedTokenRequest(HttpContext ctx, GatewayStartupContext startup)
+    {
+        if (!startup.IsNonLoopbackBind)
+            return true;
+
+        var token = GatewaySecurity.GetToken(ctx, startup.Config.Security.AllowQueryStringToken);
+        if (string.IsNullOrWhiteSpace(token))
+            return false;
+
+        var policy = ctx.RequestServices.GetService<OrganizationPolicyService>()?.GetSnapshot() ?? new OrganizationPolicySnapshot();
+        if (policy.BootstrapTokenEnabled &&
+            policy.AllowedAuthModes.Any(mode => string.Equals(mode, OrganizationAuthModeNames.BootstrapToken, StringComparison.OrdinalIgnoreCase)) &&
+            !string.IsNullOrWhiteSpace(startup.Config.AuthToken) &&
+            GatewaySecurity.IsTokenValid(token, startup.Config.AuthToken))
+        {
+            return true;
+        }
+
+        var operatorAccounts = ctx.RequestServices.GetService<OperatorAccountService>();
+        return operatorAccounts is not null &&
+               policy.AllowedAuthModes.Any(mode => string.Equals(mode, OrganizationAuthModeNames.AccountToken, StringComparison.OrdinalIgnoreCase)) &&
+               operatorAccounts.TryAuthenticateToken(token, out _);
     }
 
     private static bool IsOriginAllowed(HttpContext ctx, GatewayAppRuntime runtime)

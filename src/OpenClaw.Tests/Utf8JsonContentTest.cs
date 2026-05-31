@@ -18,7 +18,7 @@ namespace OpenClaw.Tests
 
             using var jsonContent = new Agent.Tools.Utf8JsonContent(stream);
             var actualStream = new MemoryStream();
-            await jsonContent.CopyToAsync(actualStream, TestContext.Current.CancellationToken);
+            await jsonContent.CopyToAsync(actualStream);
             var actual = Encoding.UTF8.GetString(actualStream.ToArray());
 
             Assert.Equal(jsonString, actual);

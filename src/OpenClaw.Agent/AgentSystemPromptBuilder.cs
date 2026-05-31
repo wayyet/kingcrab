@@ -6,10 +6,23 @@ namespace OpenClaw.Agent;
 
 internal static class AgentSystemPromptBuilder
 {
-    public static string BuildSystemPrompt(IReadOnlyList<SkillDefinition> skills, bool requireApproval)
+    private const string ConciseOperationalInstructions =
+        """
+        [Operational Response Mode]
+        For this run, respond in a concise operator-facing format:
+        - state the action taken
+        - state the proof or verification result
+        - state any unresolved blocker
+        - include the next step only when needed
+        Avoid long rationale unless the user explicitly asks for it.
+        """;
+
+    public static string BuildSystemPrompt(IReadOnlyList<SkillDefinition> skills, bool requireApproval, string? skillsInstructionPrompt = null)
     {
         var basePrompt = BuildBaseSystemPrompt(requireApproval);
-        var skillSection = SkillPromptBuilder.Build(skills);
+        // Progressive disclosure: emit only the metadata index; full bodies are loaded on
+        // demand by the `load_skill` tool against the runtime's LoadedSkills snapshot.
+        var skillSection = SkillPromptBuilder.BuildIndex(skills, skillsInstructionPrompt);
         return string.IsNullOrEmpty(skillSection) ? basePrompt : basePrompt + "\n" + skillSection;
     }
 
@@ -57,7 +70,7 @@ internal static class AgentSystemPromptBuilder
 
         var basePrompt =
             """
-            You are an NCrew digital employee.
+            You are OpenClaw, a self-hosted AI assistant. You run locally on the user's machine.
             You can execute tools to interact with the operating system, files, and external services.
             Be concise, helpful, and security-conscious. Never expose credentials or sensitive data.
             When using tools, explain what you're doing and why.
@@ -78,21 +91,21 @@ internal static class AgentSystemPromptBuilder
 
         var workspacePath = Environment.GetEnvironmentVariable("OPENCLAW_WORKSPACE") ?? Directory.GetCurrentDirectory();
 
-        // Load order matches OpenClaw upstream CONTEXT_FILE_ORDER priority:
-        // AGENTS(10) → SOUL(20) → IDENTITY(30) → MEMORY(70) → Ontology(80)
         var agentsFile = Path.Combine(workspacePath, "AGENTS.md");
         AppendOptionalPromptFile(ref basePrompt, "Workspace Memory (AGENTS.md)", agentsFile, PromptFileMaxChars);
 
         var soulFile = Path.Combine(workspacePath, "SOUL.md");
         AppendOptionalPromptFile(ref basePrompt, "Agent Personality (SOUL.md)", soulFile, PromptFileMaxChars);
 
-        var identityFile = Path.Combine(workspacePath, "IDENTITY.md");
-        AppendOptionalPromptFile(ref basePrompt, "Agent Identity (IDENTITY.md)", identityFile, PromptFileMaxChars);
-
-        var memoryFile = Path.Combine(workspacePath, "MEMORY.md");
-        AppendOptionalPromptFile(ref basePrompt, "Agent Memory Schema (MEMORY.md)", memoryFile, PromptFileMaxChars);
-
         return basePrompt;
+    }
+
+    public static string ApplyResponseMode(string prompt, string? responseMode)
+    {
+        if (!string.Equals(responseMode, OpenClaw.Core.Models.SessionResponseModes.ConciseOps, StringComparison.Ordinal))
+            return prompt;
+
+        return prompt + "\n\n" + ConciseOperationalInstructions;
     }
 
     /// <summary>Dynamic suffix injected per-turn so the timestamp is always current.</summary>

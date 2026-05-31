@@ -34,10 +34,15 @@ public sealed class FileMemoryStoreTests
                 [
                     new ToolInvocation
                     {
+                        CallId = "call_memory_1",
                         ToolName = "memory",
                         Arguments = """{"action":"write","key":"note","content":"hello"}""",
                         Result = "Saved note: note",
-                        Duration = TimeSpan.FromMilliseconds(12)
+                        Duration = TimeSpan.FromMilliseconds(12),
+                        ResultStatus = ToolResultStatuses.Blocked,
+                        FailureCode = ToolFailureCodes.ApprovalRequired,
+                        FailureMessage = "Approval required.",
+                        NextStep = "Approve the request and retry."
                     }
                 ]
             });
@@ -46,6 +51,31 @@ public sealed class FileMemoryStoreTests
                 Role = "assistant",
                 Content = "Saved note: note"
             });
+            session.ExecutionCheckpoint = new SessionExecutionCheckpoint
+            {
+                CheckpointId = "chk_tool_history",
+                Kind = SessionCheckpointKinds.ToolBatch,
+                State = SessionCheckpointStates.Completed,
+                Sequence = 1,
+                Iteration = 0,
+                HistoryCount = 2,
+                CorrelationId = "corr-1",
+                CompletedAtUtc = DateTimeOffset.UtcNow,
+                CompletionReason = "final_response",
+                ToolCalls =
+                [
+                    new SessionCheckpointToolCall
+                    {
+                        CallId = "call_memory_1",
+                        ToolName = "memory",
+                        ResultStatus = ToolResultStatuses.Blocked,
+                        FailureCode = ToolFailureCodes.ApprovalRequired,
+                        DurationMs = 12,
+                        ArgumentsBytes = 48,
+                        ResultBytes = 16
+                    }
+                ]
+            };
 
             await writerStore.SaveSessionAsync(session, CancellationToken.None);
 
@@ -55,8 +85,19 @@ public sealed class FileMemoryStoreTests
             Assert.NotNull(loaded);
             Assert.Equal(3, loaded!.History.Count);
             var toolCall = Assert.Single(loaded!.History[1].ToolCalls!);
+            Assert.Equal("call_memory_1", toolCall.CallId);
             Assert.Equal("memory", toolCall.ToolName);
             Assert.Equal("Saved note: note", toolCall.Result);
+            Assert.Equal(ToolResultStatuses.Blocked, toolCall.ResultStatus);
+            Assert.Equal(ToolFailureCodes.ApprovalRequired, toolCall.FailureCode);
+            Assert.Equal("Approval required.", toolCall.FailureMessage);
+            Assert.Equal("Approve the request and retry.", toolCall.NextStep);
+            Assert.NotNull(loaded.ExecutionCheckpoint);
+            Assert.Equal("chk_tool_history", loaded.ExecutionCheckpoint!.CheckpointId);
+            Assert.Equal(SessionCheckpointStates.Completed, loaded.ExecutionCheckpoint.State);
+            var checkpointTool = Assert.Single(loaded.ExecutionCheckpoint.ToolCalls);
+            Assert.Equal("call_memory_1", checkpointTool.CallId);
+            Assert.Equal("memory", checkpointTool.ToolName);
         }
         finally
         {
@@ -141,6 +182,32 @@ public sealed class FileMemoryStoreTests
     }
 
     [Fact]
+    public async Task GetSessionAsync_DoesNotLoadLegacyTraversalPath()
+    {
+        var storagePath = Path.Combine(Path.GetTempPath(), "openclaw-file-memory-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(storagePath);
+
+        try
+        {
+            var escapedTarget = Path.Combine(storagePath, "escape-target.json");
+            await File.WriteAllTextAsync(
+                escapedTarget,
+                """{"Id":"../escape-target","ChannelId":"test","SenderId":"user","History":[]}""",
+                CancellationToken.None);
+
+            var store = new FileMemoryStore(storagePath, 4);
+            var loaded = await store.GetSessionAsync("../escape-target", CancellationToken.None);
+
+            Assert.Null(loaded);
+            Assert.True(File.Exists(escapedTarget));
+        }
+        finally
+        {
+            Directory.Delete(storagePath, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ListNotesWithPrefixAsync_LongKeys_ReturnsOriginalKey()
     {
         var storagePath = Path.Combine(Path.GetTempPath(), "openclaw-file-memory-tests", Guid.NewGuid().ToString("N"));
@@ -197,7 +264,7 @@ public sealed class FileMemoryStoreTests
         {
             var store = new FileMemoryStore(storagePath, 4);
             await store.SaveNoteAsync("project:demo:legacy", "architecture notes about migration", CancellationToken.None);
-            await Task.Delay(20, CancellationToken.None);
+            await Task.Delay(20);
             await store.SaveNoteAsync("project:demo:architecture", "architecture migration checklist", CancellationToken.None);
 
             var hits = await store.SearchNotesAsync("architecture migration", "project:demo:", 2, CancellationToken.None);

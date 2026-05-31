@@ -1,20 +1,35 @@
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using OpenClaw.Channels;
 using OpenClaw.Agent;
 using OpenClaw.Agent.Execution;
+using OpenClaw.Agent.Memory;
+using OpenClaw.Agent.Plugins;
 using OpenClaw.Core.Abstractions;
+using OpenClaw.Core.ExternalCli;
 using OpenClaw.Core.Features;
+using OpenClaw.Core.Governance;
 using OpenClaw.Core.Memory;
 using OpenClaw.Core.Models;
 using OpenClaw.Core.Observability;
 using OpenClaw.Core.Pipeline;
+using OpenClaw.Core.Plugins;
 using OpenClaw.Core.Security;
 using OpenClaw.Core.Sessions;
 using OpenClaw.Gateway.Bootstrap;
 using OpenClaw.Gateway.Extensions;
 using OpenClaw.Gateway.Mcp;
 using OpenClaw.Gateway.Models;
+using OpenClaw.Gateway.Pipeline;
 using OpenClaw.Gateway.PromptCaching;
+using OpenClaw.Gateway.Workflows;
+using OpenClaw.Core.Validation;
+using OpenClaw.PluginKit;
+using OpenClaw.Payments.Abstractions;
+using OpenClaw.Payments.Core;
+using OpenClaw.Payments.StripeLink;
 
 namespace OpenClaw.Gateway.Composition;
 
@@ -24,34 +39,92 @@ internal static class CoreServicesExtensions
     {
         var config = startup.Config;
 
+        // kingcrab does not adopt TickerQ; the legacy CronSchedulerStartupService /
+        // CronSchedulerTickerFunction (which wrapped the cron tick loop) are also
+        // excluded — see docs/migration/exclusion-list.md §1.1.
+        // CronScheduler itself remains registered (NCrontab-only) so consumers that need
+        // to evaluate cron expressions or read job state can still resolve it from DI.
+        services.TryAddSingleton<IConfiguration>(_ => new ConfigurationBuilder().Build());
+        services.AddSingleton(startup);
         services.AddSingleton(config);
         services.AddSingleton(config.Learning);
+        services.AddSingleton(config.Governance);
+        services.AddSingleton<IToolGovernanceService>(sp => CreateToolGovernanceService(
+            config.Governance,
+            sp.GetRequiredService<ILogger<HttpSidecarToolGovernanceService>>()));
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<ISensitiveDataRedactor, BaselineSecretRedactor>());
+        services.AddOpenClawPaymentCore(
+            defaultProviderId: config.Payments.Provider,
+            environment: config.Payments.Environment,
+            secretTtl: TimeSpan.FromMinutes(Math.Max(1, config.Payments.SecretTtlMinutes)),
+            allowTestModeWithoutApproval: config.Payments.Policy.AllowTestModeWithoutApproval,
+            denyLiveWithoutApprovalService: config.Payments.Policy.DenyLiveWithoutApprovalService,
+            maxLiveAmountMinor: config.Payments.Policy.MaxLiveAmountMinor,
+            mockProviderId: config.Payments.Mock.ProviderId,
+            mockFundingDisplay: config.Payments.Mock.FundingSourceDisplayName);
+        if (string.Equals(config.Payments.Provider, "stripe-link", StringComparison.OrdinalIgnoreCase))
+        {
+            services.AddSingleton<ILinkCliCommandRunner, LinkCliProcessRunner>();
+            services.AddSingleton<IPaymentProvider>(sp => new StripeLinkPaymentProvider(new StripeLinkOptions
+            {
+                ProviderId = config.Payments.StripeLink.ProviderId,
+                CliPath = config.Payments.StripeLink.CliPath,
+                Mode = PaymentEnvironments.Normalize(config.Payments.Environment),
+                Timeout = TimeSpan.FromSeconds(Math.Max(1, config.Payments.StripeLink.TimeoutSeconds)),
+                WorkingDirectory = config.Payments.StripeLink.WorkingDirectory,
+                EnvironmentVariables = config.Payments.StripeLink.EnvironmentVariables
+            }, sp.GetRequiredService<ILinkCliCommandRunner>()));
+        }
+        services.AddSingleton<IPaymentApprovalService, GatewayPaymentApprovalService>();
+        services.AddSingleton<IRedactionPipeline>(sp => new RedactionPipeline(sp.GetServices<ISensitiveDataRedactor>()));
+        services.AddSingleton<IExternalCliConnectorRegistry, ExternalCliConnectorRegistry>();
+        services.AddSingleton<IExternalCliRunner, ExternalCliRunner>();
+        services.AddSingleton<ISentinelSubstitutionService>(sp =>
+            config.Payments.Enabled
+                ? sp.GetRequiredService<PaymentSentinelSubstitutionService>()
+                : new NoopSentinelSubstitutionService());
         services.AddSingleton(typeof(AllowlistSemantics), AllowlistPolicy.ParseSemantics(config.Channels.AllowlistSemantics));
         services.AddSingleton(sp =>
             new RecentSendersStore(config.Memory.StoragePath, sp.GetRequiredService<ILogger<RecentSendersStore>>()));
-
-        // MCP config store: persists workspace MCP config to {StoragePath}/mcp/mcp.json
-        services.AddSingleton(sp =>
-            new McpConfigStore(
-                config.Memory.StoragePath,
-                sp.GetRequiredService<ILogger<McpConfigStore>>()));
-        // Holder so admin endpoints can trigger immediate reloads after saving.
-        services.AddSingleton<McpWatcherHolder>();
         services.AddSingleton(sp =>
             new AllowlistManager(config.Memory.StoragePath, sp.GetRequiredService<ILogger<AllowlistManager>>()));
 
         services.AddSingleton<RuntimeMetrics>();
-        services.AddSingleton<IMemoryStore>(sp => CreateMemoryStore(config, sp.GetRequiredService<RuntimeMetrics>()));
+        services.AddSingleton<IMemoryStore>(sp => CreateMemoryStore(
+            startup,
+            config,
+            sp.GetRequiredService<RuntimeMetrics>(),
+            sp.GetRequiredService<ILoggerFactory>().CreateLogger("MemoryStore"),
+            sp.GetRequiredService<IRedactionPipeline>(),
+            ResolveStartupCancellationToken(sp),
+            ResolveBlockedPluginIds(sp)));
+        services.AddSingleton<IStructuredMemoryProvider>(sp =>
+            new FractalMemoryMcpProvider(
+                config,
+                startup.WorkspacePath,
+                sp.GetRequiredService<ILogger<FractalMemoryMcpProvider>>()));
+        services.AddSingleton<ContextBudgetPlanner>();
         services.AddSingleton<ISessionAdminStore>(sp =>
         {
             var memory = sp.GetRequiredService<IMemoryStore>();
             return memory as ISessionAdminStore
                 ?? throw new InvalidOperationException($"{memory.GetType().Name} must implement ISessionAdminStore.");
         });
-        services.AddSingleton<ISessionSearchStore>(sp => (ISessionSearchStore)sp.GetRequiredService<IMemoryStore>());
+        services.AddSingleton<ISessionSearchStore>(sp =>
+        {
+            var memory = sp.GetRequiredService<IMemoryStore>();
+            return memory as ISessionSearchStore ?? EmptySessionSearchStore.Instance;
+        });
         AddFeatureStores(services, config);
         services.AddSingleton<ProviderUsageTracker>();
         services.AddSingleton<ToolUsageTracker>();
+        services.AddSingleton<ProviderSmokeRegistry>();
+        services.AddSingleton<StartupNoticeCollector>();
+        services.AddSingleton<IStartupNoticeSink>(sp => sp.GetRequiredService<StartupNoticeCollector>());
+        services.AddSingleton(sp => new SetupVerificationSnapshotStore(config.Memory.StoragePath));
+        services.AddSingleton(sp => new ToolAuditLog(
+            Path.Combine(Path.GetFullPath(config.Memory.StoragePath), "audit", "tool-audit.jsonl"),
+            sp.GetRequiredService<ILogger<ToolAuditLog>>()));
         services.AddSingleton<LlmProviderRegistry>();
         services.AddSingleton<ConfiguredModelProfileRegistry>();
         services.AddSingleton<IModelProfileRegistry>(sp => sp.GetRequiredService<ConfiguredModelProfileRegistry>());
@@ -70,6 +143,11 @@ internal static class CoreServicesExtensions
                 sp.GetRequiredService<ILogger<SessionMetadataStore>>()));
         services.AddSingleton(sp => new MediaCacheStore(config.Multimodal.MediaCachePath));
         services.AddSingleton<GeminiMultimodalService>();
+        services.AddSingleton<GeminiAudioTranscriptionProvider>();
+        services.AddSingleton<IAudioTranscriptionProvider>(sp => sp.GetRequiredService<GeminiAudioTranscriptionProvider>());
+        services.AddSingleton<AudioTranscriptionService>();
+        services.AddSingleton<VideoFrameExtractionService>();
+        services.AddSingleton<IVideoFrameExtractionService>(sp => sp.GetRequiredService<VideoFrameExtractionService>());
         services.AddSingleton<GeminiLiveProxyService>();
         services.AddSingleton<ILiveSessionProvider>(sp => sp.GetRequiredService<GeminiLiveProxyService>());
         services.AddSingleton<GeminiTextToSpeechProvider>();
@@ -89,7 +167,8 @@ internal static class CoreServicesExtensions
         {
             var svc = new ExecutionProcessService(
                 sp.GetRequiredService<ToolExecutionRouter>(),
-                sp.GetService<ILoggerFactory>()?.CreateLogger<ExecutionProcessService>());
+                sp.GetService<ILoggerFactory>()?.CreateLogger<ExecutionProcessService>(),
+                sp.GetService<RuntimeMetrics>());
             var eventStore = sp.GetService<RuntimeEventStore>();
             if (eventStore is not null)
             {
@@ -107,8 +186,21 @@ internal static class CoreServicesExtensions
             return svc;
         });
         services.AddSingleton<HeartbeatService>();
+        services.TryAddSingleton<GatewayRuntimeHolder>();
+        services.AddSingleton<RuntimePulseService>();
+        services.AddHostedService(sp => sp.GetRequiredService<RuntimePulseService>());
+        services.AddSingleton<AutomationRunCoordinator>();
+        services.AddSingleton<IAutomationRunDispatcher>(sp => sp.GetRequiredService<AutomationRunCoordinator>());
         services.AddSingleton<GatewayAutomationService>();
         services.AddSingleton<LearningService>();
+        services.AddSingleton<HarnessContractService>();
+        services.AddSingleton<EvidenceBundleService>();
+        services.AddSingleton<GovernanceLedgerService>();
+        services.AddSingleton<SharedHarnessStateService>();
+        services.AddSingleton<CodebaseHarnessMapService>();
+        services.AddSingleton<PlanExecuteVerifyService>();
+        services.AddSingleton<IPlanExecuteVerifyOrchestrator>(sp => sp.GetRequiredService<PlanExecuteVerifyService>());
+        services.AddSingleton<AgentWorkflowRegistry>();
         services.AddSingleton<ICronJobSource, GatewayCronJobSource>();
         services.AddSingleton<ActorRateLimitService>(sp =>
             new ActorRateLimitService(
@@ -130,17 +222,43 @@ internal static class CoreServicesExtensions
         services.AddSingleton<IMemoryRetentionCoordinator>(sp => sp.GetRequiredService<MemoryRetentionSweeperService>());
         services.AddHostedService(sp => sp.GetRequiredService<MemoryRetentionSweeperService>());
         services.AddSingleton<MessagePipeline>();
+        services.AddSingleton(sp =>
+            new CronScheduler(
+                sp.GetRequiredService<ICronJobSource>(),
+                sp.GetRequiredService<ILogger<CronScheduler>>(),
+                sp.GetRequiredService<IStartupNoticeSink>(),
+                sp.GetRequiredService<MessagePipeline>().InboundWriter,
+                sp.GetRequiredService<IAutomationRunDispatcher>()));
+        // CronSchedulerStartupService is excluded together with TickerQ
+        // (see docs/migration/exclusion-list.md §1.1). No hosted tick loop is registered.
         services.AddSingleton(new WebSocketChannel(config.WebSocket));
+        services.AddSingleton<CanvasCommandBroker>();
+        services.AddSingleton<GatewayRuntimeShutdownCoordinator>();
+        services.AddHostedService(sp => sp.GetRequiredService<GatewayRuntimeShutdownCoordinator>());
         services.AddSingleton<ChatCommandProcessor>();
         services.AddSingleton<GatewayLlmExecutionService>();
         services.AddSingleton<PromptCacheWarmService>();
         services.AddHostedService(sp => sp.GetRequiredService<PromptCacheWarmService>());
+        services.AddSingleton<SqliteEmbeddingBackfillService>();
+        services.AddHostedService(sp => sp.GetRequiredService<SqliteEmbeddingBackfillService>());
+        // kingcrab uses the MAF runtime exclusively; the upstream NativeAgentRuntimeFactory
+        // is excluded (see docs/migration/exclusion-list.md). The MAF factory is registered
+        // separately by the Composition layer; ensure RuntimeInitializationExtensions wires it.
 
         return services;
     }
 
     private static void AddFeatureStores(IServiceCollection services, GatewayConfig config)
     {
+        services.AddSingleton<FileHarnessContractStore>(_ => new FileHarnessContractStore(config.Memory.StoragePath));
+        services.AddSingleton<IHarnessContractStore>(sp => sp.GetRequiredService<FileHarnessContractStore>());
+        services.AddSingleton<FileEvidenceBundleStore>(_ => new FileEvidenceBundleStore(config.Memory.StoragePath));
+        services.AddSingleton<IEvidenceBundleStore>(sp => sp.GetRequiredService<FileEvidenceBundleStore>());
+        services.AddSingleton<FileGovernanceLedgerStore>(_ => new FileGovernanceLedgerStore(config.Memory.StoragePath));
+        services.AddSingleton<IGovernanceLedgerStore>(sp => sp.GetRequiredService<FileGovernanceLedgerStore>());
+        services.AddSingleton<FileSharedHarnessStateStore>(_ => new FileSharedHarnessStateStore(config.Memory.StoragePath));
+        services.AddSingleton<ISharedHarnessStateStore>(sp => sp.GetRequiredService<FileSharedHarnessStateStore>());
+
         if (string.Equals(config.Memory.Provider, "sqlite", StringComparison.OrdinalIgnoreCase))
         {
             services.AddSingleton<SqliteFeatureStore>(_ => new SqliteFeatureStore(ResolveSqliteDbPath(config)));
@@ -174,8 +292,18 @@ internal static class CoreServicesExtensions
         return Path.GetFullPath(dbPath);
     }
 
-    private static IMemoryStore CreateMemoryStore(OpenClaw.Core.Models.GatewayConfig config, RuntimeMetrics metrics)
+    private static IMemoryStore CreateMemoryStore(
+        GatewayStartupContext startup,
+        GatewayConfig config,
+        RuntimeMetrics metrics,
+        ILogger logger,
+        IRedactionPipeline redaction,
+        CancellationToken startupCancellationToken,
+        IReadOnlyCollection<string> blockedPluginIds)
     {
+        if (string.Equals(config.Memory.Provider, "mempalace", StringComparison.OrdinalIgnoreCase))
+            return CreateDynamicNativeMemoryStore(startup, config, metrics, logger, startupCancellationToken, blockedPluginIds);
+
         if (string.Equals(config.Memory.Provider, "sqlite", StringComparison.OrdinalIgnoreCase))
         {
             var sqliteConfig = config.Memory.Sqlite;
@@ -189,16 +317,8 @@ internal static class CoreServicesExtensions
                 ResolveSqliteDbPath(config),
                 sqliteConfig.EnableFts,
                 embeddingGenerator: embeddingGen,
-                enableVectors: sqliteConfig.EnableVectors);
-
-            if (embeddingGen is not null)
-            {
-                _ = Task.Run(async () =>
-                {
-                    try { await store.BackfillEmbeddingsAsync(); }
-                    catch { /* fire-and-forget */ }
-                });
-            }
+                enableVectors: sqliteConfig.EnableVectors,
+                redaction: redaction);
 
             return store;
         }
@@ -206,6 +326,98 @@ internal static class CoreServicesExtensions
         return new FileMemoryStore(
             config.Memory.StoragePath,
             config.Memory.MaxCachedSessions ?? config.MaxConcurrentSessions,
-            metrics: metrics);
+            metrics: metrics,
+            redaction: redaction);
+    }
+
+    private static IMemoryStore CreateDynamicNativeMemoryStore(
+        GatewayStartupContext startup,
+        GatewayConfig config,
+        RuntimeMetrics metrics,
+        ILogger logger,
+        CancellationToken startupCancellationToken,
+        IReadOnlyCollection<string> blockedPluginIds)
+    {
+        if (!config.Plugins.DynamicNative.Enabled)
+        {
+            throw new InvalidOperationException(
+                "Memory.Provider 'mempalace' is provided by a JIT-only dynamic native plugin. " +
+                "Enable OpenClaw:Plugins:DynamicNative:Enabled and load the OpenClaw.Plugins.Mempalace native plugin, or choose 'file' or 'sqlite'.");
+        }
+
+        var host = new NativeDynamicPluginHost(config.Plugins.DynamicNative, startup.RuntimeState, logger, blockedPluginIds);
+        try
+        {
+            var providers = host.LoadMemoryProvidersAsync(startup.WorkspacePath, startupCancellationToken)
+                .GetAwaiter()
+                .GetResult();
+            var provider = providers.FirstOrDefault(item => string.Equals(item.ProviderId, config.Memory.Provider, StringComparison.OrdinalIgnoreCase));
+            if (provider.Factory is null)
+            {
+                throw new InvalidOperationException(
+                    "Memory.Provider 'mempalace' was requested, but no dynamic native memory provider registered 'mempalace'. " +
+                    "Load the OpenClaw.Plugins.Mempalace native plugin via OpenClaw:Plugins:DynamicNative:Load:Paths.");
+            }
+
+            var memoryStore = provider.Factory(new NativeDynamicMemoryProviderContext
+            {
+                PluginId = provider.PluginId,
+                ProviderId = provider.ProviderId,
+                Config = provider.Config,
+                GatewayConfig = config,
+                Metrics = metrics,
+                Logger = logger
+            });
+
+            startup.NativeDynamicPluginHost = host;
+            return memoryStore;
+        }
+        catch
+        {
+            DisposeNativeDynamicPluginHostOnStartupFailure(host, logger);
+            throw;
+        }
+    }
+
+    private static void DisposeNativeDynamicPluginHostOnStartupFailure(NativeDynamicPluginHost host, ILogger logger)
+    {
+        try
+        {
+            host.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to dispose dynamic native plugin host after memory provider startup failure");
+        }
+    }
+
+    private static CancellationToken ResolveStartupCancellationToken(IServiceProvider services)
+        => services.GetService<IHostApplicationLifetime>()?.ApplicationStopping ?? CancellationToken.None;
+
+    private static IReadOnlyCollection<string> ResolveBlockedPluginIds(IServiceProvider services)
+        => services.GetService<PluginHealthService>()?.GetBlockedPluginIds() ?? [];
+
+    private static IToolGovernanceService CreateToolGovernanceService(
+        ToolGovernanceConfig config,
+        ILogger<HttpSidecarToolGovernanceService> logger)
+    {
+        if (!config.Enabled ||
+            string.Equals(config.Provider, ToolGovernanceProviders.None, StringComparison.OrdinalIgnoreCase))
+        {
+            return new NoopToolGovernanceService();
+        }
+
+        if (!string.Equals(config.Provider, ToolGovernanceProviders.HttpSidecar, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"Unsupported governance provider '{config.Provider}'.");
+
+        if (!Uri.TryCreate(config.SidecarBaseUrl, UriKind.Absolute, out var baseUri))
+            throw new InvalidOperationException("OpenClaw:Governance:SidecarBaseUrl must be an absolute URL when governance is enabled.");
+
+        if (baseUri.Scheme is not "http" and not "https")
+            throw new InvalidOperationException("OpenClaw:Governance:SidecarBaseUrl must use http or https when governance is enabled.");
+
+        var httpClient = OpenClaw.Core.Http.HttpClientFactory.Create(allowAutoRedirect: false);
+        httpClient.BaseAddress = baseUri;
+        return new HttpSidecarToolGovernanceService(httpClient, config, logger);
     }
 }

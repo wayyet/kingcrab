@@ -124,7 +124,7 @@ public sealed class SqliteMemoryStoreRetentionTests
         var dbPath = Path.Combine(root, "memory.db");
         var now = new DateTimeOffset(2026, 03, 04, 12, 0, 0, TimeSpan.Zero);
         var invalidArchiveRoot = Path.Combine(root, "archive-blocker");
-        await File.WriteAllTextAsync(invalidArchiveRoot, "not-a-directory", CancellationToken.None);
+        await File.WriteAllTextAsync(invalidArchiveRoot, "not-a-directory");
 
         using var store = new SqliteMemoryStore(dbPath, enableFts: false);
         await store.SaveSessionAsync(new Session
@@ -252,13 +252,13 @@ public sealed class SqliteMemoryStoreRetentionTests
         using var _ = new SqliteMemoryStore(dbPath, enableFts: false);
 
         await using var conn = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = dbPath }.ToString());
-        await conn.OpenAsync(TestContext.Current.CancellationToken);
+        await conn.OpenAsync();
 
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='index' AND name IN ('idx_sessions_updated_at','idx_branches_updated_at') ORDER BY name;";
         var names = new List<string>();
-        await using var reader = await cmd.ExecuteReaderAsync(TestContext.Current.CancellationToken);
-        while (await reader.ReadAsync(TestContext.Current.CancellationToken))
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
             names.Add(reader.GetString(0));
 
         Assert.Contains("idx_sessions_updated_at", names);

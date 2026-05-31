@@ -116,6 +116,132 @@ public sealed class ModelProfileSelectionTests
     }
 
     [Fact]
+    public void SelectionPolicy_DetectsVideoInputRequirements()
+    {
+        LlmClientFactory.ResetDynamicProviders();
+        LlmClientFactory.RegisterProvider("fake-profile-tests", new EvaluationChatClient());
+
+        var config = BuildProfileConfig();
+        var registry = new ConfiguredModelProfileRegistry(config, NullLogger<ConfiguredModelProfileRegistry>.Instance);
+        var policy = new DefaultModelSelectionPolicy(registry);
+
+        var selection = policy.Resolve(new OpenClaw.Core.Abstractions.ModelSelectionRequest
+        {
+            Session = new Session
+            {
+                Id = "s-video",
+                ChannelId = "test",
+                SenderId = "user"
+            },
+            Messages =
+            [
+                new ChatMessage(ChatRole.User, [new UriContent(new Uri("https://example.invalid/clip.mp4"), "video/mp4")])
+            ],
+            Options = new ChatOptions(),
+            Streaming = false
+        });
+
+        Assert.Equal("gemma4-local", selection.SelectedProfileId);
+        Assert.True(selection.Requirements.SupportsVision);
+        Assert.True(selection.Requirements.SupportsVideoInput);
+    }
+
+    [Fact]
+    public void SelectionPolicy_FallsBackForEmbeddedVideoWhenPreprocessingIsDisabled()
+    {
+        LlmClientFactory.ResetDynamicProviders();
+        LlmClientFactory.RegisterProvider("fake-profile-tests", new EvaluationChatClient());
+
+        var config = BuildEmbeddedVideoConfig(videoEnabled: false);
+        var registry = new ConfiguredModelProfileRegistry(config, NullLogger<ConfiguredModelProfileRegistry>.Instance);
+        var policy = new DefaultModelSelectionPolicy(registry);
+
+        var selection = policy.Resolve(new OpenClaw.Core.Abstractions.ModelSelectionRequest
+        {
+            Session = new Session
+            {
+                Id = "s-embedded-video",
+                ChannelId = "test",
+                SenderId = "user",
+                ModelProfileId = "embedded-video",
+                FallbackModelProfileIds = ["frontier-tools"]
+            },
+            Messages =
+            [
+                new ChatMessage(ChatRole.User, [new DataContent(new BinaryData([1, 2, 3]), "video/mp4")])
+            ],
+            Options = new ChatOptions(),
+            Streaming = false
+        });
+
+        Assert.Equal("frontier-tools", selection.SelectedProfileId);
+        Assert.Contains("video input was required", selection.Explanation, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SelectionPolicy_FallsBackWhenEstimatedPromptExceedsContextWindow()
+    {
+        LlmClientFactory.ResetDynamicProviders();
+        LlmClientFactory.RegisterProvider("fake-profile-tests", new EvaluationChatClient());
+
+        var config = BuildProfileConfig();
+        var registry = new ConfiguredModelProfileRegistry(config, NullLogger<ConfiguredModelProfileRegistry>.Instance);
+        var policy = new DefaultModelSelectionPolicy(registry);
+        var session = new Session
+        {
+            Id = "s2-budget",
+            ChannelId = "test",
+            SenderId = "user",
+            ModelProfileId = "gemma4-local",
+            FallbackModelProfileIds = ["frontier-tools"]
+        };
+
+        var selection = policy.Resolve(new OpenClaw.Core.Abstractions.ModelSelectionRequest
+        {
+            Session = session,
+            Messages = [new ChatMessage(ChatRole.User, "Need a large-context answer")],
+            Options = new ChatOptions(),
+            EstimatedInputTokens = 130_000,
+            ReservedOutputTokens = 8_000,
+            Streaming = false
+        });
+
+        Assert.Equal("frontier-tools", selection.SelectedProfileId);
+        Assert.Contains("Falling back from 'gemma4-local'", selection.Explanation, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionPolicy_DoesNotTreatReservedOutputBudgetAsHardMinimumOutputRequirement()
+    {
+        LlmClientFactory.ResetDynamicProviders();
+        LlmClientFactory.RegisterProvider("fake-profile-tests", new EvaluationChatClient());
+
+        var config = BuildProfileConfig();
+        var registry = new ConfiguredModelProfileRegistry(config, NullLogger<ConfiguredModelProfileRegistry>.Instance);
+        var policy = new DefaultModelSelectionPolicy(registry);
+        var session = new Session
+        {
+            Id = "s2-reserved-output",
+            ChannelId = "test",
+            SenderId = "user",
+            ModelProfileId = "gemma4-local",
+            FallbackModelProfileIds = ["frontier-tools"]
+        };
+
+        var selection = policy.Resolve(new OpenClaw.Core.Abstractions.ModelSelectionRequest
+        {
+            Session = session,
+            Messages = [new ChatMessage(ChatRole.User, "Need a short answer.")],
+            Options = new ChatOptions(),
+            EstimatedInputTokens = 2_000,
+            ReservedOutputTokens = 12_000,
+            Streaming = false
+        });
+
+        Assert.Equal("gemma4-local", selection.SelectedProfileId);
+    }
+
+    [Fact]
     public void ConfigValidator_RejectsUnknownDefaultModelProfile()
     {
         var config = new GatewayConfig
@@ -217,7 +343,14 @@ public sealed class ModelProfileSelectionTests
             ["OpenClaw:Models:Profiles:1:Provider"] = "openai-compatible",
             ["OpenClaw:Models:Profiles:1:Model"] = "gemma-4",
             ["OpenClaw:Models:Profiles:1:BaseUrl"] = "https://example.invalid/v1",
-            ["OpenClaw:Models:Profiles:1:Capabilities:SupportsTools"] = "true"
+            ["OpenClaw:Models:Profiles:1:Capabilities:SupportsTools"] = "true",
+            ["OpenClaw:LocalInference:Enabled"] = "true",
+            ["OpenClaw:LocalInference:AutoStart"] = "false",
+            ["OpenClaw:LocalInference:Host"] = "127.0.0.1",
+            ["OpenClaw:LocalInference:Port"] = "49321",
+            ["OpenClaw:LocalInference:Threads"] = "4",
+            ["OpenClaw:LocalInference:GpuLayers"] = "0",
+            ["OpenClaw:LocalInference:ContextSize"] = "4096"
         };
 
         var configuration = new ConfigurationBuilder()
@@ -232,6 +365,13 @@ public sealed class ModelProfileSelectionTests
         Assert.Equal("https://example.invalid/v1", config.Models.Profiles[1].BaseUrl);
         Assert.NotNull(config.Models.Profiles[1].Capabilities);
         Assert.True(config.Models.Profiles[1].Capabilities!.SupportsTools);
+        Assert.True(config.LocalInference.Enabled);
+        Assert.False(config.LocalInference.AutoStart);
+        Assert.Equal("127.0.0.1", config.LocalInference.Host);
+        Assert.Equal(49321, config.LocalInference.Port);
+        Assert.Equal("4", config.LocalInference.Threads);
+        Assert.Equal("0", config.LocalInference.GpuLayers);
+        Assert.Equal(4096, config.LocalInference.ContextSize);
     }
 
     [Fact]
@@ -281,6 +421,159 @@ public sealed class ModelProfileSelectionTests
             Environment.SetEnvironmentVariable("MODEL_PROFILE_ENDPOINT", null);
             Environment.SetEnvironmentVariable("MODEL_PROFILE_KEY", null);
         }
+    }
+
+    [Fact]
+    public void SelectionPolicy_EmbeddedProfileFallsBackWhenToolsAreRequired()
+    {
+        LlmClientFactory.ResetDynamicProviders();
+        LlmClientFactory.RegisterProvider("fake-profile-tests", new EvaluationChatClient());
+
+        var config = new GatewayConfig
+        {
+            LocalInference = new LocalInferenceConfig
+            {
+                Enabled = true
+            },
+            Models = new ModelsConfig
+            {
+                DefaultProfile = "embedded-local",
+                Profiles =
+                [
+                    new ModelProfileConfig
+                    {
+                        Id = "embedded-local",
+                        PresetId = "embedded-gemma-small-q4",
+                        Provider = "embedded",
+                        Model = "gemma-local-small-q4",
+                        FallbackProfileIds = ["frontier-tools"]
+                    },
+                    new ModelProfileConfig
+                    {
+                        Id = "frontier-tools",
+                        Provider = "fake-profile-tests",
+                        Model = "frontier",
+                        Capabilities = new ModelCapabilities
+                        {
+                            SupportsTools = true,
+                            SupportsStreaming = true,
+                            SupportsSystemMessages = true
+                        }
+                    }
+                ]
+            }
+        };
+
+        using var registry = new ConfiguredModelProfileRegistry(config, NullLogger<ConfiguredModelProfileRegistry>.Instance);
+        var embedded = registry.ListStatuses().Single(status => status.Id == "embedded-local");
+        Assert.True(embedded.Capabilities.SupportsStreaming);
+        Assert.True(embedded.Capabilities.SupportsSystemMessages);
+        Assert.False(embedded.Capabilities.SupportsTools);
+        Assert.False(embedded.Capabilities.SupportsJsonSchema);
+        Assert.False(embedded.Capabilities.SupportsStructuredOutputs);
+        Assert.False(embedded.Capabilities.SupportsParallelToolCalls);
+        Assert.False(embedded.Capabilities.SupportsReasoningEffort);
+
+        var policy = new DefaultModelSelectionPolicy(registry);
+        var selection = policy.Resolve(new OpenClaw.Core.Abstractions.ModelSelectionRequest
+        {
+            Session = new Session
+            {
+                Id = "embedded-tools",
+                ChannelId = "test",
+                SenderId = "user",
+                ModelProfileId = "embedded-local"
+            },
+            Messages = [new ChatMessage(ChatRole.User, "Use a tool")],
+            Options = new ChatOptions
+            {
+                Tools =
+                [
+                    AIFunctionFactory.CreateDeclaration(
+                        "record_observation",
+                        "Record an observation",
+                        JsonDocument.Parse("""{"type":"object","properties":{"value":{"type":"string"}},"required":["value"]}""").RootElement.Clone(),
+                        returnJsonSchema: null)
+                ]
+            }
+        });
+
+        Assert.Equal("frontier-tools", selection.SelectedProfileId);
+        Assert.Contains("tool calling was required", selection.Explanation, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ModelDoctor_WarnsForLegacyOllamaCompatibilityEndpoint()
+    {
+        var config = new GatewayConfig
+        {
+            Llm = new LlmProviderConfig
+            {
+                Provider = "ollama",
+                Model = "llama3.2",
+                Endpoint = "http://127.0.0.1:11434/v1"
+            },
+            Models = new ModelsConfig
+            {
+                DefaultProfile = "local-primary",
+                Profiles =
+                [
+                    new ModelProfileConfig
+                    {
+                        Id = "local-primary",
+                        Provider = "ollama",
+                        Model = "llama3.2",
+                        PresetId = "ollama-agentic",
+                        BaseUrl = "http://127.0.0.1:11434/v1"
+                    }
+                ]
+            }
+        };
+
+        var registry = new ConfiguredModelProfileRegistry(config, NullLogger<ConfiguredModelProfileRegistry>.Instance);
+        var doctor = ModelDoctorEvaluator.Build(config, registry);
+        var profile = Assert.Single(doctor.Profiles);
+
+        Assert.True(profile.UsesCompatibilityTransport);
+        Assert.True(profile.IsAvailable);
+        Assert.Contains(doctor.Warnings, warning => warning.Contains("legacy Ollama /v1", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(profile.CompatibilityNotes, note => note.Contains("legacy /v1 compatibility endpoint", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Registry_LeavesOllamaProfilesWithoutPresetAvailable()
+    {
+        LlmClientFactory.ResetDynamicProviders();
+        LlmClientFactory.RegisterProvider("fake-profile-tests", new EvaluationChatClient());
+
+        var config = new GatewayConfig
+        {
+            Llm = new LlmProviderConfig
+            {
+                Provider = "fake-profile-tests",
+                Model = "legacy-model"
+            },
+            Models = new ModelsConfig
+            {
+                Profiles =
+                [
+                    new ModelProfileConfig
+                    {
+                        Id = "local-without-preset",
+                        Provider = "ollama",
+                        Model = "llama3.2",
+                        BaseUrl = "http://127.0.0.1:11434"
+                    }
+                ]
+            }
+        };
+
+        var registry = new ConfiguredModelProfileRegistry(config, NullLogger<ConfiguredModelProfileRegistry>.Instance);
+        var status = Assert.Single(registry.ListStatuses());
+
+        Assert.True(status.IsAvailable);
+        Assert.Empty(status.ValidationIssues);
+        Assert.Contains(status.CompatibilityNotes, note => note.Contains("No local preset is configured", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -354,6 +647,87 @@ public sealed class ModelProfileSelectionTests
 
         Assert.Equal("frontier-tools", selection.SelectedProfileId);
         Assert.Contains("broken-remote", selection.Explanation, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ModelDoctor_ApertureTailnetIdentity_DoesNotRequireApiKey()
+    {
+        var config = new GatewayConfig
+        {
+            Llm = new LlmProviderConfig
+            {
+                Provider = "openai",
+                Model = "gpt-4o",
+                ApiKey = "env:MODEL_PROVIDER_KEY"
+            },
+            Models = new ModelsConfig
+            {
+                Profiles =
+                [
+                    new ModelProfileConfig
+                    {
+                        Id = "aperture-default",
+                        Provider = "aperture",
+                        Model = "route/default",
+                        BaseUrl = "https://aperture.example.test/v1",
+                        AuthMode = "tailnet-identity",
+                        SendRequestMetadata = true
+                    }
+                ]
+            }
+        };
+
+        var doctor = ModelDoctorEvaluator.Build(config);
+        var profile = Assert.Single(doctor.Profiles);
+
+        Assert.Empty(profile.ValidationIssues);
+        Assert.Equal("Aperture", profile.ProviderGateway);
+        Assert.Equal("tailnet-identity", profile.AuthMode);
+        Assert.True(profile.SendRequestMetadata);
+    }
+
+    [Fact]
+    public void Registry_ApertureProfileFailure_IsolatedFromDefaultProvider()
+    {
+        LlmClientFactory.ResetDynamicProviders();
+        LlmClientFactory.RegisterProvider("fake-profile-tests", new EvaluationChatClient());
+
+        var config = new GatewayConfig
+        {
+            Llm = new LlmProviderConfig
+            {
+                Provider = "fake-profile-tests",
+                Model = "default-model"
+            },
+            Models = new ModelsConfig
+            {
+                DefaultProfile = "default",
+                Profiles =
+                [
+                    new ModelProfileConfig
+                    {
+                        Id = "default",
+                        Provider = "fake-profile-tests",
+                        Model = "default-model"
+                    },
+                    new ModelProfileConfig
+                    {
+                        Id = "broken-aperture",
+                        Provider = "aperture",
+                        Model = "route/default",
+                        AuthMode = "bearer"
+                    }
+                ]
+            }
+        };
+
+        using var registry = new ConfiguredModelProfileRegistry(config, NullLogger<ConfiguredModelProfileRegistry>.Instance);
+        var statuses = registry.ListStatuses();
+
+        Assert.Contains(statuses, status => status.Id == "default" && status.IsAvailable);
+        var broken = Assert.Single(statuses, status => status.Id == "broken-aperture");
+        Assert.False(broken.IsAvailable);
+        Assert.Contains(broken.ValidationIssues, issue => issue.Contains("BaseUrl is required", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -502,6 +876,7 @@ public sealed class ModelProfileSelectionTests
                             SupportsSystemMessages = true,
                             SupportsVision = true,
                             SupportsImageInput = true,
+                            SupportsVideoInput = true,
                             MaxContextTokens = 131072,
                             MaxOutputTokens = 8192
                         }
@@ -523,6 +898,62 @@ public sealed class ModelProfileSelectionTests
                             SupportsSystemMessages = true,
                             SupportsVision = true,
                             SupportsImageInput = true,
+                            SupportsVideoInput = true,
+                            MaxContextTokens = 1_000_000,
+                            MaxOutputTokens = 32768
+                        }
+                    }
+                ]
+            }
+        };
+
+    private static GatewayConfig BuildEmbeddedVideoConfig(bool videoEnabled)
+        => new()
+        {
+            Llm = new LlmProviderConfig
+            {
+                Provider = "fake-profile-tests",
+                Model = "legacy-model"
+            },
+            Multimodal = new MultimodalConfig
+            {
+                Video = new VideoProcessingConfig { Enabled = videoEnabled }
+            },
+            Models = new ModelsConfig
+            {
+                DefaultProfile = "embedded-video",
+                Profiles =
+                [
+                    new ModelProfileConfig
+                    {
+                        Id = "embedded-video",
+                        Provider = "embedded",
+                        Model = "gemma-4-e4b",
+                        FallbackProfileIds = ["frontier-tools"],
+                        Capabilities = new ModelCapabilities
+                        {
+                            SupportsStreaming = true,
+                            SupportsSystemMessages = true,
+                            SupportsVision = true,
+                            SupportsImageInput = true,
+                            SupportsVideoInput = true,
+                            MaxContextTokens = 128000,
+                            MaxOutputTokens = 4096
+                        }
+                    },
+                    new ModelProfileConfig
+                    {
+                        Id = "frontier-tools",
+                        Provider = "fake-profile-tests",
+                        Model = "frontier",
+                        Capabilities = new ModelCapabilities
+                        {
+                            SupportsTools = true,
+                            SupportsStreaming = true,
+                            SupportsSystemMessages = true,
+                            SupportsVision = true,
+                            SupportsImageInput = true,
+                            SupportsVideoInput = true,
                             MaxContextTokens = 1_000_000,
                             MaxOutputTokens = 32768
                         }

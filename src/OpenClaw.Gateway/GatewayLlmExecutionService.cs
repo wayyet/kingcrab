@@ -1,5 +1,7 @@
+using System.ClientModel;
 using System.Collections.Concurrent;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -7,6 +9,7 @@ using OpenClaw.Agent;
 using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Models;
 using OpenClaw.Core.Observability;
+using OpenClaw.Gateway.Extensions;
 using OpenClaw.Gateway.Models;
 using OpenClaw.Gateway.PromptCaching;
 
@@ -14,6 +17,8 @@ namespace OpenClaw.Gateway;
 
 internal sealed class GatewayLlmExecutionService : ILlmExecutionService
 {
+    internal sealed record ProviderRuntimeFailureClassification(string Code, string UserMessage, string OperatorMessage);
+
     private sealed class CompatibilityServices
     {
         public required ConfiguredModelProfileRegistry Registry { get; init; }
@@ -41,6 +46,7 @@ internal sealed class GatewayLlmExecutionService : ILlmExecutionService
     private readonly PromptCacheWarmRegistry _promptCacheWarmRegistry;
     private readonly ILogger<GatewayLlmExecutionService> _logger;
     private readonly ConcurrentDictionary<string, RouteState> _routes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, byte> _reportedProviderGuidance = new(StringComparer.OrdinalIgnoreCase);
 
     public GatewayLlmExecutionService(
         GatewayConfig config,
@@ -217,7 +223,7 @@ internal sealed class GatewayLlmExecutionService : ILlmExecutionService
         LlmExecutionEstimate estimate,
         CancellationToken ct)
     {
-        var selection = ResolveSelection(session, messages, options, streaming: false);
+        var selection = ResolveSelection(session, messages, options, estimate, streaming: false);
         var legacyPolicy = _policyService.Resolve(session, _config.Llm);
         if (!string.IsNullOrWhiteSpace(selection.Explanation))
             _logger.LogInformation("{Explanation}", selection.Explanation);
@@ -245,6 +251,7 @@ internal sealed class GatewayLlmExecutionService : ILlmExecutionService
                 }
 
                 effectiveOptions.ModelId = modelId;
+                AddRequestMetadataIfEnabled(effectiveOptions, session, candidate.Profile, streaming: false);
                 var prepared = _promptCacheCoordinator.Prepare(session, candidate.Profile, modelId, messages, effectiveOptions);
                 _promptCacheWarmRegistry.Record(prepared);
 
@@ -325,13 +332,14 @@ internal sealed class GatewayLlmExecutionService : ILlmExecutionService
                     }
                     catch (Exception ex)
                     {
-                        lastError = ex;
+                        var surfacedError = SurfaceProviderFailure(ex, candidate.Profile.ProviderId);
+                        lastError = surfacedError;
                         Interlocked.Increment(ref routeState.Errors);
-                        routeState.LastError = ex.Message;
+                        routeState.LastError = surfacedError.Message;
                         routeState.LastErrorAtUtc = DateTimeOffset.UtcNow;
                         _runtimeMetrics.IncrementLlmErrors();
                         _providerUsage.RecordError(candidate.Profile.ProviderId, modelId);
-                        RecordEvent(session, turnContext, "llm", "request_failed", "error", ex.Message, new()
+                        RecordEvent(session, turnContext, "llm", "request_failed", "error", surfacedError.Message, new()
                         {
                             ["providerId"] = candidate.Profile.ProviderId,
                             ["modelId"] = modelId,
@@ -357,7 +365,7 @@ internal sealed class GatewayLlmExecutionService : ILlmExecutionService
         LlmExecutionEstimate estimate,
         CancellationToken ct)
     {
-        var selection = ResolveSelection(session, messages, options, streaming: true);
+        var selection = ResolveSelection(session, messages, options, estimate, streaming: true);
         var legacyPolicy = _policyService.Resolve(session, _config.Llm);
         Exception? lastError = null;
         foreach (var candidate in selection.Candidates)
@@ -372,6 +380,7 @@ internal sealed class GatewayLlmExecutionService : ILlmExecutionService
             }
 
             var selectedModelId = ResolveRequestedModelId(session, candidate.Profile);
+            AddRequestMetadataIfEnabled(effectiveOptions, session, candidate.Profile, streaming: true);
             var prepared = _promptCacheCoordinator.Prepare(session, candidate.Profile, selectedModelId, messages, effectiveOptions);
             _promptCacheWarmRegistry.Record(prepared);
             var routeState = GetOrAddRouteState(candidate.Profile.Id, candidate.Profile.ProviderId, selectedModelId);
@@ -468,21 +477,22 @@ internal sealed class GatewayLlmExecutionService : ILlmExecutionService
                 }
                 catch (Exception ex)
                 {
+                    var surfacedError = SurfaceProviderFailure(ex, providerId);
                     routeState.CircuitBreaker.RecordFailure();
                     Interlocked.Increment(ref routeState.Errors);
-                    routeState.LastError = ex.Message;
+                    routeState.LastError = surfacedError.Message;
                     routeState.LastErrorAtUtc = DateTimeOffset.UtcNow;
                     _runtimeMetrics.IncrementLlmErrors();
                     _providerUsage.RecordError(providerId, modelId);
                     _promptCacheCoordinator.RecordResponse(descriptor, 0, 0);
-                    RecordEvent(session, turnContext, "llm", "stream_failed", "error", ex.Message, new()
+                    RecordEvent(session, turnContext, "llm", "stream_failed", "error", surfacedError.Message, new()
                     {
                         ["providerId"] = providerId,
                         ["modelId"] = modelId,
                         ["profileId"] = profileId,
                         ["exceptionType"] = ex.GetType().Name
                     });
-                    throw;
+                    throw surfacedError;
                 }
 
                 foreach (var usage in current.Contents.OfType<UsageContent>())
@@ -524,6 +534,7 @@ internal sealed class GatewayLlmExecutionService : ILlmExecutionService
         Session session,
         IReadOnlyList<ChatMessage> messages,
         ChatOptions options,
+        LlmExecutionEstimate estimate,
         bool streaming)
     {
         var explicitProfileId = !string.IsNullOrWhiteSpace(session.ModelProfileId)
@@ -531,13 +542,20 @@ internal sealed class GatewayLlmExecutionService : ILlmExecutionService
             : (!string.IsNullOrWhiteSpace(session.ModelOverride) && _modelProfiles.TryGet(session.ModelOverride!, out _)
                 ? session.ModelOverride
                 : null);
+
+        var reservedOutputTokens = options.MaxOutputTokens
+            ?? session.ModelRequirements.MinOutputTokens
+            ?? _config.Llm.MaxTokens;
+
         return _selectionPolicy.Resolve(new ModelSelectionRequest
         {
             ExplicitProfileId = explicitProfileId,
             Session = session,
             Messages = messages,
             Options = options,
-            Streaming = streaming
+            Streaming = streaming,
+            EstimatedInputTokens = estimate.EstimatedInputTokens,
+            ReservedOutputTokens = reservedOutputTokens > 0 ? reservedOutputTokens : null
         });
     }
 
@@ -556,10 +574,11 @@ internal sealed class GatewayLlmExecutionService : ILlmExecutionService
         if (legacyPolicy.MaxOutputTokens > 0)
             maxOutputTokens = maxOutputTokens is > 0 ? Math.Min(maxOutputTokens.Value, legacyPolicy.MaxOutputTokens) : legacyPolicy.MaxOutputTokens;
 
-        if (profile.Capabilities.MaxContextTokens > 0 && estimate.EstimatedInputTokens > profile.Capabilities.MaxContextTokens)
+        var estimatedTotalTokens = estimate.EstimatedInputTokens + (maxOutputTokens ?? 0);
+        if (profile.Capabilities.MaxContextTokens > 0 && estimatedTotalTokens > profile.Capabilities.MaxContextTokens)
         {
             profileLimitError =
-                $"Selected model profile '{profile.Id}' cannot satisfy this request because estimated input tokens ({estimate.EstimatedInputTokens}) exceed MaxContextTokens ({profile.Capabilities.MaxContextTokens}).";
+                $"Selected model profile '{profile.Id}' cannot satisfy this request because estimated prompt plus reserved output tokens ({estimatedTotalTokens}) exceed MaxContextTokens ({profile.Capabilities.MaxContextTokens}).";
             effectiveOptions = source;
             return false;
         }
@@ -605,6 +624,37 @@ internal sealed class GatewayLlmExecutionService : ILlmExecutionService
             AdditionalProperties = source.AdditionalProperties?.Clone()
         };
         return true;
+    }
+
+    private static void AddRequestMetadataIfEnabled(ChatOptions options, Session session, ModelProfile profile, bool streaming)
+    {
+        if (!profile.SendRequestMetadata)
+            return;
+
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        AddHeader(headers, "X-OpenClaw-Session-Id", session.Id);
+        AddHeader(headers, "X-OpenClaw-Actor-Id", session.SenderId);
+        AddHeader(headers, "X-OpenClaw-Channel-Id", session.ChannelId);
+        AddHeader(headers, "X-OpenClaw-Model-Profile", profile.Id);
+        AddHeader(headers, "X-OpenClaw-Run-Mode", streaming ? "streaming" : "standard");
+        AddHeader(headers, "X-OpenClaw-Purpose", "chat");
+
+        if (headers.Count == 0)
+            return;
+
+        options.AdditionalProperties ??= new AdditionalPropertiesDictionary();
+        options.AdditionalProperties[OpenClawProviderRequestPolicy.MetadataHeadersPropertyName] = headers;
+    }
+
+    private static void AddHeader(Dictionary<string, string> headers, string name, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return;
+
+        var sanitized = value.Trim();
+        if (sanitized.Length > 256)
+            sanitized = sanitized[..256];
+        headers[name] = sanitized;
     }
 
     private static void NormalizePromptCacheUsage(ChatResponse response)
@@ -676,11 +726,218 @@ internal sealed class GatewayLlmExecutionService : ILlmExecutionService
         });
     }
 
+    private Exception SurfaceProviderFailure(Exception ex, string providerId)
+    {
+        var contentFilterDetails = TryFormatAzureContentFilterDetails(ex);
+        if (contentFilterDetails is not null)
+        {
+            // Always log every occurrence (no dedup) so operators can correlate the filter breakdown
+            // with the failing turn id printed by MafAgentRuntime on the next line.
+            _logger.LogError(
+                ex,
+                "Provider '{Provider}' content filter triggered: {ContentFilterDetails}",
+                providerId,
+                contentFilterDetails);
+        }
+
+        var classification = ClassifyProviderFailure(ex, providerId, contentFilterDetails);
+        if (classification is null)
+            return ex;
+
+        if (_reportedProviderGuidance.TryAdd($"{providerId}:{classification.Code}", 0))
+            _logger.LogWarning("Provider guidance: {Guidance}", classification.OperatorMessage);
+
+        return new InvalidOperationException(classification.UserMessage, ex);
+    }
+
+    /// <summary>
+    /// Walks the exception chain looking for an Azure OpenAI <see cref="ClientResultException"/> whose
+    /// raw response body contains an <c>error.innererror.content_filter_result</c> block, and returns a
+    /// compact one-line summary like
+    /// <c>content_filter (ResponsibleAIPolicyViolation) | hate=safe, violence=high*, jailbreak=detected*</c>
+    /// where <c>*</c> marks categories with <c>filtered=true</c>. Returns <c>null</c> when the response
+    /// is not a content-filter rejection or the body cannot be parsed.
+    /// </summary>
+    internal static string? TryFormatAzureContentFilterDetails(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            if (current is not ClientResultException clientEx)
+                continue;
+
+            try
+            {
+                var raw = clientEx.GetRawResponse();
+                var content = raw?.Content;
+                if (content is null || content.ToMemory().Length == 0)
+                    continue;
+
+                using var doc = JsonDocument.Parse(content.ToMemory());
+                if (!doc.RootElement.TryGetProperty("error", out var error) || error.ValueKind != JsonValueKind.Object)
+                    continue;
+
+                var code = error.TryGetProperty("code", out var codeEl) && codeEl.ValueKind == JsonValueKind.String
+                    ? codeEl.GetString()
+                    : null;
+                if (!string.Equals(code, "content_filter", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                string? innerCode = null;
+                JsonElement filterResult = default;
+                var hasFilterResult = false;
+                if (error.TryGetProperty("innererror", out var innerError) && innerError.ValueKind == JsonValueKind.Object)
+                {
+                    if (innerError.TryGetProperty("code", out var innerCodeEl) && innerCodeEl.ValueKind == JsonValueKind.String)
+                        innerCode = innerCodeEl.GetString();
+
+                    if (innerError.TryGetProperty("content_filter_result", out filterResult) && filterResult.ValueKind == JsonValueKind.Object)
+                        hasFilterResult = true;
+                }
+
+                var prefix = string.IsNullOrWhiteSpace(innerCode) ? "content_filter" : $"content_filter ({innerCode})";
+                if (!hasFilterResult)
+                    return prefix;
+
+                var parts = new List<string>();
+                foreach (var category in filterResult.EnumerateObject())
+                {
+                    if (category.Value.ValueKind != JsonValueKind.Object)
+                        continue;
+
+                    bool? filtered = null;
+                    string? severity = null;
+                    bool? detected = null;
+
+                    if (category.Value.TryGetProperty("filtered", out var filteredEl) &&
+                        filteredEl.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                        filtered = filteredEl.GetBoolean();
+                    if (category.Value.TryGetProperty("severity", out var severityEl) && severityEl.ValueKind == JsonValueKind.String)
+                        severity = severityEl.GetString();
+                    if (category.Value.TryGetProperty("detected", out var detectedEl) &&
+                        detectedEl.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                        detected = detectedEl.GetBoolean();
+
+                    var detail = severity
+                        ?? (detected is true ? "detected" : detected is false ? "not-detected" : "unknown");
+                    var marker = filtered is true ? "*" : string.Empty;
+                    parts.Add($"{category.Name}={detail}{marker}");
+                }
+
+                return parts.Count == 0 ? prefix : $"{prefix} | {string.Join(", ", parts)}";
+            }
+            catch (JsonException)
+            {
+                // Body is not JSON (or partial). Try the next exception in the chain.
+            }
+            catch
+            {
+                // Defensive: never let the logging path throw.
+            }
+        }
+
+        return null;
+    }
+
+    internal static ProviderRuntimeFailureClassification? ClassifyProviderFailure(Exception ex, string providerId)
+        => ClassifyProviderFailure(ex, providerId, contentFilterDetails: null);
+
+    internal static ProviderRuntimeFailureClassification? ClassifyProviderFailure(
+        Exception ex,
+        string providerId,
+        string? contentFilterDetails)
+    {
+        var message = ex.GetBaseException().Message;
+        var providerLabel = FormatProviderLabel(providerId);
+        var apiKeyHint = ResolveApiKeyHint(providerId);
+
+        if (contentFilterDetails is not null ||
+            Contains(message, "content_filter") ||
+            Contains(message, "content management policy"))
+        {
+            var detailSuffix = contentFilterDetails is null ? string.Empty : $" Categories: {contentFilterDetails}.";
+            return new ProviderRuntimeFailureClassification(
+                Code: "content-filter",
+                UserMessage: $"{providerLabel} blocked the prompt due to its content management policy.{detailSuffix} Modify the prompt or relax the deployment's content filter and retry.",
+                OperatorMessage: $"{providerLabel} rejected the request via content filter.{detailSuffix} Inspect the prompt or adjust the Azure OpenAI content filter assigned to the deployment.");
+        }
+
+        if (Contains(message, "MODEL_PROVIDER_KEY must be set"))
+        {
+            return new ProviderRuntimeFailureClassification(
+                Code: "missing-key",
+                UserMessage: $"{providerLabel} credentials are missing. Set {apiKeyHint} and retry.",
+                OperatorMessage: $"{providerLabel} requests cannot run because the API key is missing. Set {apiKeyHint} before retrying.");
+        }
+
+        if (Contains(message, "MODEL_PROVIDER_ENDPOINT must be set") ||
+            Contains(message, "Endpoint must be set for provider"))
+        {
+            return new ProviderRuntimeFailureClassification(
+                Code: "missing-endpoint",
+                UserMessage: $"{providerLabel} endpoint is missing. Set MODEL_PROVIDER_ENDPOINT or OpenClaw:Llm:Endpoint and retry.",
+                OperatorMessage: $"{providerLabel} requests cannot run because the provider endpoint is missing. Set MODEL_PROVIDER_ENDPOINT or OpenClaw:Llm:Endpoint before retrying.");
+        }
+
+        if (Contains(message, "invalid_api_key") ||
+            Contains(message, "Incorrect API key provided") ||
+            Contains(message, "invalid api key") ||
+            Contains(message, "invalid api-key"))
+        {
+            return new ProviderRuntimeFailureClassification(
+                Code: "invalid-key",
+                UserMessage: $"{providerLabel} credentials were rejected. Update {apiKeyHint} and retry.",
+                OperatorMessage: $"{providerLabel} requests are failing because the configured API key was rejected. Update {apiKeyHint} and retry.");
+        }
+
+        if ((Contains(message, "401") || Contains(message, "403")) &&
+            (Contains(message, "auth") || Contains(message, "unauthorized") || Contains(message, "forbidden")))
+        {
+            return new ProviderRuntimeFailureClassification(
+                Code: "auth-rejected",
+                UserMessage: $"{providerLabel} credentials were rejected. Update {apiKeyHint} and retry.",
+                OperatorMessage: $"{providerLabel} requests are returning authorization failures. Verify {apiKeyHint} and retry.");
+        }
+
+        if (Contains(message, "Unsupported LLM provider") ||
+            Contains(message, "Configured provider '"))
+        {
+            return new ProviderRuntimeFailureClassification(
+                Code: "unsupported-provider",
+                UserMessage: $"{providerLabel} is not available in the current runtime. Update OpenClaw:Llm:Provider or enable the required plugin.",
+                OperatorMessage: $"{providerLabel} is not available in the current runtime. Update OpenClaw:Llm:Provider or enable the required provider plugin before retrying.");
+        }
+
+        return null;
+    }
+
     private static bool IsTransient(Exception ex)
         => ex is HttpRequestException
             || ex is TimeoutException
             || ex is TaskCanceledException
             || ex is CircuitOpenException;
+
+    private static string ResolveApiKeyHint(string providerId)
+        => providerId.Trim().ToLowerInvariant() switch
+        {
+            "openai" => "MODEL_PROVIDER_KEY or OPENAI_API_KEY",
+            "aperture" => "OPENCLAW_APERTURE_TOKEN, MODEL_PROVIDER_KEY, or AuthMode=tailnet-identity",
+            _ => "MODEL_PROVIDER_KEY"
+        };
+
+    private static string FormatProviderLabel(string providerId)
+        => providerId.Trim().ToLowerInvariant() switch
+        {
+            "openai" => "OpenAI",
+            "aperture" => "Aperture",
+            "azure-openai" => "Azure OpenAI",
+            "anthropic" or "claude" => "Anthropic",
+            "gemini" or "google" => "Gemini",
+            { Length: > 0 } => $"Provider '{providerId}'",
+            _ => "The configured provider"
+        };
+
+    private static bool Contains(string value, string fragment)
+        => value.Contains(fragment, StringComparison.OrdinalIgnoreCase);
 
     private RouteState GetRouteStateSnapshot(string profileId, string providerId, string modelId)
         => _routes.TryGetValue(BuildRouteKey(profileId, providerId, modelId), out var state)

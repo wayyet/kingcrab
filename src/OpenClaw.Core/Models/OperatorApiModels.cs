@@ -1,7 +1,6 @@
 using OpenClaw.Core.Observability;
 using OpenClaw.Core.Plugins;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace OpenClaw.Core.Models;
 
@@ -93,6 +92,8 @@ public sealed class RuntimeEventQuery
     public string? SenderId { get; init; }
     public string? Component { get; init; }
     public string? Action { get; init; }
+    public DateTimeOffset? FromUtc { get; init; }
+    public DateTimeOffset? ToUtc { get; init; }
 }
 
 public sealed class RuntimeEventEntry
@@ -120,7 +121,10 @@ public sealed class PluginOperatorState
     public required string PluginId { get; init; }
     public bool Disabled { get; init; }
     public bool Quarantined { get; init; }
+    public string? QuarantineSource { get; init; }
+    public bool Reviewed { get; init; }
     public string? Reason { get; init; }
+    public string? ReviewNotes { get; init; }
     public DateTimeOffset UpdatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
 }
 
@@ -132,22 +136,114 @@ public sealed class PluginHealthSnapshot
     public bool BlockedByRuntimeMode { get; init; }
     public bool Disabled { get; init; }
     public bool Quarantined { get; init; }
+    public string? QuarantineSource { get; init; }
+    public bool Reviewed { get; init; }
     public string? PendingReason { get; init; }
+    public string? ReviewNotes { get; init; }
     public string? EffectiveRuntimeMode { get; init; }
+    public string TrustLevel { get; init; } = "untrusted";
+    public string TrustReason { get; init; } = "";
+    public string CompatibilityStatus { get; init; } = "unknown";
+    public int ErrorCount { get; init; }
+    public int WarningCount { get; init; }
+    public string DeclaredSurface { get; init; } = "";
+    public string? SourcePath { get; init; }
+    public string? EntryPath { get; init; }
     public string[] RequestedCapabilities { get; init; } = [];
+    public string[] SkillDirectories { get; init; } = [];
     public string? LastError { get; init; }
     public DateTimeOffset? LastActivityAtUtc { get; init; }
     public int RestartCount { get; init; }
+    public long? WorkingSetBytes { get; init; }
+    public long? PrivateMemoryBytes { get; init; }
     public int ToolCount { get; init; }
     public int ChannelCount { get; init; }
     public int CommandCount { get; init; }
     public int ProviderCount { get; init; }
+    public IReadOnlyList<string> BudgetViolations { get; init; } = [];
     public IReadOnlyList<PluginCompatibilityDiagnostic> Diagnostics { get; init; } = [];
 }
 
 public sealed class PluginListResponse
 {
     public IReadOnlyList<PluginHealthSnapshot> Items { get; init; } = [];
+}
+
+public sealed class SkillHealthSnapshot
+{
+    public required string Name { get; init; }
+    public string Description { get; init; } = "";
+    public required string Source { get; init; }
+    public required string Location { get; init; }
+    public string TrustLevel { get; init; } = "untrusted";
+    public string TrustReason { get; init; } = "";
+    public bool Always { get; init; }
+    public bool UserInvocable { get; init; } = true;
+    public bool DisableModelInvocation { get; init; }
+    public string? CommandDispatch { get; init; }
+    public string? CommandTool { get; init; }
+    public string? CommandArgMode { get; init; }
+    public string? Homepage { get; init; }
+    public string? PrimaryEnv { get; init; }
+    public string[] RequiredBins { get; init; } = [];
+    public string[] RequiredAnyBins { get; init; } = [];
+    public string[] RequiredEnv { get; init; } = [];
+    public string[] RequiredConfig { get; init; } = [];
+    public string[] Warnings { get; init; } = [];
+}
+
+public sealed class SkillListResponse
+{
+    public IReadOnlyList<SkillHealthSnapshot> Items { get; init; } = [];
+}
+
+/// <summary>
+/// Per-skill cost breakdown for the SKILL progressive-disclosure dashboard.
+/// All values are character counts of the prompt fragments emitted by
+/// <see cref="OpenClaw.Core.Skills.SkillPromptBuilder"/>.
+/// </summary>
+public sealed class SkillCostBreakdown
+{
+    public required string Name { get; init; }
+    public string Description { get; init; } = "";
+    /// <summary>Characters contributed to the eager <c>Build</c> output by this skill (entry + body).</summary>
+    public int EagerCharacters { get; init; }
+    /// <summary>Characters contributed to the <c>BuildIndex</c> output by this skill (entry + resource manifest, no body).</summary>
+    public int IndexCharacters { get; init; }
+    /// <summary>Number of L3 resources declared by this skill (references + scripts).</summary>
+    public int ResourceCount { get; init; }
+    /// <summary>Length of the SKILL.md body (instructions). Equals <c>EagerCharacters - IndexCharacters</c> modulo XML overhead.</summary>
+    public int InstructionsLength { get; init; }
+    /// <summary>True when <c>DisableModelInvocation</c> is set — this skill is excluded from both budgets.</summary>
+    public bool ExcludedFromModel { get; init; }
+}
+
+/// <summary>
+/// Aggregate response for <c>GET /admin/skills/cost-estimate</c>:
+/// compares the eager (<see cref="OpenClaw.Core.Skills.SkillPromptBuilder.EstimateCharacterCost"/>)
+/// and progressive-disclosure index (<see cref="OpenClaw.Core.Skills.SkillPromptBuilder.EstimateIndexCharacterCost"/>)
+/// system-prompt sizes for the currently loaded skill set.
+/// </summary>
+public sealed class SkillCostEstimateResponse
+{
+    public int TotalSkills { get; init; }
+    public int ModelInvocableSkills { get; init; }
+    /// <summary>Total characters when injecting every skill's full body up-front (legacy eager mode).</summary>
+    public int EagerCharacters { get; init; }
+    /// <summary>Total characters when injecting only the index + resource manifest (progressive disclosure).</summary>
+    public int IndexCharacters { get; init; }
+    /// <summary>Absolute number of characters saved by switching to progressive disclosure.</summary>
+    public int CharactersSaved { get; init; }
+    /// <summary>Fraction of characters saved, in [0, 1]. Zero when eager cost is also zero.</summary>
+    public double SavedRatio { get; init; }
+    /// <summary>Rough token estimate using a 4-chars-per-token heuristic for the eager budget.</summary>
+    public int EagerTokensEstimate { get; init; }
+    /// <summary>Rough token estimate using a 4-chars-per-token heuristic for the index budget.</summary>
+    public int IndexTokensEstimate { get; init; }
+    /// <summary>Per-skill breakdown, sorted by <see cref="SkillCostBreakdown.EagerCharacters"/> descending.</summary>
+    public IReadOnlyList<SkillCostBreakdown> Items { get; init; } = [];
+    /// <summary>UTC timestamp when the snapshot was computed.</summary>
+    public DateTimeOffset GeneratedAt { get; init; }
 }
 
 public sealed class ChannelAuthStatusResponse
@@ -266,17 +362,24 @@ public sealed class OperatorAuditQuery
     public string? ActorId { get; init; }
     public string? ActionType { get; init; }
     public string? TargetId { get; init; }
+    public DateTimeOffset? FromUtc { get; init; }
+    public DateTimeOffset? ToUtc { get; init; }
 }
 
 public sealed class OperatorAuditEntry
 {
     public required string Id { get; init; }
+    public long Sequence { get; init; }
     public DateTimeOffset TimestampUtc { get; init; } = DateTimeOffset.UtcNow;
     public required string ActorId { get; init; }
+    public string ActorRole { get; init; } = OperatorRoleNames.Viewer;
+    public string? ActorDisplayName { get; init; }
     public required string AuthMode { get; init; }
     public required string ActionType { get; init; }
     public required string TargetId { get; init; }
     public required string Summary { get; init; }
+    public string? PreviousEntryHash { get; init; }
+    public string? EntryHash { get; init; }
     public string? Before { get; init; }
     public string? After { get; init; }
     public bool Success { get; init; }
@@ -285,6 +388,156 @@ public sealed class OperatorAuditEntry
 public sealed class OperatorAuditListResponse
 {
     public IReadOnlyList<OperatorAuditEntry> Items { get; init; } = [];
+}
+
+public static class MemoryNoteClass
+{
+    public const string General = "general";
+    public const string ProjectFact = "project_fact";
+    public const string OperationalRunbook = "operational_runbook";
+    public const string ApprovedSkill = "approved_skill";
+    public const string ApprovedAutomation = "approved_automation";
+}
+
+public sealed class MemoryNoteItem
+{
+    public required string Key { get; init; }
+    public required string DisplayKey { get; init; }
+    public string MemoryClass { get; init; } = MemoryNoteClass.General;
+    public string? ProjectId { get; init; }
+    public string Preview { get; init; } = "";
+    public string? Content { get; init; }
+    public DateTimeOffset UpdatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class MemoryNoteListResponse
+{
+    public string? Prefix { get; init; }
+    public string? Query { get; init; }
+    public string? MemoryClass { get; init; }
+    public string? ProjectId { get; init; }
+    public IReadOnlyList<MemoryNoteItem> Items { get; init; } = [];
+}
+
+public sealed class MemoryNoteDetailResponse
+{
+    public MemoryNoteItem? Note { get; init; }
+}
+
+public sealed class MemoryNoteUpsertRequest
+{
+    public string? Key { get; init; }
+    public string? MemoryClass { get; init; }
+    public string? ProjectId { get; init; }
+    public string Content { get; init; } = "";
+}
+
+public sealed class MemoryConsoleExportBundle
+{
+    public DateTimeOffset ExportedAtUtc { get; init; } = DateTimeOffset.UtcNow;
+    public IReadOnlyList<MemoryNoteItem> Notes { get; init; } = [];
+    public IReadOnlyList<UserProfile> Profiles { get; init; } = [];
+    public IReadOnlyList<LearningProposal> Proposals { get; init; } = [];
+    public IReadOnlyList<AutomationDefinition> Automations { get; init; } = [];
+}
+
+public sealed class MemoryConsoleImportResponse
+{
+    public bool Success { get; init; }
+    public int NotesImported { get; init; }
+    public int ProfilesImported { get; init; }
+    public int ProposalsImported { get; init; }
+    public int AutomationsImported { get; init; }
+    public string Message { get; init; } = "";
+}
+
+public sealed class ManagedSkillBundleItem
+{
+    public required string Name { get; init; }
+    public required string Slug { get; init; }
+    public string Description { get; init; } = "";
+    public required string Content { get; init; }
+    public string RootPath { get; init; } = "";
+    public DateTimeOffset? UpdatedAtUtc { get; init; }
+}
+
+public sealed class AgentBundleExportBundle
+{
+    public string Format { get; init; } = "openclaw-agent-bundle";
+    public int Version { get; init; } = 1;
+    public DateTimeOffset ExportedAtUtc { get; init; } = DateTimeOffset.UtcNow;
+    public AdminSettingsSnapshot? Settings { get; init; }
+    public IReadOnlyList<MemoryNoteItem> Notes { get; init; } = [];
+    public IReadOnlyList<UserProfile> Profiles { get; init; } = [];
+    public IReadOnlyList<LearningProposal> Proposals { get; init; } = [];
+    public IReadOnlyList<AutomationDefinition> Automations { get; init; } = [];
+    public IReadOnlyList<ProviderPolicyRule> ProviderPolicies { get; init; } = [];
+    public IReadOnlyList<ManagedSkillBundleItem> ManagedSkills { get; init; } = [];
+}
+
+public sealed class AgentBundleImportResponse
+{
+    public bool Success { get; init; }
+    public int Version { get; init; }
+    public bool SettingsImported { get; init; }
+    public int NotesImported { get; init; }
+    public int ProfilesImported { get; init; }
+    public int ProposalsImported { get; init; }
+    public int AutomationsImported { get; init; }
+    public int ProviderPoliciesImported { get; init; }
+    public int ManagedSkillsImported { get; init; }
+    public bool SkillsReloaded { get; init; }
+    public string Message { get; init; } = "";
+}
+
+public sealed class LearningProposalProvenance
+{
+    public string? ActorId { get; init; }
+    public IReadOnlyList<string> SourceSessionIds { get; init; } = [];
+    public IReadOnlyList<string> SourceTurnIds { get; init; } = [];
+    public IReadOnlyList<string> ToolNames { get; init; } = [];
+    public IReadOnlyList<string> ToolSequence { get; init; } = [];
+    public IReadOnlyList<LearningToolObservation> ToolObservations { get; init; } = [];
+    public int RepeatedCount { get; init; }
+    public string? ProposalFingerprint { get; init; }
+    public string? CreatedReason { get; init; }
+    public float Confidence { get; init; }
+    public DateTimeOffset CreatedAtUtc { get; init; }
+    public DateTimeOffset UpdatedAtUtc { get; init; }
+    public DateTimeOffset? ReviewedAtUtc { get; init; }
+}
+
+public sealed class ProfileDiffEntry
+{
+    public required string Path { get; init; }
+    public required string ChangeType { get; init; }
+    public string? Before { get; init; }
+    public string? After { get; init; }
+}
+
+public sealed class LearningProposalDetailResponse
+{
+    public LearningProposal? Proposal { get; init; }
+    public UserProfile? BaselineProfile { get; init; }
+    public UserProfile? CurrentProfile { get; init; }
+    public IReadOnlyList<ProfileDiffEntry> ProfileDiff { get; init; } = [];
+    public LearningProposalProvenance? Provenance { get; init; }
+    public bool CanRollback { get; init; }
+}
+
+public sealed class ProfileExportBundle
+{
+    public DateTimeOffset ExportedAtUtc { get; init; } = DateTimeOffset.UtcNow;
+    public IReadOnlyList<UserProfile> Profiles { get; init; } = [];
+    public IReadOnlyList<LearningProposal> Proposals { get; init; } = [];
+}
+
+public sealed class ProfileImportResponse
+{
+    public bool Success { get; init; }
+    public int ProfilesImported { get; init; }
+    public int ProposalsImported { get; init; }
+    public string Message { get; init; } = "";
 }
 
 public sealed class SessionMetadataSnapshot
@@ -306,6 +559,44 @@ public sealed class SessionMetadataUpdateRequest
     public IReadOnlyList<SessionHandoffItem>? HandoffItems { get; init; }
 }
 
+public static class SessionPromotionTarget
+{
+    public const string Automation = "automation";
+    public const string ProviderPolicy = "provider_policy";
+    public const string SkillDraft = "skill_draft";
+}
+
+public sealed class SessionPromotionRequest
+{
+    public string Target { get; init; } = SessionPromotionTarget.Automation;
+    public string? Name { get; init; }
+    public string? Prompt { get; init; }
+    public string? Schedule { get; init; }
+    public string? DeliveryChannelId { get; init; }
+    public string? DeliveryRecipientId { get; init; }
+    public string? DeliverySubject { get; init; }
+    public string[] Tags { get; init; } = [];
+    public string Scope { get; init; } = "session";
+    public string? ProviderId { get; init; }
+    public string? ModelId { get; init; }
+    public string[] FallbackModels { get; init; } = [];
+    public int Priority { get; init; } = 100;
+    public bool Enabled { get; init; } = true;
+    public string? Summary { get; init; }
+}
+
+public sealed class SessionPromotionResponse
+{
+    public bool Success { get; init; }
+    public string Target { get; init; } = "";
+    public string Message { get; init; } = "";
+    public string? CreatedId { get; init; }
+    public AutomationDefinition? Automation { get; init; }
+    public ProviderPolicyRule? ProviderPolicy { get; init; }
+    public LearningProposal? Proposal { get; init; }
+    public string? Error { get; init; }
+}
+
 public sealed class SessionTodoItem
 {
     public required string Id { get; init; }
@@ -314,111 +605,6 @@ public sealed class SessionTodoItem
     public string? Notes { get; init; }
     public DateTimeOffset CreatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
-}
-
-public sealed class SessionHandoffItem
-{
-    [JsonPropertyName("session_id")]
-    public required string SessionId { get; init; }
-
-    [JsonPropertyName("workflow_id")]
-    public string WorkflowId { get; init; } = "employment-coach";
-
-    [JsonPropertyName("handoff_id")]
-    public required string HandoffId { get; init; }
-
-    [JsonPropertyName("title")]
-    public string Title { get; init; } = "";
-
-    [JsonPropertyName("kind")]
-    public string Kind { get; init; } = "handoff_todo";
-
-    [JsonPropertyName("stage")]
-    public string Stage { get; init; } = "";
-
-    [JsonPropertyName("target_skill")]
-    public string TargetSkill { get; init; } = "";
-
-    [JsonPropertyName("intent")]
-    public string? Intent { get; init; }
-
-    [JsonPropertyName("category")]
-    public string? Category { get; init; }
-
-    [JsonPropertyName("payload")]
-    public JsonElement Payload { get; init; }
-
-    [JsonPropertyName("source")]
-    public string? Source { get; init; }
-
-    [JsonPropertyName("acceptance")]
-    public string? Acceptance { get; init; }
-
-    [JsonPropertyName("status")]
-    public string Status { get; init; } = "drafting";
-
-    [JsonPropertyName("fingerprint")]
-    public string Fingerprint { get; init; } = "";
-
-    [JsonPropertyName("related_todos")]
-    public string[] RelatedTodos { get; init; } = [];
-
-    [JsonPropertyName("related_files")]
-    public string[] RelatedFiles { get; init; } = [];
-
-    [JsonPropertyName("revision")]
-    public int Revision { get; init; } = 1;
-
-    [JsonPropertyName("created_at")]
-    public DateTimeOffset CreatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
-
-    [JsonPropertyName("updated_at")]
-    public DateTimeOffset UpdatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
-
-    [JsonPropertyName("dispatch_id")]
-    public string? DispatchId { get; init; }
-
-    [JsonPropertyName("callback_summary")]
-    public string? CallbackSummary { get; init; }
-}
-
-public sealed class SessionHandoffListResponse
-{
-    [JsonPropertyName("session_id")]
-    public required string SessionId { get; init; }
-
-    [JsonPropertyName("items")]
-    public IReadOnlyList<SessionHandoffItem> Items { get; init; } = [];
-}
-
-public sealed class SessionHandoffMutationResponse
-{
-    [JsonPropertyName("session_id")]
-    public required string SessionId { get; init; }
-
-    [JsonPropertyName("item")]
-    public required SessionHandoffItem Item { get; init; }
-
-    [JsonPropertyName("items")]
-    public IReadOnlyList<SessionHandoffItem> Items { get; init; } = [];
-}
-
-public sealed class SessionHandoffRemoveResponse
-{
-    [JsonPropertyName("session_id")]
-    public required string SessionId { get; init; }
-
-    [JsonPropertyName("handoff_id")]
-    public required string HandoffId { get; init; }
-
-    [JsonPropertyName("removed")]
-    public bool Removed { get; init; }
-
-    [JsonPropertyName("reason")]
-    public string? Reason { get; init; }
-
-    [JsonPropertyName("items")]
-    public IReadOnlyList<SessionHandoffItem> Items { get; init; } = [];
 }
 
 public sealed class SessionDiffResponse
@@ -517,6 +703,10 @@ public sealed class SecurityPostureResponse
     public bool AuthTokenConfigured { get; init; }
     public bool BrowserSessionCookieSecureEffective { get; init; }
     public bool BrowserSessionsEnabled { get; init; }
+    public bool BrowserToolConfigured { get; init; }
+    public bool BrowserToolRegistered { get; init; }
+    public bool BrowserLocalExecutionSupported { get; init; }
+    public bool BrowserExecutionBackendConfigured { get; init; }
     public bool TrustForwardedHeaders { get; init; }
     public bool RequireRequesterMatchForHttpToolApproval { get; init; }
     public bool ToolApprovalRequired { get; init; }
@@ -524,6 +714,9 @@ public sealed class SecurityPostureResponse
     public bool PluginBridgeEnabled { get; init; }
     public string PluginBridgeTransportMode { get; init; } = "stdio";
     public string PluginBridgeSecurityMode { get; init; } = "legacy";
+    public bool ProcessToolSafeForPublicBind { get; init; }
+    public bool StableSessionsScopedByRequester { get; init; }
+    public bool SignedWebhookValidationReady { get; init; }
     public bool SandboxConfigured { get; init; }
     public bool AllowsRawSecretRefsOnPublicBind { get; init; }
     public IReadOnlyList<string> RiskFlags { get; init; } = [];
@@ -548,7 +741,15 @@ public sealed class ApprovalSimulationResponse
     public required string Reason { get; init; }
     public string ToolName { get; init; } = "";
     public string AutonomyMode { get; init; } = "full";
+    public bool AutonomyAllowed { get; init; }
     public bool RequireToolApproval { get; init; }
+    public bool ApprovalRequired { get; init; }
+    public string? BlockingPolicy { get; init; }
+    public string? ExecutionBackend { get; init; }
+    public string? ExecutionFallbackBackend { get; init; }
+    public string? ExecutionTemplate { get; init; }
+    public string? ExecutionSandboxMode { get; init; }
+    public bool? ExecutionRequireWorkspace { get; init; }
     public IReadOnlyList<string> ApprovalRequiredTools { get; init; } = [];
 }
 

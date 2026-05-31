@@ -57,6 +57,11 @@ public sealed class ToolApprovalService
 
     private readonly ConcurrentDictionary<string, Pending> _pending = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Current number of pending approval requests. Used by observability (openclaw.approval.queue.depth gauge).
+    /// </summary>
+    public int PendingCount => ListPending().Count;
+
     public ToolApprovalRequest Create(
         string sessionId,
         string channelId,
@@ -115,6 +120,9 @@ public sealed class ToolApprovalService
         if (!_pending.TryGetValue(approvalId, out var pending))
             return new ToolApprovalDecisionOutcome { Result = ToolApprovalDecisionResult.NotFound };
 
+        if (pending.Tcs.Task.IsCompleted)
+            return new ToolApprovalDecisionOutcome { Result = ToolApprovalDecisionResult.NotFound };
+
         if (requireRequesterMatch)
         {
             if (string.IsNullOrWhiteSpace(requesterChannelId) || string.IsNullOrWhiteSpace(requesterSenderId))
@@ -135,14 +143,13 @@ public sealed class ToolApprovalService
             }
         }
 
-        if (!_pending.TryRemove(approvalId, out var p))
+        if (!pending.Tcs.TrySetResult(approved))
             return new ToolApprovalDecisionOutcome { Result = ToolApprovalDecisionResult.NotFound };
 
-        p.Tcs.TrySetResult(approved);
         return new ToolApprovalDecisionOutcome
         {
             Result = ToolApprovalDecisionResult.Recorded,
-            Request = p.Request
+            Request = pending.Request
         };
     }
 
@@ -161,6 +168,7 @@ public sealed class ToolApprovalService
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(timeout);
             var approved = await p.Tcs.Task.WaitAsync(cts.Token);
+            _pending.TryRemove(approvalId, out _);
             return new ToolApprovalWaitOutcome
             {
                 Result = approved ? ToolApprovalWaitResult.Approved : ToolApprovalWaitResult.Denied,
@@ -175,6 +183,7 @@ public sealed class ToolApprovalService
         {
             if (p.Tcs.Task.IsCompletedSuccessfully)
             {
+                _pending.TryRemove(approvalId, out _);
                 return new ToolApprovalWaitOutcome
                 {
                     Result = p.Tcs.Task.Result ? ToolApprovalWaitResult.Approved : ToolApprovalWaitResult.Denied,
@@ -184,6 +193,19 @@ public sealed class ToolApprovalService
 
             // Timeout => deny by default and drain the pending request.
             _pending.TryRemove(approvalId, out _);
+            p.Tcs.TrySetCanceled();
+
+            // Re-check: TrySetDecision may have won the race before TrySetCanceled
+            if (p.Tcs.Task.IsCompletedSuccessfully)
+            {
+                _pending.TryRemove(approvalId, out _);
+                return new ToolApprovalWaitOutcome
+                {
+                    Result = p.Tcs.Task.Result ? ToolApprovalWaitResult.Approved : ToolApprovalWaitResult.Denied,
+                    Request = p.Request
+                };
+            }
+
             return new ToolApprovalWaitOutcome
             {
                 Result = ToolApprovalWaitResult.TimedOut,
@@ -209,6 +231,12 @@ public sealed class ToolApprovalService
                 continue;
             }
 
+            if (p.Tcs.Task.IsCompleted)
+            {
+                _pending.TryRemove(kvp.Key, out _);
+                continue;
+            }
+
             if (channelId is not null && !string.Equals(channelId, p.Request.ChannelId, StringComparison.Ordinal))
                 continue;
             if (senderId is not null && !string.Equals(senderId, p.Request.SenderId, StringComparison.Ordinal))
@@ -225,7 +253,7 @@ public sealed class ToolApprovalService
         if (!_pending.TryGetValue(approvalId, out var pending))
             return null;
 
-        if (pending.ExpiresAt <= DateTimeOffset.UtcNow)
+        if (pending.ExpiresAt <= DateTimeOffset.UtcNow || pending.Tcs.Task.IsCompleted)
         {
             _pending.TryRemove(approvalId, out _);
             return null;

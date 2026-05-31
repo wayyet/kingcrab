@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.Input;
 using OpenClaw.Client;
 using OpenClaw.Companion.Models;
 using OpenClaw.Companion.Services;
+using OpenClaw.Core.Models;
 
 namespace OpenClaw.Companion.ViewModels;
 
@@ -13,6 +14,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 {
     private readonly SettingsStore _settingsStore;
     private readonly GatewayWebSocketClient _client;
+    private readonly ManagedGatewayService _managedGateway;
     private bool _isLoadingSettings;
     private int? _activeAssistantMessageIndex;
     private string? _activeAssistantReplyToMessageId;
@@ -20,6 +22,15 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     [ObservableProperty]
     private string _serverUrl = "ws://127.0.0.1:18789/ws";
+
+    [ObservableProperty]
+    private string _username = "";
+
+    [ObservableProperty]
+    private string _password = "";
+
+    [ObservableProperty]
+    private string _operatorTokenLabel = "companion";
 
     [ObservableProperty]
     private string _authToken = "";
@@ -34,6 +45,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     private bool _debugMode;
 
     [ObservableProperty]
+    private bool _approvalDesktopNotificationsEnabled = true;
+
+    [ObservableProperty]
+    private bool _approvalDesktopNotificationsOnlyWhenUnfocused = true;
+
+    [ObservableProperty]
     private bool _isConnected;
 
     [ObservableProperty]
@@ -43,23 +60,58 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     private string _status = "Disconnected";
 
     [ObservableProperty]
+    private string _operatorIdentity = "No operator account token loaded.";
+
+    [ObservableProperty]
+    private string _operatorRole = OperatorRoleNames.Viewer;
+
+    [ObservableProperty]
+    private string _operatorAuthMode = "account_token";
+
+    [ObservableProperty]
+    private bool _isBootstrapAdmin;
+
+    [ObservableProperty]
+    private bool _canManageAdmin;
+
+    [ObservableProperty]
+    private string _adminStatus = "Admin status not loaded.";
+
+    [ObservableProperty]
+    private string _deploymentStatus = "Deployment status not loaded.";
+
+    [ObservableProperty]
     private string _inputText = "";
 
-    public ObservableCollection<ChatMessage> Messages { get; } = [];
+    public ObservableCollection<ChatMessage> Messages { get; } = new();
+
+    public MainWindowViewModel()
+        : this(new SettingsStore(), new GatewayWebSocketClient(), null, null)
+    {
+    }
 
     public MainWindowViewModel(
         SettingsStore settingsStore,
         GatewayWebSocketClient client,
-        Func<string, string?, OpenClawHttpClient>? adminClientFactory = null)
+        Func<string, string?, OpenClawHttpClient>? adminClientFactory = null,
+        ManagedGatewayService? managedGateway = null)
     {
         _settingsStore = settingsStore;
         _client = client;
+        _managedGateway = managedGateway ?? new ManagedGatewayService();
         _adminClientFactory = adminClientFactory ?? ((baseUrl, authToken) => new OpenClawHttpClient(baseUrl, authToken));
 
         _client.OnTextMessage += HandleInboundText;
+        _client.OnEnvelopeReceived += HandleCanvasEnvelope;
         _client.OnError += err => AddSystemMessage($"Error: {err}");
+        Messages.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(HasMessages));
+            OnPropertyChanged(nameof(HasNoMessages));
+        };
 
         LoadSettings();
+        RefreshManagedGatewayStateCore();
     }
 
     private void LoadSettings()
@@ -69,10 +121,24 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         try
         {
             ServerUrl = settings.ServerUrl;
+            Username = settings.Username;
+            OperatorTokenLabel = string.IsNullOrWhiteSpace(settings.OperatorTokenLabel) ? "companion" : settings.OperatorTokenLabel;
             RememberToken = settings.RememberToken;
             AllowPlaintextTokenFallback = settings.AllowPlaintextTokenFallback;
             AuthToken = settings.AuthToken ?? "";
             DebugMode = settings.DebugMode;
+            ApprovalDesktopNotificationsEnabled = settings.ApprovalDesktopNotificationsEnabled;
+            ApprovalDesktopNotificationsOnlyWhenUnfocused = settings.ApprovalDesktopNotificationsOnlyWhenUnfocused;
+            AutoStartLocalGateway = settings.AutoStartLocalGateway;
+            SetupProvider = string.IsNullOrWhiteSpace(settings.SetupProvider) ? "openai" : settings.SetupProvider;
+            SetupModel = string.IsNullOrWhiteSpace(settings.SetupModel) ? "gpt-4o" : settings.SetupModel;
+            SetupModelPreset = settings.SetupModelPreset ?? "";
+            SetupWorkspacePath = string.IsNullOrWhiteSpace(settings.SetupWorkspacePath)
+                ? _managedGateway.WorkspacePath
+                : settings.SetupWorkspacePath;
+            SetupLocalModelPath = settings.SetupLocalModelPath ?? "";
+            _managedGateway.SetProviderApiKey(_settingsStore.LoadProviderApiKey(settings.AllowPlaintextTokenFallback));
+            ApplyEnvironmentSettings();
         }
         finally
         {
@@ -87,12 +153,46 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         _settingsStore.Save(new CompanionSettings
         {
             ServerUrl = ServerUrl,
+            Username = Username,
+            OperatorTokenLabel = OperatorTokenLabel,
             RememberToken = RememberToken,
             AllowPlaintextTokenFallback = AllowPlaintextTokenFallback,
             DebugMode = DebugMode,
+            ApprovalDesktopNotificationsEnabled = ApprovalDesktopNotificationsEnabled,
+            ApprovalDesktopNotificationsOnlyWhenUnfocused = ApprovalDesktopNotificationsOnlyWhenUnfocused,
+            AutoStartLocalGateway = AutoStartLocalGateway,
+            SetupProvider = SetupProvider,
+            SetupModel = SetupModel,
+            SetupModelPreset = SetupModelPreset,
+            SetupWorkspacePath = SetupWorkspacePath,
+            SetupLocalModelPath = SetupLocalModelPath,
             AuthToken = string.IsNullOrWhiteSpace(AuthToken) ? null : AuthToken
         });
         ShowSettingsWarningIfNeeded();
+    }
+
+    private void ApplyEnvironmentSettings()
+    {
+        var baseUrl = Environment.GetEnvironmentVariable("OPENCLAW_BASE_URL");
+        if (!string.IsNullOrWhiteSpace(baseUrl))
+            ServerUrl = ConvertBaseUrlToWebSocketUrl(baseUrl);
+
+        var authToken = Environment.GetEnvironmentVariable("OPENCLAW_AUTH_TOKEN");
+        if (!string.IsNullOrWhiteSpace(authToken))
+            AuthToken = authToken;
+    }
+
+    private static string ConvertBaseUrlToWebSocketUrl(string baseUrl)
+        => ManagedGatewayService.BuildWebSocketUrl(baseUrl);
+
+    public void ReportLocalGatewayInitializationFailure(Exception? exception)
+    {
+        var detail = exception?.GetBaseException().Message ?? "Unknown error.";
+        Dispatcher.UIThread.Post(() =>
+        {
+            LocalGatewayStatus = $"Local gateway initialization failed: {detail}";
+            AddSystemMessageCore($"Local gateway initialization failed: {detail}");
+        });
     }
 
     private void HandleInboundText(string payload)
@@ -105,6 +205,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
         if (TryParseEnvelope(payload, out var envelope))
         {
+            if (IsCanvasServerEnvelope(envelope.Type))
+                return;
+
             Dispatcher.UIThread.Post(() => ApplyEnvelope(envelope));
             return;
         }
@@ -145,6 +248,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                     AddSystemMessageCore($"Agent invoked tool: {envelope.Text}");
                 return;
 
+            case "tool_result":
+                if (IsToolFailureEnvelope(envelope))
+                    AddSystemMessageCore(ExplainToolFailure(envelope));
+                return;
+
             case "tool_approval_required":
                 AddSystemMessageCore("Tool approval is required in the web client.");
                 return;
@@ -158,7 +266,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private void AppendAssistantChunk(string? text, string? inReplyToMessageId)
     {
-        if (string.IsNullOrWhiteSpace(text))
+        if (string.IsNullOrEmpty(text))
             return;
 
         var index = EnsureActiveAssistantMessage(inReplyToMessageId);
@@ -234,7 +342,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private static bool TryParseEnvelope(string payload, out InboundEnvelope envelope)
     {
-        envelope = new InboundEnvelope(string.Empty, string.Empty, string.Empty);
+        envelope = new InboundEnvelope(string.Empty, string.Empty, string.Empty, null, null, null, null, null);
 
         if (payload.Length == 0 || payload[0] != '{')
             return false;
@@ -261,8 +369,23 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             var inReplyToMessageId = root.TryGetProperty("inReplyToMessageId", out var replyProp)
                 ? replyProp.GetString()
                 : null;
+            var toolName = root.TryGetProperty("toolName", out var toolNameProp)
+                ? toolNameProp.GetString()
+                : null;
+            var resultStatus = root.TryGetProperty("resultStatus", out var resultStatusProp)
+                ? resultStatusProp.GetString()
+                : null;
+            var failureCode = root.TryGetProperty("failureCode", out var failureCodeProp)
+                ? failureCodeProp.GetString()
+                : null;
+            var failureMessage = root.TryGetProperty("failureMessage", out var failureMessageProp)
+                ? failureMessageProp.GetString()
+                : null;
+            var nextStep = root.TryGetProperty("nextStep", out var nextStepProp)
+                ? nextStepProp.GetString()
+                : null;
 
-            envelope = new InboundEnvelope(type, text, inReplyToMessageId);
+            envelope = new InboundEnvelope(type, text, inReplyToMessageId, toolName, resultStatus, failureCode, failureMessage, nextStep);
             return true;
         }
         catch
@@ -270,6 +393,49 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             return false;
         }
     }
+
+    private static bool IsToolFailureEnvelope(InboundEnvelope envelope)
+        => !string.IsNullOrWhiteSpace(envelope.FailureCode)
+            || (!string.IsNullOrWhiteSpace(envelope.ResultStatus) &&
+                !string.Equals(envelope.ResultStatus, ToolResultStatuses.Completed, StringComparison.OrdinalIgnoreCase))
+            || LooksLikeToolFailureText(envelope.Text);
+
+    private static string ExplainToolFailure(InboundEnvelope envelope)
+    {
+        var toolName = string.IsNullOrWhiteSpace(envelope.ToolName) ? "This tool" : envelope.ToolName;
+        var nextStep = string.IsNullOrWhiteSpace(envelope.NextStep) ? null : envelope.NextStep;
+        var code = envelope.FailureCode?.Trim().ToLowerInvariant();
+
+        if (code == ToolFailureCodes.PresetBlocked)
+            return $"{toolName} is blocked by the active preset on this surface.{AppendNextStep(nextStep)}";
+        if (code == ToolFailureCodes.ApprovalRequired)
+            return $"This tool requires operator approval before it can run.{AppendNextStep(nextStep)}";
+        if (code == ToolFailureCodes.OperatorAuthRequired)
+            return $"This tool requires operator authentication on the current surface.{AppendNextStep(nextStep)}";
+        if (code is ToolFailureCodes.BrowserBackendMissing or ToolFailureCodes.RuntimeCapabilityUnavailable)
+            return $"{toolName} is unavailable in the current runtime.{AppendNextStep(nextStep)}";
+        if (!string.IsNullOrWhiteSpace(envelope.FailureMessage))
+            return envelope.FailureMessage!;
+        if (!string.IsNullOrWhiteSpace(envelope.Text))
+            return envelope.Text!;
+
+        return $"{toolName} failed.{AppendNextStep(nextStep)}";
+    }
+
+    private static bool LooksLikeToolFailureText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        return text.Contains("error:", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("requires approval", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("blocked", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("denied", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("unavailable", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string AppendNextStep(string? nextStep)
+        => string.IsNullOrWhiteSpace(nextStep) ? string.Empty : $" {nextStep}";
 
     private void AddSystemMessage(string text)
     {
@@ -302,6 +468,20 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         SaveSettings();
     }
 
+    partial void OnApprovalDesktopNotificationsEnabledChanged(bool value)
+    {
+        if (_isLoadingSettings)
+            return;
+        SaveSettings();
+    }
+
+    partial void OnApprovalDesktopNotificationsOnlyWhenUnfocusedChanged(bool value)
+    {
+        if (_isLoadingSettings)
+            return;
+        SaveSettings();
+    }
+
     [RelayCommand]
     private async Task ConnectAsync()
     {
@@ -323,6 +503,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             await _client.ConnectAsync(uri, string.IsNullOrWhiteSpace(AuthToken) ? null : AuthToken, CancellationToken.None);
             IsConnected = true;
             Status = "Connected";
+            await SendCanvasReadyAsync();
+            await LoadAdminStatusAsyncInternal();
             await LoadWhatsAppSetupAsync();
         }
         catch (Exception ex)
@@ -362,6 +544,121 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     }
 
     [RelayCommand]
+    private async Task IssueOperatorTokenAsync()
+    {
+        if (IsBusy)
+            return;
+
+        if (string.IsNullOrWhiteSpace(Username) || string.IsNullOrWhiteSpace(Password))
+        {
+            AddSystemMessage("Username and password are required to issue an operator token.");
+            return;
+        }
+
+        IsBusy = true;
+        try
+        {
+            using var client = CreateAdminClient(authToken: null, out var error);
+            if (client is null)
+            {
+                AddSystemMessage(error ?? "Invalid gateway URL.");
+                return;
+            }
+
+            var issued = await client.ExchangeOperatorTokenAsync(new OperatorTokenExchangeRequest
+            {
+                Username = Username,
+                Password = Password,
+                Label = string.IsNullOrWhiteSpace(OperatorTokenLabel) ? "companion" : OperatorTokenLabel
+            }, CancellationToken.None);
+
+            AuthToken = issued.Token;
+            RememberToken = true;
+            Password = "";
+            SaveSettings();
+            ApplyOperatorIdentity(
+                issued.AuthMode,
+                issued.Account?.Role ?? OperatorRoleNames.Viewer,
+                issued.Account?.DisplayName,
+                issued.Account?.Username,
+                isBootstrapAdmin: false);
+            AdminStatus = $"Issued operator token '{issued.TokenInfo?.Id ?? "unknown"}'.";
+            AddSystemMessage($"Issued operator token for {issued.Account?.Username ?? Username}.");
+            await LoadAdminStatusAsyncInternal();
+        }
+        catch (Exception ex)
+        {
+            AddSystemMessage($"Operator token exchange failed: {ex.Message}");
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task LoadAdminStatusAsync()
+        => await LoadAdminStatusAsyncInternal();
+
+    private async Task LoadAdminStatusAsyncInternal()
+    {
+        using var client = CreateAdminClient(out var error);
+        if (client is null)
+        {
+            AdminStatus = error ?? "Invalid gateway URL.";
+            DeploymentStatus = "Deployment status unavailable.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(AuthToken))
+        {
+            ApplyOperatorIdentity("account_token", OperatorRoleNames.Viewer, displayName: null, username: Username, isBootstrapAdmin: false);
+            AdminStatus = "No operator token loaded. Exchange credentials for a token to use admin surfaces.";
+            DeploymentStatus = "Deployment status unavailable until a token is loaded.";
+            return;
+        }
+
+        try
+        {
+            var auth = await client.GetAuthSessionAsync(CancellationToken.None);
+            var setup = await client.GetSetupStatusAsync(CancellationToken.None);
+            ApplyOperatorIdentity(auth.AuthMode, auth.Role, auth.DisplayName, auth.Username, auth.IsBootstrapAdmin);
+            AdminStatus = auth.IsBootstrapAdmin
+                ? "Using bootstrap/breakglass admin auth."
+                : $"Authenticated as {auth.DisplayName ?? auth.Username ?? "operator"} via {auth.AuthMode}.";
+            DeploymentStatus = string.Join(
+                Environment.NewLine,
+                [
+                    $"Profile: {setup.Profile}",
+                    $"Reachable base URL: {setup.ReachableBaseUrl}",
+                    $"Bind: {setup.BindAddress}:{setup.Port}",
+                    $"Bootstrap token enabled: {setup.BootstrapTokenEnabled}",
+                    $"Allowed auth modes: {string.Join(", ", setup.AllowedAuthModes)}",
+                    $"Minimum plugin trust: {setup.MinimumPluginTrustLevel}",
+                    $"Warnings: {(setup.Warnings.Count == 0 ? "none" : string.Join("; ", setup.Warnings))}"
+                ]);
+        }
+        catch (Exception ex)
+        {
+            AdminStatus = $"Admin status load failed: {ex.Message}";
+            DeploymentStatus = "Deployment status unavailable.";
+        }
+    }
+
+    private void ApplyOperatorIdentity(string authMode, string role, string? displayName, string? username, bool isBootstrapAdmin)
+    {
+        OperatorAuthMode = authMode;
+        OperatorRole = role;
+        IsBootstrapAdmin = isBootstrapAdmin;
+        CanManageAdmin = isBootstrapAdmin || OperatorRoleNames.CanAccess(role, OperatorRoleNames.Operator);
+        OperatorIdentity = isBootstrapAdmin
+            ? "Bootstrap admin"
+            : string.IsNullOrWhiteSpace(displayName)
+                ? (string.IsNullOrWhiteSpace(username) ? "Authenticated operator" : username)
+                : $"{displayName} ({username ?? "operator"})";
+    }
+
+    [RelayCommand]
     private async Task SendAsync()
     {
         if (IsBusy)
@@ -382,7 +679,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
         try
         {
-            var msgId = Guid.CreateVersion7().ToString("n");
+            var msgId = Guid.NewGuid().ToString("n");
             await _client.SendUserMessageAsync(text, msgId, replyToMessageId: null, CancellationToken.None);
         }
         catch (Exception ex)
@@ -391,5 +688,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         }
     }
 
-    private sealed record InboundEnvelope(string Type, string? Text, string? InReplyToMessageId);
+    private sealed record InboundEnvelope(
+        string Type,
+        string? Text,
+        string? InReplyToMessageId,
+        string? ToolName,
+        string? ResultStatus,
+        string? FailureCode,
+        string? FailureMessage,
+        string? NextStep);
 }

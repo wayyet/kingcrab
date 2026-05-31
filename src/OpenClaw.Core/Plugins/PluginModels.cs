@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using OpenClaw.Core.Models;
 
 namespace OpenClaw.Core.Plugins;
 
@@ -103,6 +104,9 @@ public sealed class PluginsConfig
     /// <summary>Transport configuration for the plugin bridge.</summary>
     public BridgeTransportConfig Transport { get; set; } = new();
 
+    /// <summary>Optional bridge runtime budgets that auto-quarantine unhealthy plugins.</summary>
+    public PluginBridgeBudgetConfig RuntimeBudget { get; set; } = new();
+
     /// <summary>Configuration for native plugin replicas.</summary>
     public NativePluginsConfig Native { get; set; } = new();
 
@@ -111,6 +115,18 @@ public sealed class PluginsConfig
 
     /// <summary>Configuration for in-process dynamic .NET plugins. JIT mode only.</summary>
     public NativeDynamicPluginsConfig DynamicNative { get; set; } = new();
+}
+
+public sealed class PluginBridgeBudgetConfig
+{
+    /// <summary>Maximum restart count allowed before a bridge plugin is auto-quarantined. 0 disables the threshold.</summary>
+    public int MaxRestartCount { get; set; }
+
+    /// <summary>Maximum working set size in bytes allowed before a bridge plugin is auto-quarantined. 0 disables the threshold.</summary>
+    public long MaxWorkingSetBytes { get; set; }
+
+    /// <summary>Maximum compatibility error count allowed before a bridge plugin is auto-quarantined. 0 disables the threshold.</summary>
+    public int MaxCompatibilityErrors { get; set; }
 }
 
 public sealed class McpPluginsConfig
@@ -164,9 +180,7 @@ public sealed class NativePluginsConfig
     public GitToolsConfig GitTools { get; set; } = new();
     public CodeExecConfig CodeExec { get; set; } = new();
     public ImageGenConfig ImageGen { get; set; } = new();
-    public ImageAnalyzeConfig ImageAnalyze { get; set; } = new();
     public PdfReadConfig PdfRead { get; set; } = new();
-    public MinerUPdfConfig MinerUPdf { get; set; } = new();
     public CalendarConfig Calendar { get; set; } = new();
     public EmailConfig Email { get; set; } = new();
     public DatabaseConfig Database { get; set; } = new();
@@ -345,6 +359,9 @@ public sealed class WebFetchConfig
 
     /// <summary>User-Agent header for outbound requests.</summary>
     public string UserAgent { get; set; } = "OpenClaw/1.0";
+
+    /// <summary>Optional tool-specific URL safety override. Falls back to Tooling.UrlSafety when unset.</summary>
+    public UrlSafetyConfig? UrlSafety { get; set; }
 }
 
 public sealed class GitToolsConfig
@@ -401,35 +418,6 @@ public sealed class ImageGenConfig
     public string Quality { get; set; } = "standard";
 }
 
-public sealed class ImageAnalyzeConfig
-{
-    public bool Enabled { get; set; } = false;
-
-    /// <summary>
-    /// Provider for the vision model: "openai", "azure-openai", "openai-compatible", etc.
-    /// Can differ from the main LLM provider to route vision calls to a dedicated model.
-    /// </summary>
-    public string Provider { get; set; } = "openai";
-
-    /// <summary>API key (or env: / raw: secret ref). Inherits from main LLM config if null.</summary>
-    public string? ApiKey { get; set; }
-
-    /// <summary>API endpoint. Required for openai-compatible providers.</summary>
-    public string? Endpoint { get; set; }
-
-    /// <summary>Vision model name (e.g. "gpt-4o", "gpt-4.1").</summary>
-    public string Model { get; set; } = "gpt-4o";
-
-    /// <summary>Maximum images per single analyze call.</summary>
-    public int MaxImagesPerCall { get; set; } = 5;
-
-    /// <summary>Maximum output characters for the analysis result.</summary>
-    public int MaxOutputChars { get; set; } = 8_000;
-
-    /// <summary>Per-call timeout in seconds.</summary>
-    public int TimeoutSeconds { get; set; } = 60;
-}
-
 public sealed class PdfReadConfig
 {
     public bool Enabled { get; set; } = false;
@@ -439,46 +427,6 @@ public sealed class PdfReadConfig
 
     /// <summary>Maximum output characters.</summary>
     public int MaxOutputChars { get; set; } = 100_000;
-}
-
-public sealed class MinerUPdfConfig
-{
-    public bool Enabled { get; set; } = false;
-
-    /// <summary>Base URL of the MinerU FastAPI service (e.g. http://14.103.254.121:8000).</summary>
-    public string Url { get; set; } = "http://localhost:8888";
-
-    /// <summary>Backend type: "pipeline", "vlm-transformers", "vlm-sglang-engine", "vlm-sglang-client".</summary>
-    public string Backend { get; set; } = "pipeline";
-
-    /// <summary>Parse method for the pipeline backend: "auto", "txt", "ocr".</summary>
-    public string ParseMethod { get; set; } = "auto";
-
-    /// <summary>OCR language hint (e.g. "ch", "en"). Used by the pipeline backend.</summary>
-    public string Lang { get; set; } = "ch";
-
-    /// <summary>Enable formula (LaTeX) detection. Pipeline backend only.</summary>
-    public bool FormulaEnable { get; set; } = true;
-
-    /// <summary>Enable table detection. Pipeline backend only.</summary>
-    public bool TableEnable { get; set; } = true;
-
-    /// <summary>SGLang inference server URL. Required when Backend is "vlm-sglang-client".</summary>
-    public string? SglangServerUrl { get; set; }
-
-    /// <summary>HTTP request timeout in seconds. PDF parsing can be slow for large files.</summary>
-    public int TimeoutSeconds { get; set; } = 300;
-
-    /// <summary>Maximum output characters when the Markdown cannot be written to disk.</summary>
-    public int MaxOutputChars { get; set; } = 200_000;
-
-    /// <summary>
-    /// When true, requests MinerU to return extracted images as base64 and saves them
-    /// to an "images/" subfolder next to the output Markdown file.
-    /// The Markdown image references are rewritten to absolute disk paths so the agent
-    /// can pass each [IMAGE_PATH:...] to a vision model for analysis.
-    /// </summary>
-    public bool ExtractImages { get; set; } = false;
 }
 
 public sealed class CalendarConfig

@@ -49,7 +49,7 @@ public sealed class MafAgentRuntime : IAgentRuntime
     private IList<AITool> _mafTools;
     private IReadOnlyDictionary<string, AITool> _mafToolsByName;
     private string _baseSystemPrompt = string.Empty;
-    private SkillDefinition[] _loadedSkills = [];
+    private IReadOnlyList<SkillDefinition> _loadedSkills = [];
     private string[] _loadedSkillNames = [];
     private int _systemPromptLength;
     private int _skillPromptLength;
@@ -73,8 +73,9 @@ public sealed class MafAgentRuntime : IAgentRuntime
             logger,
             config: context.Config,
             toolSandbox: context.ToolSandbox,
-            toolPresetResolver: context.Services.GetService(typeof(IToolPresetResolver)) as IToolPresetResolver
-        );
+            toolPresetResolver: context.Services.GetService(typeof(IToolPresetResolver)) as IToolPresetResolver,
+            auditLog: context.ToolAuditLog,
+            toolGovernance: context.ToolGovernance);
         _options = options;
         _agentFactory = agentFactory;
         _sessionStateStore = sessionStateStore;
@@ -139,6 +140,17 @@ public sealed class MafAgentRuntime : IAgentRuntime
             }
         }
     }
+    
+    public IReadOnlyList<SkillDefinition> LoadedSkills
+    {
+        get
+        {
+            lock (_skillGate)
+            {
+                return _loadedSkills;
+            }
+        }
+    }
 
     public event Action<IReadOnlyList<SkillDefinition>>? SkillsReloaded;
 
@@ -180,7 +192,7 @@ public sealed class MafAgentRuntime : IAgentRuntime
         if (skills.Count > 0)
             logger.LogInformation("{Summary}", SkillPromptBuilder.BuildSummary(skills));
         else
-            logger.LogInformation("No skills loaded for the MAF experiment runtime.");
+            logger.LogInformation("No skills loaded for the MAF runtime.");
 
         try { SkillsReloaded?.Invoke(skills); }
         catch (Exception ex) { logger.LogWarning(ex, "SkillsReloaded subscriber threw"); }
@@ -581,7 +593,7 @@ public sealed class MafAgentRuntime : IAgentRuntime
         lock (_skillGate)
         {
             baseSystemPrompt = _baseSystemPrompt;
-            loadedSkills = _loadedSkills;
+            loadedSkills = _loadedSkills.ToArray();
         }
 
         var effectiveSkills = ResolveSkillsForTurn(loadedSkills, userMessage, out var blockedRoutes);
@@ -985,10 +997,15 @@ public sealed class MafAgentRuntime : IAgentRuntime
     {
         lock (_skillGate)
         {
-            _baseSystemPrompt = AgentSystemPromptBuilder.BuildBaseSystemPrompt(_requireToolApproval);
-            _loadedSkills = [.. skills];
-            _skillPromptLength = SkillPromptBuilder.Build(skills).Length;
+            // Progressive disclosure: only the metadata index lives in the system prompt.
+            // The full SKILL.md body for any single skill is fetched on demand via the
+            // `load_skill` tool, which reads from LoadedSkills (this same snapshot).
+            var skillSection = SkillPromptBuilder.BuildIndex(skills, _skillsConfig?.InstructionPrompt);
+            var basePrompt = AgentSystemPromptBuilder.BuildBaseSystemPrompt(_requireToolApproval);
+            _skillPromptLength = skillSection.Length;
+            _baseSystemPrompt = string.IsNullOrEmpty(skillSection) ? basePrompt : basePrompt + "\n" + skillSection;
             _systemPromptLength = _baseSystemPrompt.Length;
+            _loadedSkills = skills;
             _loadedSkillNames = skills
                 .Select(skill => skill.Name)
                 .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)

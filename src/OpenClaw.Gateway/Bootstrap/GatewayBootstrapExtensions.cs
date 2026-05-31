@@ -2,11 +2,13 @@ using System.Net.Http.Headers;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using A2A;
 using Microsoft.Extensions.Configuration;
 using OpenClaw.Core.Models;
 using OpenClaw.Core.Plugins;
 using OpenClaw.Core.Security;
 using OpenClaw.Core.Validation;
+using OpenClaw.Gateway;
 using OpenClaw.Gateway.Extensions;
 
 namespace OpenClaw.Gateway.Bootstrap;
@@ -18,9 +20,16 @@ internal static class GatewayBootstrapExtensions
         ApplyConfigFileOverride(builder, args);
 
         builder.Services.ConfigureHttpJsonOptions(opts =>
-            opts.SerializerOptions.TypeInfoResolverChain.Add(CoreJsonContext.Default));
+        {
+            var a2aResolver = A2AJsonUtilities.DefaultOptions.TypeInfoResolver;
+            if (a2aResolver is not null)
+                opts.SerializerOptions.TypeInfoResolverChain.Add(a2aResolver);
+            opts.SerializerOptions.TypeInfoResolverChain.Add(GatewayJsonContext.Default);
+            opts.SerializerOptions.TypeInfoResolverChain.Add(CoreJsonContext.Default);
+        });
 
         var config = LoadGatewayConfig(builder.Configuration);
+        var configSources = ConfigurationSourceDiagnosticsBuilder.Build(builder.Configuration, config);
 
         var isNonLoopbackBind = !GatewaySecurity.IsLoopbackBind(config.BindAddress);
         var isDoctorMode = args.Any(a => string.Equals(a, "--doctor", StringComparison.Ordinal));
@@ -39,6 +48,7 @@ internal static class GatewayBootstrapExtensions
         if (isNonLoopbackBind && string.IsNullOrWhiteSpace(config.AuthToken))
         {
             var message = "OPENCLAW_AUTH_TOKEN must be set when binding to a non-loopback address.";
+            WriteConfigSourceDiagnostics(configSources);
             if (isDoctorMode)
             {
                 Console.Error.WriteLine(message);
@@ -52,9 +62,12 @@ internal static class GatewayBootstrapExtensions
             throw new InvalidOperationException(message);
         }
 
-        var configErrors = ConfigValidator.Validate(config);
+        var configErrors = ConfigValidator.Validate(config).ToList();
+        foreach (var featureError in ValidateOptionalFeatureCompatibility(config))
+            configErrors.Add(featureError);
         if (configErrors.Count > 0)
         {
+            WriteConfigSourceDiagnostics(configSources);
             foreach (var err in configErrors)
                 Console.Error.WriteLine($"Configuration error: {err}");
 
@@ -77,6 +90,7 @@ internal static class GatewayBootstrapExtensions
         }
         catch (Exception ex)
         {
+            WriteConfigSourceDiagnostics(configSources);
             Console.Error.WriteLine($"Configuration error: {ex.Message}");
             if (isDoctorMode)
             {
@@ -92,7 +106,10 @@ internal static class GatewayBootstrapExtensions
 
         if (isDoctorMode)
         {
-            var ok = await DoctorCheck.RunAsync(config, runtimeState);
+            var ok = await DoctorCheck.RunAsync(
+                config,
+                runtimeState,
+                configSources);
             return new BootstrapResult
             {
                 ShouldExit = true,
@@ -111,9 +128,16 @@ internal static class GatewayBootstrapExtensions
                 Config = config,
                 RuntimeState = runtimeState,
                 IsNonLoopbackBind = isNonLoopbackBind,
+                ConfigSources = configSources,
                 WorkspacePath = Environment.GetEnvironmentVariable("OPENCLAW_WORKSPACE")
             }
         };
+    }
+
+    private static void WriteConfigSourceDiagnostics(ConfigSourceDiagnostics diagnostics)
+    {
+        Console.Error.WriteLine("Effective configuration winners:");
+        Console.Error.WriteLine(ConfigurationSourceDiagnosticsBuilder.Render(diagnostics));
     }
 
     internal static GatewayConfig LoadGatewayConfig(IConfiguration configuration)
@@ -132,6 +156,18 @@ internal static class GatewayBootstrapExtensions
         ApplyExecutionCompatibility(config);
         NormalizeCodingBackendConfig(config);
         return config;
+    }
+
+    internal static IReadOnlyList<string> ValidateOptionalFeatureCompatibility(GatewayConfig config)
+    {
+        var errors = new List<string>();
+        if (ToolSandboxPolicy.IsOpenSandboxProviderConfigured(config) &&
+            !OptionalFeatureSupport.OpenSandboxEnabled)
+        {
+            errors.Add("Sandbox.Provider='OpenSandbox' requires a gateway build compiled with -p:OpenClawEnableOpenSandbox=true. Rebuild with that flag or set Sandbox.Provider='None'.");
+        }
+
+        return errors;
     }
 
     private static void ApplyConfigFileOverride(WebApplicationBuilder builder, string[] args)

@@ -110,6 +110,22 @@ public sealed class IntegrationPluginsResponse
     public IReadOnlyList<PluginHealthSnapshot> Items { get; init; } = [];
 }
 
+public sealed class IntegrationCompatibilityCatalogResponse
+{
+    public required CompatibilityCatalogResponse Catalog { get; init; }
+}
+
+public sealed class IntegrationCompatibilityExportResponse
+{
+    public required string RequestedRuntimeMode { get; init; }
+    public required string EffectiveRuntimeMode { get; init; }
+    public bool DynamicCodeSupported { get; init; }
+    public required SecurityPostureResponse Posture { get; init; }
+    public IReadOnlyList<ChannelReadinessDto> Channels { get; init; } = [];
+    public IReadOnlyList<PluginHealthSnapshot> Plugins { get; init; } = [];
+    public required CompatibilityCatalogResponse Catalog { get; init; }
+}
+
 public sealed class IntegrationOperatorAuditResponse
 {
     public required OperatorAuditQuery Query { get; init; }
@@ -131,6 +147,7 @@ public sealed class IntegrationDashboardResponse
     public required IntegrationProvidersResponse Providers { get; init; }
     public required IntegrationPluginsResponse Plugins { get; init; }
     public required IntegrationRuntimeEventsResponse Events { get; init; }
+    public required OperatorDashboardSnapshot Operator { get; init; }
 }
 
 public sealed class IntegrationSessionSearchResponse
@@ -157,6 +174,21 @@ public sealed class IntegrationAutomationDetailResponse
 {
     public AutomationDefinition? Automation { get; init; }
     public AutomationRunState? RunState { get; init; }
+}
+
+public sealed class IntegrationAutomationRunsResponse
+{
+    public required string AutomationId { get; init; }
+    public AutomationRunState? RunState { get; init; }
+    public IReadOnlyList<AutomationRunRecord> Items { get; init; } = [];
+}
+
+public sealed class IntegrationAutomationRunDetailResponse
+{
+    public required string AutomationId { get; init; }
+    public AutomationDefinition? Automation { get; init; }
+    public AutomationRunState? RunState { get; init; }
+    public AutomationRunRecord? Run { get; init; }
 }
 
 public sealed class LearningProposalListResponse

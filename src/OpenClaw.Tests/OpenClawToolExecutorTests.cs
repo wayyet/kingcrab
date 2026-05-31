@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
 using NSubstitute;
 using OpenClaw.Agent;
 using OpenClaw.Core.Abstractions;
@@ -47,7 +48,7 @@ public sealed class OpenClawToolExecutorTests
             CancellationToken.None);
 
         Assert.Contains("requires approval", result.ResultText, StringComparison.OrdinalIgnoreCase);
-        await tool.DidNotReceiveWithAnyArgs().ExecuteAsync(default!, CancellationToken.None);
+        await tool.DidNotReceiveWithAnyArgs().ExecuteAsync(default!, default);
     }
 
     [Fact]
@@ -170,10 +171,15 @@ public sealed class OpenClawToolExecutorTests
         Assert.Equal(0, tool.LocalExecutionCount);
     }
 
-    [Fact]
-    public async Task ExecuteAsync_SandboxRequireWithProviderNone_FailsClosed()
+    [Theory]
+    [InlineData("websocket", "Provide a summary of AI news")]
+    [InlineData("cli", "Summarize this local repository")]
+    public async Task ExecuteAsync_SandboxRequireWithProviderNone_RunsLocallyAndLogsResolution(
+        string channelId,
+        string prompt)
     {
         var tool = new SandboxCapableEchoTool(ToolSandboxMode.Require, "local-result");
+        var logger = new ListLogger();
         var executor = CreateExecutor(
             [tool],
             toolSandbox: null,
@@ -191,20 +197,28 @@ public sealed class OpenClawToolExecutorTests
                         }
                     }
                 }
-            });
+            },
+            logger);
 
         var result = await executor.ExecuteAsync(
             "sandbox_echo",
             """{"value":"hi"}""",
             callId: null,
-            CreateSession(),
+            CreateSession(channelId, prompt),
             CreateTurnContext(),
             isStreaming: false,
             approvalCallback: null,
             CancellationToken.None);
 
-        Assert.Contains("requires sandboxing", result.ResultText, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(0, tool.LocalExecutionCount);
+        Assert.Equal("local-result", result.ResultText);
+        Assert.Equal(1, tool.LocalExecutionCount);
+        Assert.Contains(
+            logger.Messages,
+            message => message.Contains("Sandbox mode resolved for tool sandbox_echo", StringComparison.Ordinal) &&
+                       message.Contains("provider=None", StringComparison.OrdinalIgnoreCase) &&
+                       message.Contains("configured=Require", StringComparison.Ordinal) &&
+                       message.Contains("effective=None", StringComparison.Ordinal) &&
+                       message.Contains("global sandbox off switch", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -239,39 +253,61 @@ public sealed class OpenClawToolExecutorTests
             CancellationToken.None);
 
         Assert.Contains("denied by hook", result.ResultText, StringComparison.OrdinalIgnoreCase);
-        await sandbox.DidNotReceiveWithAnyArgs().ExecuteAsync(default!, CancellationToken.None);
+        await sandbox.DidNotReceiveWithAnyArgs().ExecuteAsync(default!, default);
     }
 
     [Fact]
-    public void OpenClawToolExecutor_ReplaceMcpTools_UpdatesToolDeclarations()
+    public async Task ExecuteAsync_OperatorAuthFailure_IsClassifiedAndPersisted()
     {
-        var initialTool = CreateTool("initial_tool");
-        var addedTool = CreateTool("added_tool");
-        var executor = CreateExecutor([initialTool]);
-        var session = CreateSession();
+        var tool = new ThrowingTool("This action requires operator authentication on the current surface.");
+        var executor = CreateExecutor([tool]);
 
-        executor.ReplaceMcpTools([addedTool], ["initial_tool"]);
+        var result = await executor.ExecuteAsync(
+            "auth_bound",
+            """{"action":"restricted"}""",
+            callId: null,
+            CreateSession(),
+            CreateTurnContext(),
+            isStreaming: false,
+            approvalCallback: null,
+            CancellationToken.None);
 
-        var toolNames = executor.GetToolDeclarations(session)
-            .Select(static tool => tool.Name)
-            .OrderBy(static name => name, StringComparer.Ordinal)
-            .ToArray();
-        Assert.Equal(["added_tool"], toolNames);
+        Assert.Equal(ToolResultStatuses.Blocked, result.ResultStatus);
+        Assert.Equal(ToolFailureCodes.OperatorAuthRequired, result.FailureCode);
+        Assert.Contains("operator authentication", result.ResultText, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(ToolFailureCodes.OperatorAuthRequired, result.Invocation.FailureCode);
+        Assert.Equal(ToolResultStatuses.Blocked, result.Invocation.ResultStatus);
+        Assert.Contains("browser session or operator token", result.NextStep ?? string.Empty, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static ITool CreateTool(string name)
+    [Fact]
+    public async Task ExecuteAsync_RuntimeCapabilityFailure_PreservesStructuredClassification()
     {
-        var tool = Substitute.For<ITool>();
-        tool.Name.Returns(name);
-        tool.Description.Returns($"{name} test tool");
-        tool.ParameterSchema.Returns("""{"type":"object"}""");
-        return tool;
+        var tool = new ThrowingTool("Execution backend 'docker' is not configured.");
+        var executor = CreateExecutor([tool]);
+
+        var result = await executor.ExecuteAsync(
+            "auth_bound",
+            """{"action":"restricted"}""",
+            callId: null,
+            CreateSession(),
+            CreateTurnContext(),
+            isStreaming: false,
+            approvalCallback: null,
+            CancellationToken.None);
+
+        Assert.Equal(ToolResultStatuses.Blocked, result.ResultStatus);
+        Assert.Equal(ToolFailureCodes.RuntimeCapabilityUnavailable, result.FailureCode);
+        Assert.Equal(ToolFailureCodes.RuntimeCapabilityUnavailable, result.Invocation.FailureCode);
+        Assert.Contains("execution backend", result.ResultText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Configure the required execution backend or sandbox", result.NextStep ?? string.Empty, StringComparison.OrdinalIgnoreCase);
     }
 
     private static OpenClawToolExecutor CreateExecutor(
         IReadOnlyList<ITool> tools,
         IToolSandbox? toolSandbox = null,
-        GatewayConfig? config = null)
+        GatewayConfig? config = null,
+        ILogger? logger = null)
         => new(
             tools,
             toolTimeoutSeconds: 5,
@@ -279,16 +315,19 @@ public sealed class OpenClawToolExecutorTests
             approvalRequiredTools: [],
             hooks: [],
             metrics: new RuntimeMetrics(),
-            logger: NullLogger.Instance,
+            logger: logger ?? NullLogger.Instance,
             config: config,
             toolSandbox: toolSandbox);
 
-    private static Session CreateSession()
+    private static Session CreateSession(string channelId = "websocket", string? prompt = null)
         => new()
         {
             Id = "sess1",
-            ChannelId = "websocket",
-            SenderId = "user1"
+            ChannelId = channelId,
+            SenderId = "user1",
+            History = string.IsNullOrWhiteSpace(prompt)
+                ? []
+                : [new ChatTurn { Role = "user", Content = prompt }]
         };
 
     private static TurnContext CreateTurnContext()
@@ -343,5 +382,32 @@ public sealed class OpenClawToolExecutorTests
 
         public string FormatSandboxResult(string argumentsJson, SandboxResult result)
             => "formatted:" + result.Stdout;
+    }
+
+    private sealed class ThrowingTool(string message) : ITool
+    {
+        public string Name => "auth_bound";
+        public string Description => "Throws a classified operator auth error.";
+        public string ParameterSchema => """{"type":"object","properties":{"action":{"type":"string"}}}""";
+
+        public ValueTask<string> ExecuteAsync(string argumentsJson, CancellationToken ct)
+            => throw new InvalidOperationException(message);
+    }
+
+    private sealed class ListLogger : ILogger
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+            => Messages.Add(formatter(state, exception));
     }
 }

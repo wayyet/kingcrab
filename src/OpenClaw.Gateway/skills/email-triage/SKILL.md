@@ -16,3 +16,4 @@ When asked to triage email:
    - Receipts/confirmations (extract key numbers/dates)
    - Newsletters/promotions (safe to archive)
 4) If asked to email the report, send it via the `email` tool with a clear subject line.
+

@@ -122,7 +122,7 @@ public sealed class FileMemoryStoreRetentionTests
         var store = new FileMemoryStore(root, maxCachedSessions: 8);
         var now = new DateTimeOffset(2026, 03, 04, 12, 0, 0, TimeSpan.Zero);
         var invalidArchiveRoot = Path.Combine(root, "archive-blocker");
-        await File.WriteAllTextAsync(invalidArchiveRoot, "not-a-directory", CancellationToken.None);
+        await File.WriteAllTextAsync(invalidArchiveRoot, "not-a-directory");
 
         await store.SaveSessionAsync(new Session
         {
@@ -159,8 +159,8 @@ public sealed class FileMemoryStoreRetentionTests
         Directory.CreateDirectory(archive);
         var oldFile = Path.Combine(archive, "old.json");
         var newFile = Path.Combine(archive, "new.json");
-        await File.WriteAllTextAsync(oldFile, "{}", CancellationToken.None);
-        await File.WriteAllTextAsync(newFile, "{}", CancellationToken.None);
+        await File.WriteAllTextAsync(oldFile, "{}");
+        await File.WriteAllTextAsync(newFile, "{}");
 
         var now = new DateTimeOffset(2026, 03, 04, 12, 0, 0, TimeSpan.Zero);
         File.SetLastWriteTimeUtc(oldFile, now.UtcDateTime.AddDays(-60));
