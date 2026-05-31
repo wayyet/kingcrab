@@ -99,18 +99,40 @@ public sealed class OpenClawToolExecutor
         _planExecuteVerify = planExecuteVerify ?? NoopPlanExecuteVerifyOrchestrator.Instance;
     }
 
-    public IList<AITool> ToolDeclarations => _toolDeclarations;
+    public IList<AITool> ToolDeclarations
+    {
+        get
+        {
+            lock (_toolsMutationLock)
+            {
+                return _toolDeclarations.ToArray();
+            }
+        }
+    }
 
     public IList<AITool> GetToolDeclarations(Session session)
     {
-        var preset = _toolPresetResolver?.Resolve(session, _toolsByName.Keys);
-        return _toolDeclarations
+        AITool[] declarations;
+        string[] toolNames;
+        lock (_toolsMutationLock)
+        {
+            declarations = _toolDeclarations.ToArray();
+            toolNames = _toolsByName.Keys.ToArray();
+        }
+
+        var preset = _toolPresetResolver?.Resolve(session, toolNames);
+        return declarations
             .Where(item => IsToolAllowedForSession(session, item.Name, preset))
             .ToArray();
     }
 
     public bool SupportsStreaming(string toolName)
-        => _toolsByName.TryGetValue(toolName, out var tool) && tool is IStreamingTool;
+    {
+        lock (_toolsMutationLock)
+        {
+            return _toolsByName.TryGetValue(toolName, out var tool) && tool is IStreamingTool;
+        }
+    }
 
     /// <summary>
     /// Atomically replaces the workspace MCP tools in the dispatch table.
@@ -164,7 +186,15 @@ public sealed class OpenClawToolExecutor
         activity?.SetTag("tool.name", toolName);
         var persistedArgsJson = _redaction.Redact(argsJson);
 
-        if (!_toolsByName.TryGetValue(toolName, out var tool))
+        ITool? tool;
+        string[] toolNamesSnapshot;
+        lock (_toolsMutationLock)
+        {
+            _toolsByName.TryGetValue(toolName, out tool);
+            toolNamesSnapshot = _toolsByName.Keys.ToArray();
+        }
+
+        if (tool is null)
         {
             return CreateImmediateResult(
                 toolName,
@@ -177,7 +207,7 @@ public sealed class OpenClawToolExecutor
                 nextStep: "Use one of the tools declared for this session.");
         }
 
-        var preset = _toolPresetResolver?.Resolve(session, _toolsByName.Keys);
+        var preset = _toolPresetResolver?.Resolve(session, toolNamesSnapshot);
         if (!IsToolAllowedForSession(session, tool.Name, preset))
         {
             var deniedByPreset = preset is not null
