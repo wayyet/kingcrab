@@ -17,7 +17,6 @@ using OpenClaw.Core.Security;
 using OpenClaw.Core.Sessions;
 using OpenClaw.Gateway;
 using OpenClaw.Gateway.Extensions;
-using OpenClaw.Agent;
 using Xunit;
 
 namespace OpenClaw.Tests;

@@ -10,7 +10,6 @@ using OpenClaw.Core.Memory;
 using OpenClaw.Core.Models;
 using OpenClaw.Core.Observability;
 using OpenClaw.Core.Skills;
-using OpenClaw.Agent;
 using Xunit;
 
 namespace OpenClaw.Tests;

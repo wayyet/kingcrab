@@ -14,16 +14,16 @@ public sealed class MempalaceMemoryStoreTests : IAsyncLifetime
 {
     private readonly string _storagePath = Path.Join(Path.GetTempPath(), "openclaw-mempalace-tests", Guid.NewGuid().ToString("N"));
 
-    public Task InitializeAsync()
+    public ValueTask InitializeAsync()
     {
         Directory.CreateDirectory(_storagePath);
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         try { Directory.Delete(_storagePath, recursive: true); } catch { }
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     [Fact]
