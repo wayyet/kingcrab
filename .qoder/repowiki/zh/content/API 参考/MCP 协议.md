@@ -2,22 +2,19 @@
 
 <cite>
 **本文引用的文件**
+- [McpModels.cs](file://src/OpenClaw.Client/McpModels.cs)
+- [McpJsonContext.cs](file://src/OpenClaw.Client/McpJsonContext.cs)
+- [OpenClawHttpClient.cs](file://src/OpenClaw.Client/OpenClawHttpClient.cs)
+- [McpServiceExtensions.cs](file://src/OpenClaw.Gateway/Mcp/McpServiceExtensions.cs)
 - [OpenClawMcpTools.cs](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpTools.cs)
 - [OpenClawMcpResources.cs](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpResources.cs)
 - [OpenClawMcpPrompts.cs](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpPrompts.cs)
-- [McpServiceExtensions.cs](file://src/OpenClaw.Gateway/Mcp/McpServiceExtensions.cs)
 - [GatewayRuntimeHolder.cs](file://src/OpenClaw.Gateway/Mcp/GatewayRuntimeHolder.cs)
 - [McpWatcherHolder.cs](file://src/OpenClaw.Gateway/Mcp/McpWatcherHolder.cs)
-- [McpConfigStore.cs](file://src/OpenClaw.Gateway/Mcp/McpConfigStore.cs)
 - [McpWorkspaceWatcherService.cs](file://src/OpenClaw.Gateway/McpWorkspaceWatcherService.cs)
-- [McpServerToolRegistry.cs](file://src/OpenClaw.Agent/Plugins/McpServerToolRegistry.cs)
+- [McpConfigStore.cs](file://src/OpenClaw.Gateway/Mcp/McpConfigStore.cs)
 - [McpNativeTool.cs](file://src/OpenClaw.Agent/Tools/McpNativeTool.cs)
 - [FractalMemoryMcpProvider.cs](file://src/OpenClaw.Agent/Memory/FractalMemoryMcpProvider.cs)
-- [McpModels.cs](file://src/OpenClaw.Client/McpModels.cs)
-- [OpenClawHttpClient.cs](file://src/OpenClaw.Client/OpenClawHttpClient.cs)
-- [OpenClawLiveClient.cs](file://src/OpenClaw.Client/OpenClawLiveClient.cs)
-- [OpenClawWebSocketClient.cs](file://src/OpenClaw.Client/OpenClawWebSocketClient.cs)
-- [McpServerToolRegistryTests.cs](file://src/OpenClaw.Tests/McpServerToolRegistryTests.cs)
 </cite>
 
 ## 目录
@@ -27,458 +24,474 @@
 4. [架构总览](#架构总览)
 5. [详细组件分析](#详细组件分析)
 6. [依赖关系分析](#依赖关系分析)
-7. [性能考虑](#性能考虑)
-8. [故障排除指南](#故障排除指南)
+7. [性能考量](#性能考量)
+8. [故障排查指南](#故障排查指南)
 9. [结论](#结论)
 10. [附录](#附录)
 
 ## 简介
-本文件为 OpenClaw.NET 的 MCP（Model Context Protocol）实现提供权威参考文档，覆盖协议工作原理、消息格式与通信流程；记录所有 MCP 端点的功能、参数与响应格式；详解提示管理、资源访问与工具调用的实现；说明 MCP 服务器配置、客户端连接与协议升级过程；提供客户端集成示例、消息处理代码与错误恢复机制；解释与 OpenClaw 内部系统的集成点与数据流转；并给出性能监控、调试工具与故障排除建议。
+本文件系统性阐述 OpenClaw 中对 MCP（Model Context Protocol）协议的实现与使用，覆盖客户端与服务器交互、工具注册、资源与提示管理、消息格式与序列化、工作区热重载与安全授权等主题。文档面向开发者与运维人员，既提供代码级细节，也给出可操作的最佳实践。
 
 ## 项目结构
-MCP 在 OpenClaw 中分为“网关侧服务端”和“代理侧客户端”两部分：
-- 网关侧（Gateway）：通过官方 MCP ASP.NET Core 扩展注册工具、资源与提示，暴露给外部 MCP 客户端或内部代理。
-- 代理侧（Agent）：从已配置的 MCP 服务器发现工具，桥接为本地工具，供智能体执行。
+围绕 MCP 的实现主要分布在以下模块：
+- 客户端侧：MCP 消息模型与 JSON 序列化上下文、HTTP 客户端封装、工具适配器
+- 网关侧：MCP 服务注册与传输、工具/资源/提示实现、运行时桥接与鉴权中间件
+- 工作区与热重载：工作区配置存储与监听、动态工具注册刷新
+- 代理侧：MCP 工具适配器与结构化记忆 MCP 提供者
 
 ```mermaid
 graph TB
-subgraph "网关侧Gateway"
-A["McpServiceExtensions<br/>注册 MCP 服务"]
-B["OpenClawMcpTools<br/>工具实现"]
-C["OpenClawMcpResources<br/>资源实现"]
-D["OpenClawMcpPrompts<br/>提示实现"]
-E["GatewayRuntimeHolder<br/>运行时持有者"]
-F["McpWatcherHolder<br/>监视器持有者"]
-G["McpConfigStore<br/>持久化配置"]
-H["McpWorkspaceWatcherService<br/>工作区热重载"]
+subgraph "客户端"
+A["OpenClawHttpClient<br/>MCP 请求封装"]
+B["McpModels.cs<br/>MCP 数据模型"]
+C["McpJsonContext.cs<br/>源生成上下文"]
+D["McpNativeTool.cs<br/>工具适配器"]
 end
-subgraph "代理侧Agent"
-I["McpServerToolRegistry<br/>发现与注册 MCP 工具"]
-J["McpNativeTool<br/>本地包装器"]
-K["FractalMemoryMcpProvider<br/>内存 MCP 提供者"]
+subgraph "网关"
+E["McpServiceExtensions.cs<br/>服务注册与传输"]
+F["OpenClawMcpTools.cs<br/>工具实现"]
+G["OpenClawMcpResources.cs<br/>资源实现"]
+H["OpenClawMcpPrompts.cs<br/>提示实现"]
+I["GatewayRuntimeHolder.cs<br/>运行时桥接"]
 end
-subgraph "客户端Client"
-L["McpModels<br/>JSON-RPC 模型"]
-M["OpenClawHttpClient<br/>HTTP 客户端"]
-N["OpenClawLiveClient<br/>实时 WebSocket 客户端"]
-O["OpenClawWebSocketClient<br/>通用 WebSocket 客户端"]
+subgraph "工作区与热重载"
+J["McpWorkspaceWatcherService.cs<br/>文件/内存配置监听"]
+K["McpConfigStore.cs<br/>内存存储配置"]
+L["McpWatcherHolder.cs<br/>观察者桥接"]
+end
+subgraph "代理"
+M["FractalMemoryMcpProvider.cs<br/>结构化记忆 MCP 提供者"]
 end
 A --> B
 A --> C
-A --> D
-E --> B
-F --> H
-H --> I
-I --> J
-K --> I
-M --> L
-N --> L
-O --> L
+D --> A
+E --> F
+E --> G
+E --> H
+E --> I
+J --> K
+J --> L
+D --> M
 ```
 
 图表来源
-- [McpServiceExtensions.cs:1-36](file://src/OpenClaw.Gateway/Mcp/McpServiceExtensions.cs#L1-L36)
-- [OpenClawMcpTools.cs:1-319](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpTools.cs#L1-L319)
-- [OpenClawMcpResources.cs:1-116](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpResources.cs#L1-L116)
-- [OpenClawMcpPrompts.cs:1-71](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpPrompts.cs#L1-L71)
-- [GatewayRuntimeHolder.cs:1-21](file://src/OpenClaw.Gateway/Mcp/GatewayRuntimeHolder.cs#L1-L21)
-- [McpWatcherHolder.cs:1-11](file://src/OpenClaw.Gateway/Mcp/McpWatcherHolder.cs#L1-L11)
-- [McpConfigStore.cs:1-110](file://src/OpenClaw.Gateway/Mcp/McpConfigStore.cs#L1-L110)
-- [McpWorkspaceWatcherService.cs:1-221](file://src/OpenClaw.Gateway/McpWorkspaceWatcherService.cs#L1-L221)
-- [McpServerToolRegistry.cs:1-369](file://src/OpenClaw.Agent/Plugins/McpServerToolRegistry.cs#L1-L369)
-- [McpNativeTool.cs:1-36](file://src/OpenClaw.Agent/Tools/McpNativeTool.cs#L1-L36)
-- [FractalMemoryMcpProvider.cs:1-200](file://src/OpenClaw.Agent/Memory/FractalMemoryMcpProvider.cs#L1-L200)
+- [OpenClawHttpClient.cs:262-320](file://src/OpenClaw.Client/OpenClawHttpClient.cs#L262-L320)
 - [McpModels.cs:1-187](file://src/OpenClaw.Client/McpModels.cs#L1-L187)
-- [OpenClawHttpClient.cs:254-280](file://src/OpenClaw.Client/OpenClawHttpClient.cs#L254-L280)
-- [OpenClawLiveClient.cs:1-303](file://src/OpenClaw.Client/OpenClawLiveClient.cs#L1-L303)
-- [OpenClawWebSocketClient.cs:1-248](file://src/OpenClaw.Client/OpenClawWebSocketClient.cs#L1-L248)
+- [McpJsonContext.cs:1-39](file://src/OpenClaw.Client/McpJsonContext.cs#L1-L39)
+- [McpServiceExtensions.cs:20-55](file://src/OpenClaw.Gateway/Mcp/McpServiceExtensions.cs#L20-L55)
+- [OpenClawMcpTools.cs:14-319](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpTools.cs#L14-L319)
+- [OpenClawMcpResources.cs:9-116](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpResources.cs#L9-L116)
+- [OpenClawMcpPrompts.cs:12-71](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpPrompts.cs#L12-L71)
+- [GatewayRuntimeHolder.cs:10-20](file://src/OpenClaw.Gateway/Mcp/GatewayRuntimeHolder.cs#L10-L20)
+- [McpWorkspaceWatcherService.cs:20-221](file://src/OpenClaw.Gateway/McpWorkspaceWatcherService.cs#L20-L221)
+- [McpConfigStore.cs:11-110](file://src/OpenClaw.Gateway/Mcp/McpConfigStore.cs#L11-L110)
+- [McpWatcherHolder.cs:7-10](file://src/OpenClaw.Gateway/Mcp/McpWatcherHolder.cs#L7-L10)
+- [McpNativeTool.cs:9-118](file://src/OpenClaw.Agent/Tools/McpNativeTool.cs#L9-L118)
+- [FractalMemoryMcpProvider.cs:13-330](file://src/OpenClaw.Agent/Memory/FractalMemoryMcpProvider.cs#L13-L330)
 
 章节来源
-- [McpServiceExtensions.cs:1-36](file://src/OpenClaw.Gateway/Mcp/McpServiceExtensions.cs#L1-L36)
-- [McpWorkspaceWatcherService.cs:1-221](file://src/OpenClaw.Gateway/McpWorkspaceWatcherService.cs#L1-L221)
+- [OpenClawHttpClient.cs:262-320](file://src/OpenClaw.Client/OpenClawHttpClient.cs#L262-L320)
+- [McpServiceExtensions.cs:20-55](file://src/OpenClaw.Gateway/Mcp/McpServiceExtensions.cs#L20-L55)
 
 ## 核心组件
-- 网关 MCP 服务注册与运行时桥接：通过扩展方法注册 MCP 服务器并注入运行时，使工具/资源/提示可访问内部系统。
-- MCP 工具实现：以“openclaw.*”命名空间导出，封装对内部 API 的调用，返回序列化后的结果。
-- MCP 资源实现：基于 URI 模板的只读资源，返回聚合状态、会话详情等 JSON。
-- MCP 提示实现：纯模板提示，指导模型使用资源与工具。
-- 工作区 MCP 配置与热重载：支持内存存储与工作区文件两种来源，无重启热更新。
-- 代理侧 MCP 工具发现与桥接：从远端 MCP 服务器拉取工具清单，生成本地工具包装器。
-- 客户端模型与 HTTP/WebSocket 客户端：定义 JSON-RPC 消息模型与连接生命周期。
+- 客户端模型与序列化
+  - 定义了 JSON-RPC 2.0 封装、初始化请求/结果、工具/资源/提示相关模型，以及源生成上下文以提升序列化性能与安全性。
+- 网关 MCP 服务
+  - 通过官方 MCP AspNetCore 扩展注册工具、资源、提示，并注入运行时桥接对象。
+- 工具/资源/提示实现
+  - 工具类以“openclaw.*”命名兼容现有客户端；资源基于 URI 模板；提示为纯模板消息集合。
+- 工作区热重载
+  - 监听内存存储或工作区文件变更，动态加载/卸载 MCP 服务器并热更新工具集。
+- 代理适配器
+  - 将 MCP 工具调用包装为 ITool 接口；结构化记忆 MCP 提供者通过 STDIO 传输连接外部 MCP 服务器。
 
 章节来源
-- [OpenClawMcpTools.cs:1-319](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpTools.cs#L1-L319)
-- [OpenClawMcpResources.cs:1-116](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpResources.cs#L1-L116)
-- [OpenClawMcpPrompts.cs:1-71](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpPrompts.cs#L1-L71)
-- [McpWorkspaceWatcherService.cs:1-221](file://src/OpenClaw.Gateway/McpWorkspaceWatcherService.cs#L1-L221)
-- [McpServerToolRegistry.cs:1-369](file://src/OpenClaw.Agent/Plugins/McpServerToolRegistry.cs#L1-L369)
 - [McpModels.cs:1-187](file://src/OpenClaw.Client/McpModels.cs#L1-L187)
+- [McpJsonContext.cs:1-39](file://src/OpenClaw.Client/McpJsonContext.cs#L1-L39)
+- [OpenClawMcpTools.cs:14-319](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpTools.cs#L14-L319)
+- [OpenClawMcpResources.cs:9-116](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpResources.cs#L9-L116)
+- [OpenClawMcpPrompts.cs:12-71](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpPrompts.cs#L12-L71)
+- [McpWorkspaceWatcherService.cs:20-221](file://src/OpenClaw.Gateway/McpWorkspaceWatcherService.cs#L20-L221)
+- [McpNativeTool.cs:9-118](file://src/OpenClaw.Agent/Tools/McpNativeTool.cs#L9-L118)
+- [FractalMemoryMcpProvider.cs:13-330](file://src/OpenClaw.Agent/Memory/FractalMemoryMcpProvider.cs#L13-L330)
 
 ## 架构总览
-下图展示 MCP 服务器端与客户端之间的交互路径，以及与 OpenClaw 内部系统的集成点。
+下图展示客户端与网关之间的 MCP 交互路径，以及工作区热重载如何影响工具注册。
 
 ```mermaid
 sequenceDiagram
-participant Client as "MCP 客户端"
-participant HTTP as "OpenClawHttpClient"
-participant WS as "OpenClawLiveClient / OpenClawWebSocketClient"
-participant Server as "MCP 服务器端"
-participant Tools as "OpenClawMcpTools"
-participant Resources as "OpenClawMcpResources"
-participant Prompts as "OpenClawMcpPrompts"
-Client->>HTTP : initialize / tools/list / resources/list
-HTTP-->>Server : JSON-RPC 请求
-Server-->>HTTP : JSON-RPC 响应
-HTTP-->>Client : 初始化结果/工具列表/资源列表
-Client->>WS : 连接 / 发送消息 / 实时流
-WS-->>Server : WebSocket 文本帧
-Server-->>WS : 返回文本/事件
-Client->>Server : 调用工具 / 读取资源 / 获取提示
-Server->>Tools : 解析参数并执行
-Server->>Resources : 解析 URI 并读取
-Server->>Prompts : 组合预定义消息序列
-Tools-->>Server : 序列化结果
-Resources-->>Server : 序列化结果
-Prompts-->>Server : 预设消息数组
-Server-->>Client : JSON-RPC 结果
+participant Client as "客户端<br/>OpenClawHttpClient"
+participant Gateway as "网关<br/>MCP 服务"
+participant Tools as "工具实现<br/>OpenClawMcpTools"
+participant Resources as "资源实现<br/>OpenClawMcpResources"
+participant Prompts as "提示实现<br/>OpenClawMcpPrompts"
+Client->>Gateway : "initialize"
+Gateway-->>Client : "McpInitializeResult"
+Client->>Gateway : "tools/list"
+Gateway-->>Client : "McpToolListResult"
+Client->>Gateway : "resources/list"
+Gateway-->>Client : "McpResourceListResult"
+Client->>Gateway : "prompts/list"
+Gateway-->>Client : "McpPromptListResult"
+Client->>Gateway : "tools/call"
+Gateway->>Tools : "执行 openclaw.* 工具"
+Tools-->>Gateway : "CallToolResult"
+Gateway-->>Client : "CallToolResult"
+Client->>Gateway : "resources/read"
+Gateway->>Resources : "读取 openclaw : //* 资源"
+Resources-->>Gateway : "ReadResourceResult"
+Gateway-->>Client : "ReadResourceResult"
+Client->>Gateway : "prompts/get"
+Gateway->>Prompts : "生成模板消息"
+Prompts-->>Gateway : "GetPromptResult"
+Gateway-->>Client : "GetPromptResult"
 ```
 
 图表来源
-- [OpenClawHttpClient.cs:254-280](file://src/OpenClaw.Client/OpenClawHttpClient.cs#L254-L280)
-- [OpenClawLiveClient.cs:1-303](file://src/OpenClaw.Client/OpenClawLiveClient.cs#L1-L303)
-- [OpenClawWebSocketClient.cs:1-248](file://src/OpenClaw.Client/OpenClawWebSocketClient.cs#L1-L248)
-- [OpenClawMcpTools.cs:1-319](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpTools.cs#L1-L319)
-- [OpenClawMcpResources.cs:1-116](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpResources.cs#L1-L116)
-- [OpenClawMcpPrompts.cs:1-71](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpPrompts.cs#L1-L71)
+- [OpenClawHttpClient.cs:262-320](file://src/OpenClaw.Client/OpenClawHttpClient.cs#L262-L320)
+- [OpenClawMcpTools.cs:21-319](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpTools.cs#L21-L319)
+- [OpenClawMcpResources.cs:16-115](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpResources.cs#L16-L115)
+- [OpenClawMcpPrompts.cs:15-71](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpPrompts.cs#L15-L71)
 
 ## 详细组件分析
 
-### 网关 MCP 服务注册与运行时桥接
-- 通过扩展方法注册 MCP 服务器，设置 ServerInfo、注入 IntegrationApiFacade，使工具/资源/提示可访问内部状态与 API。
-- GatewayRuntimeHolder 与 McpWatcherHolder 在运行时构建后填充，确保请求处理前可用。
+### 客户端：MCP 模型与 JSON 序列化
+- 模型设计
+  - JSON-RPC 2.0 封装用于统一请求/响应结构。
+  - 初始化请求包含协议版本、客户端能力与信息；初始化结果包含协议版本、能力与服务器信息。
+  - 工具/资源/提示相关模型分别描述列表与读取/调用参数。
+- 源生成上下文
+  - 使用 [JsonSerializable] 对所有 MCP 模型进行源生成，启用驼峰命名、忽略空值、禁用缩进，提升性能与一致性。
 
 ```mermaid
 classDiagram
-class McpServiceExtensions {
-+AddOpenClawMcpServices(services, startup)
+class McpJsonRpcRequest {
++string Jsonrpc
++string Id
++string Method
++JsonElement Params
 }
-class GatewayRuntimeHolder {
-+Runtime : GatewayAppRuntime
+class McpInitializeRequest {
++string ProtocolVersion
++McpClientCapabilities Capabilities
++McpClientInfo ClientInfo
 }
-class McpWatcherHolder {
-+Watcher : McpWorkspaceWatcherService
+class McpInitializeResult {
++string ProtocolVersion
++McpCapabilities Capabilities
++McpServerInfo ServerInfo
 }
-McpServiceExtensions --> GatewayRuntimeHolder : "创建并注入"
-McpServiceExtensions --> McpWatcherHolder : "创建并注入"
-```
-
-图表来源
-- [McpServiceExtensions.cs:1-36](file://src/OpenClaw.Gateway/Mcp/McpServiceExtensions.cs#L1-L36)
-- [GatewayRuntimeHolder.cs:1-21](file://src/OpenClaw.Gateway/Mcp/GatewayRuntimeHolder.cs#L1-L21)
-- [McpWatcherHolder.cs:1-11](file://src/OpenClaw.Gateway/Mcp/McpWatcherHolder.cs#L1-L11)
-
-章节来源
-- [McpServiceExtensions.cs:1-36](file://src/OpenClaw.Gateway/Mcp/McpServiceExtensions.cs#L1-L36)
-- [GatewayRuntimeHolder.cs:1-21](file://src/OpenClaw.Gateway/Mcp/GatewayRuntimeHolder.cs#L1-L21)
-- [McpWatcherHolder.cs:1-11](file://src/OpenClaw.Gateway/Mcp/McpWatcherHolder.cs#L1-L11)
-
-### MCP 工具实现（OpenClawMcpTools）
-- 工具命名：统一以“openclaw.*”前缀，兼容现有客户端。
-- 功能覆盖：仪表盘、状态、审批、审计、提供商、插件、会话、自动化、工作流、消息发送等。
-- 参数与响应：每个工具方法均声明参数描述，返回序列化后的 JSON 字符串，使用 CoreJsonContext 进行序列化。
-
-```mermaid
-classDiagram
-class OpenClawMcpTools {
-+GetDashboard(ct) string
-+GetStatus() string
-+ListApprovals(channelId, senderId) string
-+GetApprovalHistory(limit, channelId, senderId, toolName) string
-+GetProviders(recentTurnsLimit) string
-+GetPlugins() string
-+QueryOperatorAudit(limit, actorId, actionType, targetId) string
-+ListSessions(page, pageSize, search, channelId, senderId, state, tag, fromUtc, toUtc, starred, ct) string
-+GetSession(sessionId, ct) string
-+GetSessionTimeline(sessionId, limit, ct) string
-+SearchSessions(text, limit, channelId, senderId, ct) string
-+GetProfile(actorId, ct) string
-+ListAutomations(ct) string
-+GetAutomation(automationId, ct) string
-+ListWorkflows() string
-+RunWorkflow(workflowId, input, payloadJson, channelId, senderId, sessionId, ct) string
-+GetWorkflowRun(workflowId, runId, ct) string
-+RespondWorkflow(workflowId, runId, portId, approved, comment, actorId, payloadJson, ct) string
-+QueryRuntimeEvents(limit, sessionId, channelId, senderId, component, action) string
-+SendMessage(text, channelId, senderId, sessionId, messageId, replyToMessageId, ct) string
+class McpToolListResult {
++IReadOnlyList~McpToolDefinition~ Tools
 }
+class McpResourceListResult {
++IReadOnlyList~McpResourceDefinition~ Resources
+}
+class McpPromptListResult {
++IReadOnlyList~McpPromptDefinition~ Prompts
+}
+class McpCallToolRequest {
++string Name
++JsonElement Arguments
+}
+class McpReadResourceRequest {
++string Uri
+}
+class McpGetPromptRequest {
++string Name
++Dictionary~string,string~ Arguments
+}
+McpInitializeRequest --> McpClientCapabilities
+McpInitializeResult --> McpCapabilities
+McpCapabilities --> McpToolCapabilities
+McpCapabilities --> McpResourceCapabilities
+McpCapabilities --> McpPromptCapabilities
+McpInitializeResult --> McpServerInfo
+McpJsonRpcRequest --> McpCallToolRequest
+McpJsonRpcRequest --> McpReadResourceRequest
+McpJsonRpcRequest --> McpGetPromptRequest
 ```
 
 图表来源
-- [OpenClawMcpTools.cs:1-319](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpTools.cs#L1-L319)
+- [McpModels.cs:5-187](file://src/OpenClaw.Client/McpModels.cs#L5-L187)
+- [McpJsonContext.cs:5-38](file://src/OpenClaw.Client/McpJsonContext.cs#L5-L38)
 
 章节来源
-- [OpenClawMcpTools.cs:1-319](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpTools.cs#L1-L319)
+- [McpModels.cs:1-187](file://src/OpenClaw.Client/McpModels.cs#L1-L187)
+- [McpJsonContext.cs:1-39](file://src/OpenClaw.Client/McpJsonContext.cs#L1-L39)
 
-### MCP 资源实现（OpenClawMcpResources）
-- 资源 URI 模板：如 openclaw://status、openclaw://dashboard、openclaw://sessions/{sessionId} 等。
-- 行为：只读资源，按模板解析路径参数，返回聚合状态、会话详情、时间线、用户画像、自动化等 JSON。
-
-```mermaid
-flowchart TD
-A["收到资源请求"] --> B{"URI 是否匹配模板?"}
-B --> |是| C["解析路径参数"]
-C --> D["调用内部 Facade 获取数据"]
-D --> E["序列化为 JSON 字符串"]
-E --> F["返回资源内容"]
-B --> |否| G["抛出未找到异常"]
-```
-
-图表来源
-- [OpenClawMcpResources.cs:1-116](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpResources.cs#L1-L116)
-
-章节来源
-- [OpenClawMcpResources.cs:1-116](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpResources.cs#L1-L116)
-
-### MCP 提示实现（OpenClawMcpPrompts）
-- 提示类型：纯模板，不进行 I/O，仅生成预设消息序列。
-- 示例：openclaw_operator_summary、openclaw_session_summary，引导模型使用资源与工具。
-
-```mermaid
-sequenceDiagram
-participant Model as "模型"
-participant Prompt as "OpenClawMcpPrompts"
-Model->>Prompt : 获取提示名称与参数
-Prompt-->>Model : 返回预设消息数组含角色与文本
-```
-
-图表来源
-- [OpenClawMcpPrompts.cs:1-71](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpPrompts.cs#L1-L71)
-
-章节来源
-- [OpenClawMcpPrompts.cs:1-71](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpPrompts.cs#L1-L71)
-
-### 工作区 MCP 配置与热重载（McpConfigStore / McpWorkspaceWatcherService）
-- 配置来源优先级：内存存储（McpConfigStore）> 工作区文件（.kingcrab/mcp.json）。
-- 热重载机制：带缓冲通道的后台循环，合并快速事件，执行重载并应用到代理工具表。
-
-```mermaid
-flowchart TD
-A["触发重载"] --> B["读取内存存储配置"]
-B --> |有| C["使用内存配置"]
-B --> |无| D["读取工作区文件"]
-D --> E{"配置有效?"}
-C --> F["调用 Registry.ReloadWorkspaceServersAsync"]
-E --> |是| F
-E --> |否| G["返回空字典/移除所有工具"]
-F --> H["应用到 Agent 运行时"]
-H --> I["记录日志并完成"]
-```
-
-图表来源
-- [McpConfigStore.cs:1-110](file://src/OpenClaw.Gateway/Mcp/McpConfigStore.cs#L1-L110)
-- [McpWorkspaceWatcherService.cs:1-221](file://src/OpenClaw.Gateway/McpWorkspaceWatcherService.cs#L1-L221)
-
-章节来源
-- [McpConfigStore.cs:1-110](file://src/OpenClaw.Gateway/Mcp/McpConfigStore.cs#L1-L110)
-- [McpWorkspaceWatcherService.cs:1-221](file://src/OpenClaw.Gateway/McpWorkspaceWatcherService.cs#L1-L221)
-
-### 代理侧 MCP 工具发现与桥接（McpServerToolRegistry / McpNativeTool）
-- 发现流程：遍历配置的 MCP 服务器，建立传输（stdio/http），初始化客户端，列出工具。
-- 命名与描述：根据 serverId 与前缀规则生成本地工具名，拼接描述信息。
-- 包装与注册：将远端工具包装为本地 ITool，注册到原生工具表。
-
-```mermaid
-sequenceDiagram
-participant Agent as "Agent 运行时"
-participant Registry as "McpServerToolRegistry"
-participant Client as "McpClient"
-participant Native as "McpNativeTool"
-participant NativeReg as "NativePluginRegistry"
-Agent->>Registry : RegisterToolsAsync()
-Registry->>Registry : 加载配置与并发控制
-Registry->>Client : 创建传输并初始化
-Client-->>Registry : 工具清单
-Registry->>Native : 为每个工具创建包装器
-Native-->>Registry : 本地工具实例
-Registry->>NativeReg : 注册外部工具
-NativeReg-->>Agent : 可用工具表更新
-```
-
-图表来源
-- [McpServerToolRegistry.cs:1-369](file://src/OpenClaw.Agent/Plugins/McpServerToolRegistry.cs#L1-L369)
-- [McpNativeTool.cs:1-36](file://src/OpenClaw.Agent/Tools/McpNativeTool.cs#L1-L36)
-
-章节来源
-- [McpServerToolRegistry.cs:1-369](file://src/OpenClaw.Agent/Plugins/McpServerToolRegistry.cs#L1-L369)
-- [McpNativeTool.cs:1-36](file://src/OpenClaw.Agent/Tools/McpNativeTool.cs#L1-L36)
-
-### 客户端模型与消息处理（McpModels / OpenClawHttpClient / WebSocket 客户端）
-- JSON-RPC 模型：定义 initialize、tools/list、resources/read、prompts/get 等请求/响应结构。
-- HTTP 客户端：封装 JSON-RPC 调用，提供 initialize、list tools/resources/templates、read resource 等方法。
-- WebSocket 客户端：支持实时文本/音频/中断/关闭会话等信封类型，事件驱动接收与错误回调。
+### 客户端：HTTP 客户端与 MCP 方法封装
+- 关键方法
+  - initialize、tools/list、resources/list、resources/templates/list、resources/read、prompts/list、prompts/get、tools/call。
+- 错误处理
+  - 解析 SSE 响应时提取 data 行；对空响应体、错误字段、缺失结果进行显式校验与异常抛出。
+- 使用建议
+  - 在调用前确保已建立授权与会话；对流式响应按行解析并拼接文本。
 
 ```mermaid
 sequenceDiagram
 participant Client as "OpenClawHttpClient"
-participant RPC as "MCP 服务器"
-Client->>RPC : initialize
-RPC-->>Client : 初始化结果
-Client->>RPC : tools/list
-RPC-->>Client : 工具列表
-Client->>RPC : resources/read(uri)
-RPC-->>Client : 资源内容
+participant Net as "HTTP 客户端"
+Client->>Net : "POST /mcp initialize"
+Net-->>Client : "JSON 或 SSE"
+alt SSE
+Client->>Client : "提取 data 行"
+end
+Client->>Client : "反序列化为 McpInitializeResult"
+Client-->>Client : "返回结果"
 ```
 
 图表来源
-- [McpModels.cs:1-187](file://src/OpenClaw.Client/McpModels.cs#L1-L187)
-- [OpenClawHttpClient.cs:254-280](file://src/OpenClaw.Client/OpenClawHttpClient.cs#L254-L280)
-- [OpenClawLiveClient.cs:1-303](file://src/OpenClaw.Client/OpenClawLiveClient.cs#L1-L303)
-- [OpenClawWebSocketClient.cs:1-248](file://src/OpenClaw.Client/OpenClawWebSocketClient.cs#L1-L248)
+- [OpenClawHttpClient.cs:262-263](file://src/OpenClaw.Client/OpenClawHttpClient.cs#L262-L263)
+- [OpenClawHttpClient.cs:1308-1325](file://src/OpenClaw.Client/OpenClawHttpClient.cs#L1308-L1325)
 
 章节来源
-- [McpModels.cs:1-187](file://src/OpenClaw.Client/McpModels.cs#L1-L187)
-- [OpenClawHttpClient.cs:254-280](file://src/OpenClaw.Client/OpenClawHttpClient.cs#L254-L280)
-- [OpenClawLiveClient.cs:1-303](file://src/OpenClaw.Client/OpenClawLiveClient.cs#L1-L303)
-- [OpenClawWebSocketClient.cs:1-248](file://src/OpenClaw.Client/OpenClawWebSocketClient.cs#L1-L248)
+- [OpenClawHttpClient.cs:262-320](file://src/OpenClaw.Client/OpenClawHttpClient.cs#L262-L320)
+- [OpenClawHttpClient.cs:1308-1325](file://src/OpenClaw.Client/OpenClawHttpClient.cs#L1308-L1325)
 
-### 内存 MCP 提供者（FractalMemoryMcpProvider）
-- 功能：封装对 Fractal Memory MCP 工具的调用，支持搜索、打开、最近条目、导出、手柄创建、校验与索引刷新。
-- 错误处理：捕获异常并转换为友好的错误消息，区分超时、不可用、参数错误等场景。
+### 网关：MCP 服务注册与传输
+- 服务注册
+  - 通过 AddMcpServer 注册 MCP 服务器，设置 ServerInfo；配置 HTTP 无状态传输；注册工具/资源/提示类型。
+- 运行时桥接
+  - 通过 GatewayRuntimeHolder 将网关运行时注入到工具/资源/提示实现中，实现业务能力访问。
+- 鉴权与限流
+  - 在 /mcp 路径上强制令牌鉴权与速率限制，复用网关通用策略。
+
+```mermaid
+graph TB
+A["McpServiceExtensions.cs<br/>AddOpenClawMcpServices"] --> B["MCP 服务器<br/>AddMcpServer"]
+B --> C["工具注册<br/>WithTools<OpenClawMcpTools>()"]
+B --> D["资源注册<br/>WithResources<OpenClawMcpResources>()"]
+B --> E["提示注册<br/>WithPrompts<OpenClawMcpPrompts>()"]
+B --> F["HTTP 传输<br/>WithHttpTransport(Stateless=true)"]
+G["GatewayRuntimeHolder.cs<br/>Runtime 注入"] --> C
+G --> D
+G --> E
+H["UseOpenClawMcpAuth"] --> B
+```
+
+图表来源
+- [McpServiceExtensions.cs:20-91](file://src/OpenClaw.Gateway/Mcp/McpServiceExtensions.cs#L20-L91)
+- [GatewayRuntimeHolder.cs:10-20](file://src/OpenClaw.Gateway/Mcp/GatewayRuntimeHolder.cs#L10-L20)
+
+章节来源
+- [McpServiceExtensions.cs:20-91](file://src/OpenClaw.Gateway/Mcp/McpServiceExtensions.cs#L20-L91)
+- [GatewayRuntimeHolder.cs:10-20](file://src/OpenClaw.Gateway/Mcp/GatewayRuntimeHolder.cs#L10-L20)
+
+### 网关：工具、资源与提示实现
+- 工具实现
+  - 以特性标注暴露工具方法，名称遵循 openclaw.* 兼容约定；参数通过 JSON 序列化为字符串返回。
+- 资源实现
+  - 以 URI 模板定义资源，支持路径参数；返回 JSON 序列化结果。
+- 提示实现
+  - 以纯模板方式生成用户消息，指导模型使用资源与工具。
+
+```mermaid
+classDiagram
+class OpenClawMcpTools {
++GetDashboard()
++GetStatus()
++ListApprovals()
++GetApprovalHistory()
++GetProviders()
++GetPlugins()
++QueryOperatorAudit()
++ListSessions()
++GetSession()
++GetSessionTimeline()
++SearchSessions()
++GetProfile()
++ListAutomations()
++GetAutomation()
++ListWorkflows()
++RunWorkflow()
++GetWorkflowRun()
++RespondWorkflow()
++QueryRuntimeEvents()
++SendMessage()
+}
+class OpenClawMcpResources {
++GetStatus()
++GetDashboard()
++GetApprovals()
++GetApprovalHistory()
++GetProviders()
++GetPlugins()
++GetOperatorAudit()
++GetSession()
++GetSessionTimeline()
++GetProfile()
++GetAutomations()
++GetAutomation()
+}
+class OpenClawMcpPrompts {
++OperatorSummary()
++SessionSummary()
+}
+```
+
+图表来源
+- [OpenClawMcpTools.cs:14-319](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpTools.cs#L14-L319)
+- [OpenClawMcpResources.cs:9-116](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpResources.cs#L9-L116)
+- [OpenClawMcpPrompts.cs:12-71](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpPrompts.cs#L12-L71)
+
+章节来源
+- [OpenClawMcpTools.cs:14-319](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpTools.cs#L14-L319)
+- [OpenClawMcpResources.cs:9-116](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpResources.cs#L9-L116)
+- [OpenClawMcpPrompts.cs:12-71](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpPrompts.cs#L12-L71)
+
+### 工作区热重载与配置持久化
+- 配置来源优先级
+  - 内存存储配置（由管理 API 写入，容器内可靠）优先于工作区文件。
+- 热重载流程
+  - 监听变更事件，合并配置后调用注册表重载；计算新增/移除工具，通知代理运行时应用变更。
+- 最佳实践
+  - 通过内存存储写入配置，避免文件系统争用；在容器环境中依赖内存存储以保证一致性。
 
 ```mermaid
 flowchart TD
-A["调用内存工具"] --> B{"工具名是否受支持?"}
-B --> |是| C["构造参数字典"]
-C --> D["调用 CallToolAsync"]
-D --> E{"成功?"}
-E --> |是| F["解析结构化/文本结果"]
-E --> |否| G["返回失败与错误信息"]
-B --> |否| H["返回不支持错误"]
+Start(["开始"]) --> CheckMem["检查内存存储配置"]
+CheckMem --> MemHas["有配置？"]
+MemHas --> |是| UseMem["使用内存配置"]
+MemHas --> |否| CheckWS["检查工作区文件"]
+CheckWS --> WSExists["文件存在？"]
+WSExists --> |是| ReadWS["读取工作区配置"]
+WSExists --> |否| Empty["返回空配置"]
+UseMem --> Merge["合并配置"]
+ReadWS --> Merge
+Merge --> Registry["调用注册表重载"]
+Registry --> Diff{"新增/移除工具？"}
+Diff --> |否| LogNone["记录无变更"]
+Diff --> |是| Apply["通知代理应用变更"]
+Apply --> Done(["完成"])
+LogNone --> Done
+Empty --> Done
 ```
 
 图表来源
-- [FractalMemoryMcpProvider.cs:1-200](file://src/OpenClaw.Agent/Memory/FractalMemoryMcpProvider.cs#L1-L200)
+- [McpWorkspaceWatcherService.cs:105-151](file://src/OpenClaw.Gateway/McpWorkspaceWatcherService.cs#L105-L151)
+- [McpConfigStore.cs:53-89](file://src/OpenClaw.Gateway/Mcp/McpConfigStore.cs#L53-L89)
 
 章节来源
-- [FractalMemoryMcpProvider.cs:1-200](file://src/OpenClaw.Agent/Memory/FractalMemoryMcpProvider.cs#L1-L200)
+- [McpWorkspaceWatcherService.cs:20-221](file://src/OpenClaw.Gateway/McpWorkspaceWatcherService.cs#L20-L221)
+- [McpConfigStore.cs:11-110](file://src/OpenClaw.Gateway/Mcp/McpConfigStore.cs#L11-L110)
+
+### 代理：MCP 工具适配器与结构化记忆提供者
+- MCP 工具适配器
+  - 将 MCP 工具调用封装为 ITool.ExecuteAsync，解析参数 JSON，调用远程工具，格式化返回内容。
+- 结构化记忆 MCP 提供者
+  - 通过 STDIO 传输连接外部 MCP 服务器，提供搜索、打开、最近条目、导出、手柄创建、验证与索引刷新等能力；内置超时与异常映射。
+
+```mermaid
+sequenceDiagram
+participant Agent as "代理工具适配器<br/>McpNativeTool"
+participant Client as "MCP 客户端"
+participant Server as "远端 MCP 服务器"
+Agent->>Client : "CallToolAsync(remoteName, args)"
+Client->>Server : "JSON-RPC 工具调用"
+Server-->>Client : "CallToolResult"
+Client-->>Agent : "CallToolResult"
+Agent->>Agent : "格式化内容/错误标记"
+Agent-->>Agent : "返回字符串结果"
+```
+
+图表来源
+- [McpNativeTool.cs:20-70](file://src/OpenClaw.Agent/Tools/McpNativeTool.cs#L20-L70)
+
+章节来源
+- [McpNativeTool.cs:9-118](file://src/OpenClaw.Agent/Tools/McpNativeTool.cs#L9-L118)
+- [FractalMemoryMcpProvider.cs:222-277](file://src/OpenClaw.Agent/Memory/FractalMemoryMcpProvider.cs#L222-L277)
 
 ## 依赖关系分析
-- 网关侧依赖：Microsoft.Extensions.DependencyInjection、ModelContextProtocol.AspNetCore、OpenClaw.Core.Abstractions/Models。
-- 代理侧依赖：ModelContextProtocol.Client、OpenClaw.Core.Abstractions、安全策略（SecretResolver）。
-- 客户端依赖：System.Net.WebSockets、System.Text.Json、OpenClaw.Core.Models。
+- 客户端依赖
+  - OpenClawHttpClient 依赖 MCP 模型与源生成上下文；内部封装 JSON-RPC 请求/响应与 SSE 解析。
+- 网关依赖
+  - MCP 服务扩展依赖运行时持有者与集成门面；工具/资源/提示实现依赖运行时提供的业务能力。
+- 工作区依赖
+  - 工作区监听服务依赖注册表与代理运行时；配置存储提供原子写入与解析。
+- 代理依赖
+  - MCP 工具适配器依赖 MCP 客户端；结构化记忆提供者依赖 STDIO 传输与外部 MCP 服务器。
 
 ```mermaid
 graph LR
-Agent["McpServerToolRegistry"] --> CoreAbst["OpenClaw.Core.Abstractions"]
-Agent --> Sec["SecretResolver"]
-Agent --> MCPClient["ModelContextProtocol.Client"]
-GatewaySvc["McpServiceExtensions"] --> DI["Microsoft.Extensions.DependencyInjection"]
-GatewaySvc --> MCPASP["ModelContextProtocol.AspNetCore"]
-GatewaySvc --> CoreModels["OpenClaw.Core.Models"]
-Client["OpenClawHttpClient"] --> Json["System.Text.Json"]
-Client --> NetWS["System.Net.WebSockets"]
+HttpClient["OpenClawHttpClient"] --> Models["McpModels.cs"]
+HttpClient --> Context["McpJsonContext.cs"]
+ServiceExt["McpServiceExtensions.cs"] --> RuntimeHolder["GatewayRuntimeHolder.cs"]
+ServiceExt --> ToolsImpl["OpenClawMcpTools.cs"]
+ServiceExt --> ResourcesImpl["OpenClawMcpResources.cs"]
+ServiceExt --> PromptsImpl["OpenClawMcpPrompts.cs"]
+Watcher["McpWorkspaceWatcherService.cs"] --> ConfigStore["McpConfigStore.cs"]
+Watcher --> Registry["McpServerToolRegistry"]
+Watcher --> AgentRuntime["IAgentRuntime"]
+AgentTool["McpNativeTool.cs"] --> McpClient["ModelContextProtocol.Client"]
+FractalMem["FractalMemoryMcpProvider.cs"] --> McpClient
 ```
 
 图表来源
-- [McpServerToolRegistry.cs:1-369](file://src/OpenClaw.Agent/Plugins/McpServerToolRegistry.cs#L1-L369)
-- [McpServiceExtensions.cs:1-36](file://src/OpenClaw.Gateway/Mcp/McpServiceExtensions.cs#L1-L36)
-- [OpenClawHttpClient.cs:254-280](file://src/OpenClaw.Client/OpenClawHttpClient.cs#L254-L280)
+- [OpenClawHttpClient.cs:262-320](file://src/OpenClaw.Client/OpenClawHttpClient.cs#L262-L320)
+- [McpModels.cs:1-187](file://src/OpenClaw.Client/McpModels.cs#L1-L187)
+- [McpJsonContext.cs:1-39](file://src/OpenClaw.Client/McpJsonContext.cs#L1-L39)
+- [McpServiceExtensions.cs:20-55](file://src/OpenClaw.Gateway/Mcp/McpServiceExtensions.cs#L20-L55)
+- [GatewayRuntimeHolder.cs:10-20](file://src/OpenClaw.Gateway/Mcp/GatewayRuntimeHolder.cs#L10-L20)
+- [OpenClawMcpTools.cs:14-319](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpTools.cs#L14-L319)
+- [OpenClawMcpResources.cs:9-116](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpResources.cs#L9-L116)
+- [OpenClawMcpPrompts.cs:12-71](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpPrompts.cs#L12-L71)
+- [McpWorkspaceWatcherService.cs:20-221](file://src/OpenClaw.Gateway/McpWorkspaceWatcherService.cs#L20-L221)
+- [McpConfigStore.cs:11-110](file://src/OpenClaw.Gateway/Mcp/McpConfigStore.cs#L11-L110)
+- [McpNativeTool.cs:9-118](file://src/OpenClaw.Agent/Tools/McpNativeTool.cs#L9-L118)
+- [FractalMemoryMcpProvider.cs:13-330](file://src/OpenClaw.Agent/Memory/FractalMemoryMcpProvider.cs#L13-L330)
 
 章节来源
-- [McpServerToolRegistry.cs:1-369](file://src/OpenClaw.Agent/Plugins/McpServerToolRegistry.cs#L1-L369)
-- [McpServiceExtensions.cs:1-36](file://src/OpenClaw.Gateway/Mcp/McpServiceExtensions.cs#L1-L36)
-- [OpenClawHttpClient.cs:254-280](file://src/OpenClaw.Client/OpenClawHttpClient.cs#L254-L280)
+- [OpenClawHttpClient.cs:262-320](file://src/OpenClaw.Client/OpenClawHttpClient.cs#L262-L320)
+- [McpServiceExtensions.cs:20-55](file://src/OpenClaw.Gateway/Mcp/McpServiceExtensions.cs#L20-L55)
+- [McpWorkspaceWatcherService.cs:20-221](file://src/OpenClaw.Gateway/McpWorkspaceWatcherService.cs#L20-L221)
 
-## 性能考虑
-- 并发与锁：工具注册使用信号量与互斥保护，避免重复加载与竞态。
-- 超时控制：客户端初始化与工具调用分别设置启动与请求超时，防止阻塞。
-- 缓冲通道：工作区热重载使用带丢弃旧值模式的有界通道，合并频繁变更。
-- 序列化开销：工具/资源返回统一使用 CoreJsonContext，减少反射成本。
-- 连接复用：WebSocket 客户端在连接期间复用套接字，避免频繁握手。
-
-章节来源
-- [McpServerToolRegistry.cs:1-369](file://src/OpenClaw.Agent/Plugins/McpServerToolRegistry.cs#L1-L369)
-- [McpWorkspaceWatcherService.cs:1-221](file://src/OpenClaw.Gateway/McpWorkspaceWatcherService.cs#L1-L221)
-- [OpenClawLiveClient.cs:1-303](file://src/OpenClaw.Client/OpenClawLiveClient.cs#L1-L303)
-- [OpenClawWebSocketClient.cs:1-248](file://src/OpenClaw.Client/OpenClawWebSocketClient.cs#L1-L248)
-
-## 故障排除指南
-- 工具发现失败
-  - 检查 MCP 服务器配置（传输类型、URL/命令、环境变量与头）。
-  - 查看初始化与工具列表请求的超时设置。
-  - 关注日志中关于“空名称工具”“未设置环境变量引用”的错误。
-- 资源读取异常
-  - 确认 URI 模板匹配与路径参数解码。
-  - 检查内部 Facade 查询是否返回空对象，必要时抛出“未找到”异常。
-- 工作区热重载无效
-  - 确认内存存储或工作区文件存在且可解析。
-  - 观察“无工具变更”日志，确认实际配置字典是否为空。
-- 客户端连接问题
-  - WebSocket 客户端需在连接后发送信封；检查授权头与消息大小限制。
-  - 实时客户端支持中断与关闭会话，注意连接状态判断。
-- 内存 MCP 提供者
-  - 关注可用性状态与错误消息；检查 Fractal 配置与命令可用性。
+## 性能考量
+- 源生成序列化
+  - 使用 [JsonSerializable] 与源生成上下文，减少反射开销，提升序列化/反序列化性能与内存占用。
+- 无状态 HTTP 传输
+  - 网关采用 HTTP 无状态传输，降低连接管理复杂度，便于横向扩展。
+- 流式响应解析
+  - 客户端对 SSE 响应按行解析，避免一次性缓冲大块数据，提高实时性与内存效率。
+- 工作区热重载去抖
+  - 使用有界通道（丢弃最旧）合并快速文件事件，减少重复重载带来的 CPU 与 IO 压力。
 
 章节来源
-- [McpServerToolRegistry.cs:1-369](file://src/OpenClaw.Agent/Plugins/McpServerToolRegistry.cs#L1-L369)
-- [OpenClawMcpResources.cs:1-116](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpResources.cs#L1-L116)
-- [McpWorkspaceWatcherService.cs:1-221](file://src/OpenClaw.Gateway/McpWorkspaceWatcherService.cs#L1-L221)
-- [OpenClawLiveClient.cs:1-303](file://src/OpenClaw.Client/OpenClawLiveClient.cs#L1-L303)
-- [OpenClawWebSocketClient.cs:1-248](file://src/OpenClaw.Client/OpenClawWebSocketClient.cs#L1-L248)
-- [FractalMemoryMcpProvider.cs:1-200](file://src/OpenClaw.Agent/Memory/FractalMemoryMcpProvider.cs#L1-L200)
+- [McpJsonContext.cs:34-38](file://src/OpenClaw.Client/McpJsonContext.cs#L34-L38)
+- [McpServiceExtensions.cs:40-43](file://src/OpenClaw.Gateway/Mcp/McpServiceExtensions.cs#L40-L43)
+- [OpenClawHttpClient.cs:214-260](file://src/OpenClaw.Client/OpenClawHttpClient.cs#L214-L260)
+- [McpWorkspaceWatcherService.cs:31-40](file://src/OpenClaw.Gateway/McpWorkspaceWatcherService.cs#L31-L40)
+
+## 故障排查指南
+- 客户端错误
+  - 空响应体、错误字段、缺少结果：在发送与解析阶段进行显式校验并抛出异常，便于定位问题。
+  - SSE 解析失败：检查 data 行是否存在与 JSON 可解析性。
+- 网关鉴权与限流
+  - /mcp 路径未通过令牌鉴权或触发速率限制时，直接返回 401/429，需检查请求头与 IP 限流配置。
+- 工作区配置
+  - 内存存储配置缺失或解析失败时，回退到工作区文件；若两者均不可用则移除所有工作区服务器。
+- 代理 MCP 工具
+  - 参数 JSON 非法、调用超时、外部服务器不可用等均有明确异常映射与日志记录，便于快速诊断。
+
+章节来源
+- [OpenClawHttpClient.cs:1297-1306](file://src/OpenClaw.Client/OpenClawHttpClient.cs#L1297-L1306)
+- [OpenClawHttpClient.cs:1308-1325](file://src/OpenClaw.Client/OpenClawHttpClient.cs#L1308-L1325)
+- [McpServiceExtensions.cs:66-88](file://src/OpenClaw.Gateway/Mcp/McpServiceExtensions.cs#L66-L88)
+- [McpWorkspaceWatcherService.cs:109-129](file://src/OpenClaw.Gateway/McpWorkspaceWatcherService.cs#L109-L129)
+- [McpNativeTool.cs:58-70](file://src/OpenClaw.Agent/Tools/McpNativeTool.cs#L58-L70)
+- [FractalMemoryMcpProvider.cs:239-277](file://src/OpenClaw.Agent/Memory/FractalMemoryMcpProvider.cs#L239-L277)
 
 ## 结论
-OpenClaw.NET 的 MCP 实现通过“网关侧服务端 + 代理侧客户端”的双层架构，实现了对内部系统能力的标准化暴露与外部工具/资源/提示的无缝集成。其设计强调可配置、可热重载、可观测与健壮的错误处理，适合在复杂生产环境中稳定运行。
+OpenClaw 对 MCP 的实现遵循官方协议与最佳实践：客户端以源生成上下文提升性能，网关通过特性注册工具/资源/提示并注入运行时，工作区热重载保障动态扩展，代理适配器与结构化记忆提供者打通外部 MCP 服务器。整体方案具备良好的可维护性、可观测性与扩展性。
 
 ## 附录
-
-### MCP 端点一览（工具/资源/提示）
-- 工具（openclaw.*）
-  - openclaw.get_dashboard：获取聚合仪表盘快照。
-  - openclaw.get_status：获取网关运行状态。
-  - openclaw.list_approvals：列出待审批项（可选过滤）。
-  - openclaw.get_approval_history：获取审批历史（可选过滤）。
-  - openclaw.get_providers：获取提供商路由/用量/策略/近期轮次。
-  - openclaw.get_plugins：获取插件健康列表。
-  - openclaw.query_operator_audit：查询操作员审计（可选过滤）。
-  - openclaw.list_sessions / openclaw.get_session / openclaw.get_session_timeline / openclaw.search_sessions：会话相关查询与时间线。
-  - openclaw.get_profile：按 actorId 获取用户画像。
-  - openclaw.list_automations / openclaw.get_automation：自动化清单与详情。
-  - openclaw.list_workflows / openclaw.run_workflow / openclaw.get_workflow_run / openclaw.respond_workflow：工作流编排。
-  - openclaw.query_runtime_events：查询运行时事件（可选过滤）。
-  - openclaw.send_message：入站消息队列。
-- 资源（openclaw://...）
-  - openclaw://status、openclaw://dashboard、openclaw://approvals、openclaw://providers、openclaw://plugins、openclaw://operator-audit。
-  - openclaw://sessions/{sessionId}、openclaw://sessions/{sessionId}/timeline。
-  - openclaw://profiles/{actorId}。
-  - openclaw://automations、openclaw://automations/{automationId}。
-- 提示（openclaw_operator_summary、openclaw_session_summary）
-
-章节来源
-- [OpenClawMcpTools.cs:1-319](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpTools.cs#L1-L319)
-- [OpenClawMcpResources.cs:1-116](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpResources.cs#L1-L116)
-- [OpenClawMcpPrompts.cs:1-71](file://src/OpenClaw.Gateway/Mcp/OpenClawMcpPrompts.cs#L1-L71)
-
-### MCP 客户端集成示例（步骤指引）
-- 初始化与连接
-  - 使用 OpenClawHttpClient 调用 initialize，随后调用 tools/list 与 resources/list 获取可用能力。
-  - 如需实时交互，使用 OpenClawLiveClient 或 OpenClawWebSocketClient 建立 WebSocket 连接。
-- 调用工具
-  - 通过 tools/list 获取工具定义，构造 JSON-RPC 调用，传入参数 JSON。
-- 读取资源
-  - 使用 resources/list 获取资源定义，再调用 resources/read 读取内容。
-- 获取提示
-  - 使用 prompts/list 获取提示定义，再调用 prompts/get 获取消息序列。
-
-章节来源
-- [OpenClawHttpClient.cs:254-280](file://src/OpenClaw.Client/OpenClawHttpClient.cs#L254-L280)
-- [OpenClawLiveClient.cs:1-303](file://src/OpenClaw.Client/OpenClawLiveClient.cs#L1-L303)
-- [OpenClawWebSocketClient.cs:1-248](file://src/OpenClaw.Client/OpenClawWebSocketClient.cs#L1-L248)
-- [McpModels.cs:1-187](file://src/OpenClaw.Client/McpModels.cs#L1-L187)
-
-### 单元测试参考
-- 测试工具注册与执行：验证 HTTP 服务器发现并执行工具的能力。
-- 断言要点：服务器 URL、调用集合、工具注册数量与名称。
-
-章节来源
-- [McpServerToolRegistryTests.cs:1-41](file://src/OpenClaw.Tests/McpServerToolRegistryTests.cs#L1-L41)
+- 协议版本与能力
+  - 客户端初始化请求包含协议版本与客户端能力；初始化结果包含服务器能力与信息，用于协商与能力发现。
+- 安全与合规
+  - /mcp 路径强制令牌鉴权与速率限制；工具调用与资源读取均在受控网关内完成，避免直接暴露后端系统。
+- 最佳实践清单
+  - 使用内存存储持久化工作区 MCP 配置，避免文件争用；
+  - 在容器环境优先依赖内存存储；
+  - 对工具参数进行严格 JSON 校验与类型转换；
+  - 合理设置超时与取消令牌，避免阻塞；
+  - 记录关键错误与异常，便于排障。
