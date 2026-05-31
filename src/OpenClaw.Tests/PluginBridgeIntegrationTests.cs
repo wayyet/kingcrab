@@ -13,7 +13,6 @@ using OpenClaw.Core.Sessions;
 using OpenClaw.Core.Skills;
 using OpenClaw.Gateway.Extensions;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace OpenClaw.Tests;
 
