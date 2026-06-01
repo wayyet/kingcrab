@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol;
 using ModelContextProtocol.Client;
+using ModelContextProtocol.Protocol;
 using OpenClaw.Agent.Tools;
 using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Plugins;
@@ -25,6 +26,10 @@ public sealed class McpServerToolRegistry : IDisposable, IAsyncDisposable
     private bool _loaded;
     private bool _registered;
     private bool _disposed;
+
+    // Workspace-sourced servers (from .kingcrab/mcp.json) — tracked separately so they can be diffed and reloaded.
+    private readonly Dictionary<string, (McpClient Client, List<DiscoveredMcpTool> Tools, McpServerConfig Config)> _workspaceServers
+        = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Creates a registry for configured MCP servers.
@@ -89,18 +94,18 @@ public sealed class McpServerToolRegistry : IDisposable, IAsyncDisposable
         var discoveredTools = new List<DiscoveredMcpTool>();
         var discoveredClients = new List<McpClient>();
 
-        try
+        foreach (var (serverId, serverConfig) in _config.Servers ?? [])
         {
-            foreach (var (serverId, serverConfig) in _config.Servers ?? [])
-            {
-                if (!serverConfig.Enabled)
-                    continue;
+            if (!serverConfig.Enabled)
+                continue;
 
+            McpClient? client = null;
+            try
+            {
                 var transport = CreateTransport(serverId, serverConfig);
                 using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 timeoutCts.CancelAfter(TimeSpan.FromSeconds(serverConfig.StartupTimeoutSeconds));
-                var client = await McpClient.CreateAsync(transport, cancellationToken: timeoutCts.Token);
-                discoveredClients.Add(client);
+                client = await McpClient.CreateAsync(transport, cancellationToken: timeoutCts.Token);
 
                 var displayName = string.IsNullOrWhiteSpace(serverConfig.Name) ? serverId : serverConfig.Name!;
                 var pluginId = $"mcp:{serverId}";
@@ -114,27 +119,29 @@ public sealed class McpServerToolRegistry : IDisposable, IAsyncDisposable
                         new McpNativeTool(client, tool.LocalName, tool.RemoteName, tool.Description, tool.InputSchemaText),
                         displayName));
                 }
-            }
 
-            _clients.AddRange(discoveredClients);
-            _tools.AddRange(discoveredTools);
-            _loaded = true;
-            return _tools;
-        }
-        catch
-        {
-            foreach (var client in discoveredClients)
-            {
-                try
-                {
-                    await DisposeClientAsync(client);
-                }
-                catch
-                {
-                }
+                discoveredClients.Add(client);
             }
-            throw;
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                if (client is not null)
+                    DisposeClient(client);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "MCP server '{ServerId}' failed to connect or load tools and will be skipped. Check the server URL and SSL configuration.",
+                    serverId);
+                if (client is not null)
+                    DisposeClient(client);
+            }
         }
+
+        _clients.AddRange(discoveredClients);
+        _tools.AddRange(discoveredTools);
+        _loaded = true;
+        return _tools;
     }
 
     private async Task<IReadOnlyList<McpToolDescriptor>> LoadToolsFromClientAsync(
@@ -147,10 +154,20 @@ public sealed class McpServerToolRegistry : IDisposable, IAsyncDisposable
     {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(TimeSpan.FromSeconds(config.RequestTimeoutSeconds));
-        var response = await client.ListToolsAsync(cancellationToken: timeoutCts.Token);
+
+        var allTools = new List<Tool>();
+        var listParams = new ListToolsRequestParams();
+        do
+        {
+            var page = await client.ListToolsAsync(listParams, cancellationToken: timeoutCts.Token);
+            allTools.AddRange(page.Tools);
+            var next = page.NextCursor;
+            listParams = new ListToolsRequestParams { Cursor = string.IsNullOrEmpty(next) ? null : next };
+        }
+        while (listParams.Cursor is not null);
 
         var tools = new List<McpToolDescriptor>();
-        foreach (var tool in response)
+        foreach (var tool in allTools)
         {
             var remoteName = tool.Name;
             if (string.IsNullOrWhiteSpace(remoteName))
@@ -160,7 +177,7 @@ public sealed class McpServerToolRegistry : IDisposable, IAsyncDisposable
             var description = !string.IsNullOrWhiteSpace(tool.Description)
                 ? $"{tool.Description} (from MCP server '{displayName}')"
                 : $"MCP tool '{remoteName}' from server '{displayName}'.";
-            var inputSchema = ResolveInputSchemaText(tool.JsonSchema);
+            var inputSchema = ResolveInputSchemaText(tool.InputSchema);
             tools.Add(new McpToolDescriptor(localName, remoteName, description, inputSchema));
         }
 
@@ -175,7 +192,8 @@ public sealed class McpServerToolRegistry : IDisposable, IAsyncDisposable
         if (prefix is null)
             prefix = $"{SanitizePrefixPart(serverId)}.";
 
-        return string.IsNullOrEmpty(prefix) ? remoteName : prefix + remoteName;
+        var sanitizedRemoteName = SanitizeLlmToolNamePart(remoteName);
+        return string.IsNullOrEmpty(prefix) ? sanitizedRemoteName : prefix + sanitizedRemoteName;
     }
 
     private static string SanitizePrefixPart(string value)
@@ -186,13 +204,118 @@ public sealed class McpServerToolRegistry : IDisposable, IAsyncDisposable
         var sb = new StringBuilder(value.Length);
         foreach (var ch in value)
         {
-            if (char.IsLetterOrDigit(ch) || ch is '_' or '-' or '.')
+            if (IsLlmToolNameChar(ch))
                 sb.Append(char.ToLowerInvariant(ch));
+            else if (ch > 0x7F)
+                sb.Append($"_u{(int)ch:x4}");
             else
                 sb.Append('_');
         }
 
         return sb.Length == 0 ? "mcp" : sb.ToString();
+    }
+
+    /// <summary>
+    /// Sanitizes a string so every character satisfies the LLM tool-name pattern <c>^[a-zA-Z0-9_.\-]+$</c>.
+    /// Non-conforming characters (e.g. CJK, spaces) are replaced with <c>_uXXXX</c> (lowercase hex code point).
+    /// </summary>
+    private static string SanitizeLlmToolNamePart(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return value;
+
+        var sb = new StringBuilder(value.Length);
+        foreach (var ch in value)
+        {
+            if (IsLlmToolNameChar(ch))
+                sb.Append(ch);
+            else
+                sb.Append($"_u{(int)ch:x4}");
+        }
+
+        return sb.Length == 0 ? "_" : sb.ToString();
+    }
+
+    private static bool IsLlmToolNameChar(char ch)
+        => (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')
+           || ch is '_' or '-' or '.';
+
+    /// <summary>
+    /// Hot-reloads workspace MCP servers from <paramref name="newServers"/>.
+    /// Diffs against the previously loaded workspace servers: removes servers no longer present,
+    /// adds new ones. Returns the changed tool sets so callers can update the LLM tool list.
+    /// </summary>
+    public async Task<McpWorkspaceReloadResult> ReloadWorkspaceServersAsync(
+        Dictionary<string, McpServerConfig>? newServers,
+        CancellationToken ct)
+    {
+        ThrowIfDisposed();
+        await _loadSemaphore.WaitAsync(ct);
+        try
+        {
+            ThrowIfDisposed();
+            var addedTools = new List<ITool>();
+            var removedNames = new List<string>();
+
+            newServers ??= new Dictionary<string, McpServerConfig>(StringComparer.Ordinal);
+
+            // Remove servers that are gone, disabled, or whose config has changed
+            var toRemove = _workspaceServers.Keys
+                .Where(id =>
+                    !newServers.TryGetValue(id, out var cfg) ||
+                    !cfg.Enabled ||
+                    !IsSameConfig(cfg, _workspaceServers[id].Config))
+                .ToList();
+
+            foreach (var id in toRemove)
+            {
+                var (client, tools, _) = _workspaceServers[id];
+                removedNames.AddRange(tools.Select(t => t.Tool.Name));
+                _workspaceServers.Remove(id);
+                try { DisposeClient(client); } catch { }
+            }
+
+            // Add servers that are new or were just removed due to config change
+            foreach (var (serverId, serverConfig) in newServers)
+            {
+                if (!serverConfig.Enabled || _workspaceServers.ContainsKey(serverId))
+                    continue;
+
+                try
+                {
+                    var transport = CreateTransport(serverId, serverConfig);
+                    using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    timeoutCts.CancelAfter(TimeSpan.FromSeconds(serverConfig.StartupTimeoutSeconds));
+                    var client = await McpClient.CreateAsync(transport, cancellationToken: timeoutCts.Token);
+
+                    var displayName = string.IsNullOrWhiteSpace(serverConfig.Name) ? serverId : serverConfig.Name!;
+                    var pluginId = $"mcp:{serverId}";
+                    var descriptors = await LoadToolsFromClientAsync(
+                        client, serverId, pluginId, displayName, serverConfig, ct);
+
+                    var discovered = descriptors
+                        .Select(d => new DiscoveredMcpTool(
+                            pluginId,
+                            new McpNativeTool(client, d.LocalName, d.RemoteName, d.Description, d.InputSchemaText),
+                            displayName))
+                        .ToList();
+
+                    _workspaceServers[serverId] = (client, discovered, serverConfig);
+                    addedTools.AddRange(discovered.Select(d => d.Tool));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex,
+                        "Workspace MCP: failed to connect to server '{ServerId}', skipping", serverId);
+                }
+            }
+
+            return new McpWorkspaceReloadResult(addedTools, removedNames);
+        }
+        finally
+        {
+            _loadSemaphore.Release();
+        }
     }
 
     private static string ResolveInputSchemaText(JsonElement inputSchema)
@@ -203,10 +326,87 @@ public sealed class McpServerToolRegistry : IDisposable, IAsyncDisposable
         return inputSchema.GetRawText();
     }
 
+    /// <summary>
+    /// Returns true when the connection-relevant fields of two configs are identical.
+    /// Any change to transport/URL/credentials/command forces a reconnect.
+    /// </summary>
+    private static bool IsSameConfig(McpServerConfig a, McpServerConfig b)
+    {
+        if (!string.Equals(a.NormalizeTransport(), b.NormalizeTransport(), StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (!string.Equals(a.Url, b.Url, StringComparison.Ordinal))
+            return false;
+        if (!string.Equals(a.Command, b.Command, StringComparison.Ordinal))
+            return false;
+        if (!string.Equals(a.WorkingDirectory, b.WorkingDirectory, StringComparison.Ordinal))
+            return false;
+        if (!string.Equals(a.ToolNamePrefix, b.ToolNamePrefix, StringComparison.Ordinal))
+            return false;
+        if (!(a.Arguments ?? []).SequenceEqual(b.Arguments ?? [], StringComparer.Ordinal))
+            return false;
+        if (!DictEqual(a.Headers, b.Headers))
+            return false;
+        if (!DictEqual(a.Environment, b.Environment))
+            return false;
+        return true;
+    }
+
+    private static bool DictEqual(
+        Dictionary<string, string> x,
+        Dictionary<string, string> y)
+    {
+        if (x.Count != y.Count)
+            return false;
+        foreach (var (k, v) in x)
+            if (!y.TryGetValue(k, out var yv) || !string.Equals(v, yv, StringComparison.Ordinal))
+                return false;
+        return true;
+    }
+
     public void Dispose()
     {
-        DisposeAsync().AsTask().GetAwaiter().GetResult();
-        GC.SuppressFinalize(this);
+        bool acquired = false;
+        try
+        {
+            acquired = _loadSemaphore.Wait(TimeSpan.FromSeconds(5));
+            if (!acquired)
+            {
+                _logger.LogWarning("McpServerToolRegistry.Dispose() timed out waiting for load semaphore, waiting indefinitely to ensure load completes");
+                _loadSemaphore.Wait();
+                acquired = true;
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+            _logger.LogWarning("McpServerToolRegistry.Dispose() encountered disposed semaphore, load may have completed concurrently");
+            return;
+        }
+
+        try
+        {
+            if (_disposed)
+                return;
+
+            _disposed = true;
+            foreach (var client in _clients)
+            {
+                try { DisposeClient(client); }
+                catch { }
+            }
+            _clients.Clear();
+
+            foreach (var (_, entry) in _workspaceServers)
+            {
+                try { DisposeClient(entry.Client); }
+                catch { }
+            }
+            _workspaceServers.Clear();
+        }
+        finally
+        {
+            if (acquired)
+                _loadSemaphore.Release();
+        }
     }
 
     public async ValueTask DisposeAsync()
@@ -235,14 +435,23 @@ public sealed class McpServerToolRegistry : IDisposable, IAsyncDisposable
                 EnvironmentVariables = ResolveEnv(config.Environment),
                 Name = serverId,
             }),
-            "http" => new HttpClientTransport(new HttpClientTransportOptions
-            {
-                Endpoint = new Uri(config.Url!),
-                AdditionalHeaders = ResolveHeaders(config.Headers),
-                Name = serverId,
-            }),
+            "http" => CreateHttpTransport(serverId, config, HttpTransportMode.StreamableHttp),
+            "sse"  => CreateHttpTransport(serverId, config, HttpTransportMode.Sse),
             _ => throw new InvalidOperationException($"Unsupported MCP transport '{config.Transport}' for server '{serverId}'.")
         };
+    }
+
+    private static HttpClientTransport CreateHttpTransport(string serverId, McpServerConfig config, HttpTransportMode mode)
+    {
+        var options = new HttpClientTransportOptions
+        {
+            Endpoint = new Uri(config.Url!),
+            AdditionalHeaders = ResolveHeaders(config.Headers),
+            TransportMode = mode,
+            Name = serverId,
+        };
+        var httpClient = new HttpClient(new RemoveCharsetDelegatingHandler());
+        return new HttpClientTransport(options, httpClient, ownsHttpClient: true);
     }
 
     private static Dictionary<string, string?>? ResolveEnv(Dictionary<string, string>? environment)
@@ -295,6 +504,30 @@ public sealed class McpServerToolRegistry : IDisposable, IAsyncDisposable
             throw new ObjectDisposedException(nameof(McpServerToolRegistry));
     }
 
+    private static void DisposeClient(McpClient client)
+    {
+        if (client is IAsyncDisposable asyncDisposable)
+        {
+            asyncDisposable.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            return;
+        }
+
+        if (client is IDisposable disposable)
+            disposable.Dispose();
+    }
+
+    private sealed class RemoveCharsetDelegatingHandler() : DelegatingHandler(new HttpClientHandler())
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            if (request.Content?.Headers?.ContentType is { CharSet: not null } contentType)
+                contentType.CharSet = null;
+            return base.SendAsync(request, cancellationToken);
+        }
+    }
+
     private async Task DisposeCoreAsync()
     {
         List<McpClient> clients;
@@ -339,30 +572,12 @@ public sealed class McpServerToolRegistry : IDisposable, IAsyncDisposable
             disposable.Dispose();
     }
 
+
     internal sealed record DiscoveredMcpTool(string PluginId, ITool Tool, string Detail);
     private sealed record McpToolDescriptor(string LocalName, string RemoteName, string Description, string InputSchemaText);
-
-    /// <summary>
-    /// Result describing the tool delta produced by a workspace MCP reload.
-    /// </summary>
-    public sealed record WorkspaceMcpReloadResult(
-        IReadOnlyList<ITool> AddedTools,
-        IReadOnlyList<string> RemovedToolNames);
-
-    /// <summary>
-    /// Minimal stub for workspace MCP hot-reload. The kingcrab build does not currently
-    /// hot-swap MCP tools at runtime; this returns an empty delta so the watcher service
-    /// compiles and remains a no-op.
-    /// </summary>
-    public Task<WorkspaceMcpReloadResult> ReloadWorkspaceServersAsync(
-        Dictionary<string, McpServerConfig>? servers,
-        CancellationToken ct)
-    {
-        ThrowIfDisposed();
-        _ = servers;
-        _ = ct;
-        return Task.FromResult(new WorkspaceMcpReloadResult(
-            Array.Empty<ITool>(),
-            Array.Empty<string>()));
-    }
 }
+
+/// <summary>Result of a workspace MCP server hot-reload: tools to add and tool names to remove.</summary>
+public sealed record McpWorkspaceReloadResult(
+    IReadOnlyList<ITool> AddedTools,
+    IReadOnlyList<string> RemovedToolNames);

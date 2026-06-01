@@ -180,7 +180,9 @@ public sealed class NativePluginsConfig
     public GitToolsConfig GitTools { get; set; } = new();
     public CodeExecConfig CodeExec { get; set; } = new();
     public ImageGenConfig ImageGen { get; set; } = new();
+    public ImageAnalyzeConfig ImageAnalyze { get; set; } = new();
     public PdfReadConfig PdfRead { get; set; } = new();
+    public MinerUPdfConfig MinerUPdf { get; set; } = new();
     public CalendarConfig Calendar { get; set; } = new();
     public EmailConfig Email { get; set; } = new();
     public DatabaseConfig Database { get; set; } = new();

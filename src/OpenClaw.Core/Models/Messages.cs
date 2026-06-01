@@ -42,6 +42,30 @@ public sealed record InboundMessage
     public string? MediaUrl { get; init; }
     public string? MediaMimeType { get; init; }
     public string? MediaFileName { get; init; }
+
+    /// <summary>
+    /// Verified identity from the channel's authentication layer (e.g. Keycloak JWT <c>sub</c>).
+    /// Only set when the channel has validated an OIDC token; <c>null</c> for anonymous channels.
+    /// </summary>
+    public string? AuthenticatedUserId { get; init; }
+
+    /// <summary>
+    /// Multiple media attachments (e.g. several images in one message).
+    /// When present, each attachment generates its own marker line in the pipeline text.
+    /// </summary>
+    public IReadOnlyList<MediaAttachment>? Attachments { get; init; }
+}
+
+/// <summary>
+/// A single media file attached to an <see cref="InboundMessage"/>.
+/// </summary>
+public sealed record MediaAttachment
+{
+    /// <summary>"image", "video", "audio", "document"</summary>
+    public required string MediaType { get; init; }
+    public string? Url { get; init; }
+    public string? MimeType { get; init; }
+    public string? FileName { get; init; }
 }
 
 /// <summary>

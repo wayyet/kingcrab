@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
@@ -24,33 +25,37 @@ public sealed class McpNativeTool(
             using var argsDoc = JsonDocument.Parse(string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson);
             if (argsDoc.RootElement.ValueKind != JsonValueKind.Object)
                 return $"Error: Invalid JSON arguments for MCP tool '{localName}': JSON root must be an object.";
-            var argsDict = new Dictionary<string, object?>(StringComparer.Ordinal);
+
+            // 直接构建 Dictionary<string, JsonElement>，与 CallToolRequestParams.Arguments 类型匹配
+            var argsDict = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
             foreach (var prop in argsDoc.RootElement.EnumerateObject())
+                argsDict[prop.Name] = prop.Value.Clone();
+
+            // 从 AsyncLocal 执行上下文中读取当前用户标识，注入到 MCP 协议的 _meta 字段
+            // _meta 是协议级别的元数据，不污染工具的 arguments 参数
+            // 优先使用 OIDC 认证得到的稳定用户 ID；无认证时降级为路由级的 SenderId
+            JsonObject? meta = null;
+            if (MafExecutionContextScope.TryGetCurrent() is { } ctx)
             {
-                object? value = null;
-                var v = prop.Value;
-                switch (v.ValueKind)
+                meta = new JsonObject
                 {
-                    case JsonValueKind.String:
-                        value = v.GetString();
-                        break;
-                    case JsonValueKind.Number:
-                        value = v.Clone();
-                        break;
-                    case JsonValueKind.True:
-                    case JsonValueKind.False:
-                        value = v.GetBoolean();
-                        break;
-                    case JsonValueKind.Null:
-                        value = null;
-                        break;
-                    default:
-                        value = v.Clone();
-                        break;
-                }
-                argsDict[prop.Name] = value;
+                    ["userId"]    = JsonValue.Create(ctx.Session.AuthenticatedUserId ?? ctx.Session.SenderId),
+                    ["sessionId"] = JsonValue.Create(ctx.Session.Id),
+                };
             }
-            var response = await client.CallToolAsync(remoteName, argsDict, progress: null, cancellationToken: ct);
+
+            var callParams = new CallToolRequestParams
+            {
+                Name      = remoteName,
+                Arguments = argsDict,
+                Meta      = meta,
+            };
+
+            var response = await client.SendRequestAsync<CallToolRequestParams, CallToolResult>(
+                RequestMethods.ToolsCall,
+                callParams,
+                cancellationToken: ct);
+
             var text = FormatResponseContent(response);
             var isError = response.IsError ?? false;
             return isError ? $"Error: {text}" : text;

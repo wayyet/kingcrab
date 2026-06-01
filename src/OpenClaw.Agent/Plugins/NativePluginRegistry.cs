@@ -36,8 +36,14 @@ public sealed class NativePluginRegistry : IDisposable
         if (config.ImageGen.Enabled)
             RegisterTool(new ImageGenTool(config.ImageGen), "image-gen", config.ImageGen.Provider);
 
+        if (config.ImageAnalyze.Enabled)
+            RegisterTool(new ImageAnalyzeTool(config.ImageAnalyze), "image-analyze", config.ImageAnalyze.Provider);
+
         if (config.PdfRead.Enabled)
             RegisterTool(new PdfReadTool(config.PdfRead, toolingConfig), "pdf-read");
+
+        if (config.MinerUPdf.Enabled)
+            RegisterTool(new MinerUPdfTool(config.MinerUPdf, toolingConfig), "mineru-pdf");
 
         if (config.Calendar.Enabled)
             RegisterTool(new CalendarTool(config.Calendar), "calendar", config.Calendar.Provider);

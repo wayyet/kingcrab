@@ -73,7 +73,7 @@ public sealed class WebSocketChannel : IChannelAdapter
 
     public Task StartAsync(CancellationToken ct) => Task.CompletedTask; // Kestrel manages the listener
 
-    public async Task HandleConnectionAsync(WebSocket ws, string clientId, IPAddress? remoteIp, CancellationToken ct)
+    public async Task HandleConnectionAsync(WebSocket ws, string clientId, IPAddress? remoteIp, CancellationToken ct, string? userId = null)
     {
         if (!TryAddConnection(clientId, ws, remoteIp, out var state))
         {
@@ -137,6 +137,7 @@ public sealed class WebSocketChannel : IChannelAdapter
                     Sequence = parsed.CanvasEnvelope?.Sequence,
                     ApprovalId = parsed.ApprovalId,
                     Approved = parsed.Approved,
+                    AuthenticatedUserId = userId,
                     RequestCancellation = ct
                 };
 
