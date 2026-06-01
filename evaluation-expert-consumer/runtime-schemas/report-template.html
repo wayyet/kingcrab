@@ -82,6 +82,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-
     </div>
   </div>
 
+  <!-- TAINTED RUN BANNER (STEP 9 / K11 / K16 / K18) -->
+  <div id="tainted-banner" style="display:none;background:#fce8e6;border:1px solid #f28b82;border-radius:12px;padding:16px;margin-bottom:24px;color:#a50e0e">
+    <strong>⚠️ 评估结论为「指示性（indicative）」而非「结论性（definitive）」</strong>
+    <ul id="tainted-reasons" class="list-styled" style="margin-top:8px"></ul>
+  </div>
+
   <!-- OVERVIEW: SCORE + RADAR -->
   <div class="grid-2">
     <div class="card">
@@ -186,6 +192,42 @@ const DIM_CONFIG = {
 const DIM_ORDER = Object.keys(DIM_CONFIG);
 const TARGET_SCORE = 85;
 
+// === STEP 9 / K18 中文叙事字典 ===
+// 模板不内置任何 metric / tool 中文名（指标会持续新增，写死会让新指标退化为英文 code）。
+// STEP 9 必须在 REPORT_DATA 中注入：
+//   report.metric_labels = { <metric_code>: <metrics/<code>.metric.json#display_name>, ... }   // 全量当前评估涉及的 metric
+//   report.tool_labels   = { <tool_name>:   <role-catalog tool#display_name>,           ... }   // 全量当前评估涉及的 tool
+//   report.dimension_labels = { <dim_code>: <evaluation_context.dimension_meta[dim].display_name>, ... }   // 可选
+// 找不到注入项时退化为 code 字符串，并由 K18 self-check 在产出阶段拦截。
+const TRIGGER_KIND_LABEL = {
+  missing_required_signal: '必须信号缺失',
+  forbidden_behavior: '禁止行为出现',
+  threshold_breach: '阈值越界'
+};
+function metricLabel(code) {
+  const inj = (window.__reportLabels && window.__reportLabels.metric) || {};
+  return inj[code] || code;
+}
+function toolLabel(code) {
+  const inj = (window.__reportLabels && window.__reportLabels.tool) || {};
+  return inj[code] || code;
+}
+function triggerKindLabel(kind) { return TRIGGER_KIND_LABEL[kind] || kind || ''; }
+function dimLabel(code) {
+  const inj = (window.__reportLabels && window.__reportLabels.dimension) || {};
+  return inj[code] || (DIM_CONFIG[code] && DIM_CONFIG[code].label) || code;
+}
+function translateSignal(sig) {
+  if (typeof sig !== 'string') return '';
+  let m = sig.match(/^missing_required_tool_call:(.+)$/);
+  if (m) return `必须工具未调用：${toolLabel(m[1].trim())}`;
+  m = sig.match(/^forbidden_behavior:(.+)$/);
+  if (m) return `出现禁止行为：${m[1].trim()}`;
+  m = sig.match(/^threshold_breach:(.+)$/);
+  if (m) return `阈值越界：${m[1].trim()}`;
+  return sig;
+}
+
 // Header
 document.getElementById('emp-name').textContent = report.employee?.display_name || report.employee?.employee_id || '';
 document.getElementById('emp-role').textContent = report.employee?.role || '';
@@ -200,22 +242,41 @@ scoreEl.textContent = report.overall_score;
 scoreEl.className = 'score-big ' + (report.passed ? 'pass' : 'fail');
 document.getElementById('score-desc').textContent = report.passed ? '达标' : '未达标 — 需改进后复测';
 
+// Inject label dictionaries from REPORT_DATA (STEP 9 MUST author these from
+// metrics/<code>.metric.json#display_name and role-catalog tool#display_name —
+// the template intentionally has no built-in metric/tool fallback so that newly
+// added metrics/tools cannot silently regress into raw English codes).
+window.__reportLabels = {
+  metric: report.metric_labels || {},
+  tool: report.tool_labels || {},
+  dimension: report.dimension_labels || {}
+};
+
 // Red line
 const rl = report.red_line;
 const rlBox = document.getElementById('redline-box');
 if (rl && rl.triggered !== undefined) {
   const triggered = rl.triggered || (rl.passed === false);
+  // K18 中文叙事：优先使用 narratives（已中文化的句子数组）；其次把 details 兼容渲染
+  const rawLines = rl.narratives || rl.details || [];
+  const items = (Array.isArray(rawLines) ? rawLines : []).map(item => {
+    if (typeof item === 'string') return item;
+    if (item && item.description) return item.description;
+    if (item && item.metric_code && item.trigger_kind) {
+      return `${metricLabel(item.metric_code)}：触发"${triggerKindLabel(item.trigger_kind)}"红线`;
+    }
+    return JSON.stringify(item);
+  });
   rlBox.innerHTML = `<div class="red-line-box ${triggered ? '' : 'ok'}">
     <strong>${triggered ? '🔴 红线已触发' : '🟢 红线未触发'}</strong>
-    ${triggered && rl.details ? '<ul style="margin-top:8px;padding-left:20px">' + (Array.isArray(rl.details) ? rl.details : []).map(d => `<li style="font-size:13px">${d}</li>`).join('') + '</ul>' : ''}
-    ${triggered && rl.triggers ? '<ul style="margin-top:8px;padding-left:20px">' + rl.triggers.map(t => `<li style="font-size:13px">${t.rule}</li>`).join('') + '</ul>' : ''}
+    ${items.length ? '<ul style="margin-top:8px;padding-left:20px">' + items.map(d => `<li style="font-size:13px;line-height:1.7">${escapeHtml(d)}</li>`).join('') + '</ul>' : ''}
   </div>`;
 } else { rlBox.style.display = 'none'; }
 
 // Radar chart
 const dimScores = report.dimension_scores || {};
 const radarData = DIM_ORDER.map(k => dimScores[k] || 0);
-const radarLabels = DIM_ORDER.map(k => `${DIM_CONFIG[k].label}(${DIM_CONFIG[k].weight})`);
+const radarLabels = DIM_ORDER.map(k => `${dimLabel(k)}(${DIM_CONFIG[k].weight})`);
 new Chart(document.getElementById('radarChart'), {
   type: 'radar',
   data: {
@@ -238,7 +299,7 @@ DIM_ORDER.forEach(k => {
   const s = dimScores[k] || 0;
   const color = s >= 80 ? 'var(--success)' : s >= 60 ? '#f9a825' : 'var(--danger)';
   dimBody.innerHTML += `<tr>
-    <td>${DIM_CONFIG[k].label}</td><td style="color:var(--text-secondary)">${DIM_CONFIG[k].weight}</td>
+    <td>${dimLabel(k)}</td><td style="color:var(--text-secondary)">${DIM_CONFIG[k].weight}</td>
     <td style="font-weight:700;color:${color}">${s}</td>
     <td style="width:40%"><div class="score-bar"><div class="score-bar-fill" style="width:${s}%;background:${color}"></div></div></td>
   </tr>`;
@@ -285,11 +346,19 @@ scenarios.forEach((sc, i) => {
   // Panel
   let panelHtml = `<div class="tab-content ${i===0?'active':''}" id="panel-${tcId}">`;
 
-  // Metric results
+  // Metric results — K18 中文叙事：中文名为主，英文 code 仅作小字技术提示
   panelHtml += `<h3 style="margin-bottom:12px">指标得分</h3>`;
   (rep.metric_results || []).forEach(mr => {
     const c = mr.score >= 80 ? 'var(--success)' : mr.score >= 60 ? '#f9a825' : 'var(--danger)';
-    panelHtml += `<div class="metric-result"><span class="metric-code">${mr.metric_code}</span><span class="metric-score" style="color:${c}">${mr.score}</span></div>`;
+    const zh = metricLabel(mr.metric_code);
+    const signals = (mr.signals || mr.observed_signals || []).map(translateSignal).filter(Boolean);
+    panelHtml += `<div class="metric-result">
+      <span class="metric-code">${zh}<span style="color:var(--text-secondary);font-weight:400;font-size:12px;margin-left:6px">(${mr.metric_code})</span></span>
+      <span class="metric-score" style="color:${c}">${mr.score}</span>
+    </div>`;
+    if (signals.length) {
+      panelHtml += `<div style="font-size:12px;color:var(--text-secondary);margin:-4px 0 8px 220px">原因：${signals.map(escapeHtml).join('；')}</div>`;
+    }
   });
 
   // Chat history
@@ -364,6 +433,31 @@ function switchTab(tcId) {
   event.target.classList.add('active');
   document.getElementById('panel-' + tcId).classList.add('active');
 }
+
+// Tainted-run banner (STEP 9 / K11 / K16 / K18 — Chinese narrative only)
+(function(){
+  const reasons = [];
+  if (report.red_line && report.red_line.triggered) {
+    reasons.push('红线已触发：评估未通过');
+    const narratives = report.red_line.narratives || report.red_line.details || [];
+    narratives.forEach(d => {
+      if (typeof d === 'string') reasons.push(d);
+      else if (d && d.description) reasons.push(d.description);
+    });
+  }
+  (report.open_questions || []).forEach(q => {
+    const text = typeof q === 'string' ? q : (q.question || '');
+    if (text) reasons.push('待确认事项：' + text);
+  });
+  if (reasons.length > 0) {
+    const el = document.getElementById('tainted-banner');
+    if (el) {
+      el.style.display = '';
+      const ul = document.getElementById('tainted-reasons');
+      reasons.forEach(r => { const li = document.createElement('li'); li.textContent = r; ul.appendChild(li); });
+    }
+  }
+})();
 
 function escapeHtml(text) {
   const d = document.createElement('div');

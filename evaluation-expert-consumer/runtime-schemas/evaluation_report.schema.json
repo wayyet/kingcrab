@@ -186,7 +186,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["triggered", "triggers"],
-      "description": "STEP 7 redLineCheck output, copied as-is. The LLM cannot mutate this object.",
+      "description": "STEP 7 redLineCheck output, copied as-is. The LLM cannot mutate triggered / triggers. narratives is a K18-mandated Chinese narrative array authored by STEP 9 (one sentence per scenario / per metric_code) so the HTML can render human-readable explanations without surfacing raw English tokens.",
       "properties": {
         "triggered": { "type": "boolean" },
         "triggers": {
@@ -203,6 +203,11 @@
               "evidence_ref": { "type": "string", "minLength": 1 }
             }
           }
+        },
+        "narratives": {
+          "type": "array",
+          "description": "K18: Chinese narrative sentences. The first entry summarises the metric_code + trigger_kind + score; subsequent entries enumerate per-scenario evidence in Chinese. Used verbatim by the HTML report.",
+          "items": { "type": "string", "minLength": 1 }
         }
       }
     },

@@ -8,6 +8,7 @@ Runtime data shapes produced/consumed during a single evaluation run. **These ar
 |---|---|---|---|
 | `evaluation_context.schema.json` | STEP 6 `materializeEvaluationContext` (deterministic) | STEP 4 fan-out, STEP 5–8 | `./runs/<eval_id>/evaluation_context.json` |
 | `enriched_test_case.schema.json` | STEP 2 `enrichTestCases` (deterministic, always runs) | STEP 3, STEP 4 | `./runs/<eval_id>/enriched-cases/<test_case_id>.json` |
+| `run_plan.schema.json` | STEP 2.5 `planRun` (deterministic; freezes literal shell strings for every scenario) | STEP 3 (verbatim execution) | `./runs/<eval_id>/run_plan.json` |
 | `execution_trace.schema.json` | STEP 3 `driveEmployeeOnScenario` (evaluator-driver) | STEP 4 fan-out | `./runs/<eval_id>/traces/<test_case_id>.trace.json` |
 | `metric_score.schema.json` | STEP 4 fan-out (one LLM call per pair) | STEP 5, STEP 7 | `./runs/<eval_id>/scores/<test_case_id>__<metric_code>.json` |
 | `scenario_score.schema.json` | STEP 4 (post-fan-out aggregator, deterministic) | STEP 5, STEP 7 | `./runs/<eval_id>/scenarios/<test_case_id>.json` |
@@ -28,22 +29,6 @@ Runtime data shapes produced/consumed during a single evaluation run. **These ar
 - **Runtime drivers are protocol-only adapters**: every driver under `./runtime-drivers/<driver_id>/` MUST publish a `driver.json` validated against `runtime_driver.schema.json`, and MUST output an `ExecutionTrace` validated against `execution_trace.schema.json`. Drivers MUST NOT contain evaluation logic, MUST NOT be referenced from any `*.projection.json`, and MUST NOT be the implicit fallback when `runtime_driver.driver_id` is missing — STEP 3 fails fast in that case.
 - **User simulators are persona-only role profiles**: every simulator under `./simulators/<simulator_id>/` MUST publish a `simulator.json` validated against `simulator.schema.json` plus a `system_prompt.md` template. Simulators are **NOT subprocesses** — the host evaluation-expert agent's own LLM (the same brain that runs STEP 1.5 / STEP 4 / STEP 8 / STEP 9) consumes the system prompt each turn and produces a `SimulatorDecision` validated against `simulator_decision.schema.json` before the decision is forwarded to the driver and appended to `simulator_trail`. Simulator directories MUST NOT contain executable entrypoints, MUST NOT score the employee, mention metrics, judge red lines, or be referenced from any `*.projection.json`. STEP 3 fails fast when `runtime_simulator.simulator_id` cannot be resolved — no implicit default.
 - **STEP 3 is dual-role with asymmetric execution**: `runtime_driver` is a long-lived subprocess (line-delimited JSON over stdin/stdout — `{"action":"send",...}` / `{"action":"end",...}` from agent to driver, `{"event":"ready"}` / `{"event":"evaluatee_turn",...}` / `{"event":"trace_written",...}` from driver to agent). `runtime_simulator` is consumed inside the host agent's own LLM, NO subprocess boundary. The driver MUST NOT generate customer text; the host agent (acting as simulator) MUST NOT touch the protocol wire. `turn_budget.hard_max_turns` (or `evaluation_context.global_turn_cap`, whichever is smaller) is a HARD ceiling — `should_continue=true` cannot bypass it; once the cap is reached the host agent MUST issue an `end` action with `reason=max_turns_reached`.
-
-## HTML report template (placeholder contract)
-
-`./report-template.html` is the source template STEP 9 fills in to produce `./runs/<eval_id>/reports/evaluation_report.html`. The placeholders below are **a contract** between the template and STEP 9: changing one without the other breaks human-readable reports.
-
-| Placeholder | Replaced with | Where it appears |
-|---|---|---|
-| `{{REPORT_DATA}}` | full `evaluation_report.json` content as a JSON string | drives the radar chart and headline numbers |
-| `{{SCENARIOS_DATA}}` | array of scenario objects (`{ report, trace, enriched }`) as a JSON string | one Tab per scenario |
-| `{{EMPLOYEE_NAME}}` | employee display name (HTML-escaped) | `<title>` and the page header |
-
-Rules:
-
-- These three placeholder names are stable across versions. Adding new placeholders is allowed; renaming existing ones is not.
-- The template MUST stay self-contained — no local-file imports, only the Chart.js CDN.
-- When a run is tainted (`open_questions` contains a `critical` entry), the rendered HTML MUST display a red banner above the radar chart explaining the run is tainted (per the STEP 9 playbook).
 
 ## Why this directory is separate from `contracts/projections/`
 

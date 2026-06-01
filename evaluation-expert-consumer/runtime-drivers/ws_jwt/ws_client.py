@@ -68,7 +68,8 @@ class WsCollector:
 
     async def __aenter__(self):
         url = self.ws_url
-        print(f"[ws_jwt] connect: {url}")
+        import sys as _sys
+        print(f"[ws_jwt] connect: {url}", file=_sys.stderr)
         self._ws = await websockets.connect(
             url,
             ping_interval=20,
@@ -76,7 +77,7 @@ class WsCollector:
             open_timeout=15,
             additional_headers={},
         )
-        print(f"[ws_jwt] connected")
+        print(f"[ws_jwt] connected", file=_sys.stderr)
         return self
 
     async def __aexit__(self, *args):

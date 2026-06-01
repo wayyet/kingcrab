@@ -87,17 +87,98 @@ Before STEP 3 begins, **every** synthesized/enriched case MUST pass three self-c
 
 The original lets the simulator declare `goal_achieved` at turn 2 (after the employee lists steps), so the employee never receives the order number, never calls the must-tools, and the red-line trips even though the conversation followed the success script. **K15 design facet** catches this before STEP 3.
 
-## Boundary coverage (best practice, not blocking)
+## Negative case coverage (mandatory, K21)
 
-Apply equivalence-class partitioning when the scenario seed contains a decision boundary (amount thresholds, time limits, category restrictions, customer tier gates). Pair `positive` ↔ `negative` cases via `paired_case_id`; use `polarity = "boundary"` only when SOP ambiguity at the threshold itself warrants it.
+Real evaluations need **adversarial / restricted-path** scenarios, not only happy paths. STEP 1.5 MUST synthesize negative-polarity cases alongside positive ones, at a target ratio of `positive : negative ≈ 80 : 20`. This is no longer best practice; it is **K21**.
 
-| polarity | Meaning | Example (threshold = 500) |
+### Polarity definitions
+
+| polarity | Meaning | Example (refund threshold = 500) |
 |---|---|---|
-| `positive` | Within normal/allowed path | order_amount=350, direct refund approved |
-| `negative` | Exceeds boundary, restricted path | order_amount=899, must handoff to human |
-| `boundary` | Exactly at threshold (optional) | order_amount=500, edge case behavior |
+| `positive` | Within the normal / allowed / happy path | `order_amount=350`, direct refund approved |
+| `negative` | Crosses a restriction / escalation / refusal / failure path | `order_amount=899`, must hand off to human; or customer requests refund after 7-day window; or customer asks for confidential info the employee MUST refuse |
+| `boundary` | Exactly at the threshold (optional, excluded from ratio counting) | `order_amount=500`, edge-case behavior |
 
-Not blocking: pure information-query cases without a decision boundary may stand alone.
+`negative` is NOT just "a different positive case". It is a case where the **expected correct behavior is to refuse / escalate / decline / hand off / quote a policy limit**. The `expected_tool_calls` of a negative case typically differ from its positive counterpart (e.g. `create_handoff_ticket` instead of `process_refund`) and its `red_line` triggers are typically different.
+
+### K21 ratio rule
+
+Let `N = #cases where polarity ∈ {positive, negative}` (cases marked `polarity = "boundary"` are excluded from this count). Then:
+
+| N | Required `#negative` |
+|---|---|
+| `1` | not enforced (single-case run; record exemption if no boundary exists) |
+| `2 – 4` | `≥ 1` |
+| `≥ 5` | `≥ ceil(0.20 * N)` |
+
+Every `negative` case MUST carry `paired_case_id` pointing to the `positive` case that exercises the **same** decision boundary from the opposite side (and vice versa for the positive when the pair is explicit). Unpaired negatives are allowed only when the negative path has no symmetric positive counterpart (e.g. a pure refusal scenario like "customer asks for another employee's salary") — in that case, omit `paired_case_id` and add `polarity_rationale` describing why no pair exists.
+
+### Mandatory self-check before writing `synthesized-cases/`
+
+```
+N = count(cases where polarity in {"positive", "negative"})
+N_neg = count(cases where polarity == "negative")
+
+if N == 1:
+    # exemption path
+    assert evaluation_context.negative_coverage_exemption is set, \
+        "K21: single-case run requires exemption rationale"
+elif 2 <= N <= 4:
+    assert N_neg >= 1, f"K21: need ≥1 negative, got {N_neg}/{N}"
+else:  # N >= 5
+    import math
+    required = math.ceil(0.20 * N)
+    assert N_neg >= required, f"K21: need ≥{required} negatives ({N=}), got {N_neg}"
+
+for c in cases:
+    assert c.polarity in {"positive", "negative", "boundary"}, \
+        "K21: every case MUST set polarity"
+    if c.polarity == "negative" and not c.paired_case_id:
+        assert c.polarity_rationale, \
+            "K21: unpaired negative requires polarity_rationale"
+```
+
+### How to generate negatives from the same scenario seed
+
+For each `positive` case you draft, ask three questions; any "yes" yields a candidate `negative` partner:
+
+1. **Boundary flip**: is there a numeric / temporal / categorical threshold? → generate the case on the OTHER side of the threshold (`order_amount=899` instead of `350`; `day_10` instead of `day_3`; `electronics` instead of `non-electronics`).
+2. **Authority flip**: does the customer ask for something the employee SHOULD refuse / escalate / quote-policy-on? → generate that refusal case (asking for someone else's data; demanding a refund outside policy; pressuring the employee to bypass approval).
+3. **Failure-mode flip**: what happens when an upstream tool returns empty / errors / contradicts the customer's claim? → generate that case (`query_order_status` returns "not found" while customer insists they ordered).
+
+Target mix per scenario seed: 1–2 positives + 1 negative is the floor that satisfies K21 at `N ≥ 2`.
+
+### Exemption protocol (the ONLY way to ship with `#negative == 0`)
+
+If and only if **every** scenario seed is a pure information-query with no decision boundary, no authority asymmetry, and no failure mode (rare — e.g. "FAQ-style lookup of public schedule"), record:
+
+```json
+"negative_coverage_exemption": {
+  "reason": "all-info-query",
+  "evidence": "<cite each scenario_id and why it has no negative counterpart>",
+  "approved_by": "<user_id or 'agent-default'>"
+}
+```
+
+into `evaluation_context.json`. STEP 9 MUST surface this exemption in `open_questions` so reviewers can challenge it.
+
+### Worked example (eval-soul-002, customer-service-ecommerce, 5 cases)
+
+N = 5. Required `#negative ≥ ceil(0.20 * 5) = 1` (floor) — with `80 : 20` target, aim for `#negative = 1` (20%) or `2` (40% if scenarios warrant it).
+
+| tc_id | polarity | paired_case_id | rationale |
+|---|---|---|---|
+| tc-refund-eligible-300 | `positive` | tc-refund-handoff-899 | within threshold |
+| tc-refund-handoff-899 | `negative` | tc-refund-eligible-300 | exceeds 500 → must handoff |
+| tc-return-day3 | `positive` | tc-return-day10-refused | within 7-day window |
+| tc-return-day10-refused | `negative` | tc-return-day3 | outside window → must quote policy + refuse |
+| tc-status-lookup | `positive` | (no pair) | pure info query, no boundary; allowed as standalone positive |
+
+Result: `N = 5`, `#negative = 2`, ratio `60 : 40` (within ≥ 20% requirement, slightly heavier on negatives). ✅ K21 satisfied.
+
+## Boundary coverage (legacy section, now subsumed by K21)
+
+Apply equivalence-class partitioning when the scenario seed contains a decision boundary (amount thresholds, time limits, category restrictions, customer tier gates). The pairing mechanics described above are now mandatory under K21; `polarity = "boundary"` is reserved for cases that sit exactly on the threshold (e.g. `order_amount=500`) and is **excluded** from the K21 ratio count.
 
 ## Anti-patterns
 
@@ -109,3 +190,6 @@ Not blocking: pure information-query cases without a decision boundary may stand
 | Write synthesized cases into `./test-cases/` instead of `./runs/<eval-id>/synthesized-cases/` | K5 | block_or_escalate |
 | `stop_conditions.success` satisfiable without firing must-tools | K15 (design) | Case rejected at STEP 3 input gate |
 | STEP 9 omits `synthesized_from_sop_only_no_user_grounding` caveat when run has any Tier-2 case | K11 | Report flagged |
+| Ship 5 synthesized cases all with `polarity="positive"` (or missing `polarity`) and no `negative_coverage_exemption` | **K21** | STEP 1.5 output rejected; must re-synthesize with negatives |
+| Tag a case `polarity="negative"` only because it has a different amount, while expected behavior is still the same happy-path refund | **K21** | Case mis-classified; treated as positive at audit; K21 ratio recomputed |
+| `negative` case without `paired_case_id` AND without `polarity_rationale` | **K21** | STEP 1.5 output rejected |

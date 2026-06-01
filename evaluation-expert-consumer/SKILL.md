@@ -92,7 +92,7 @@ If the agent feels tempted to write any `.py` file, that is a signal the prompt 
 
 ## K-rules at a glance
 
-The workflow contract (`contracts/projections/ontology_extraction/metric-selection/metric-selection.workflow-contract.projection.json`) defines K1–K18. Full table with severity, owning step, taint policy, and recovery: [`playbooks/k-rules.md`](./playbooks/k-rules.md).
+The workflow contract (`contracts/projections/ontology_extraction/metric-selection/metric-selection.workflow-contract.projection.json`) defines K1–K21. Full table with severity, owning step, taint policy, and recovery: [`playbooks/k-rules.md`](./playbooks/k-rules.md).
 
 | # | Name | Owning step(s) | One-line summary |
 |---|---|---|---|
@@ -114,8 +114,11 @@ The workflow contract (`contracts/projections/ontology_extraction/metric-selecti
 | K16 | `ScoringMustInvokeEvaluatorLLMPerCaseMetric` | STEP 4 | Real LLM call per (case, metric); distinct `scored_at`; reasoning quotes trace |
 | K17 | `EmployeeResolutionProvenanceRequired` | STEP 0 | `employee.employee_provenance` present + valid; low reliability needs caveat; only STEP 0 writes `role_id`; **atomic-fail** taint |
 | K18 | `CurateDecisionsMustBeAudited` | STEP 1.2 | Every removed/added decision cites verbatim evidence; bounds enforced; **partial-success** taint |
+| K19 | `DriverSubprocessWiringContract` | STEP 3 | Canonical FIFO pad `/tmp/eval-driver/<eval_id>/<tc_id>/{in,out,err,pid}`; `head -n 1` to read; mandatory pre-spawn + post-scenario cleanup; ad-hoc pipe names forbidden |
+| K20 | `RunPlanMaterialisedBeforeStep3` | STEP 2.5 / STEP 3 | STEP 2.5 writes `runs/<eval_id>/run_plan.json` with five **literal shell strings** per scenario; STEP 3 executes them **verbatim**; ONLY `<<JSON_PAYLOAD>>` may be substituted at runtime; runtime string composition forbidden |
+| K21 | `NegativeCasesMustMeet20Percent` | STEP 1.5 | Synthesized cases MUST include **negative-polarity** cases at target ratio `positive : negative ≈ 80 : 20`; `N ∈ [2,4] ⇒ #negative ≥ 1`; `N ≥ 5 ⇒ #negative ≥ ceil(0.20*N)`; every `negative` MUST set `paired_case_id` OR `polarity_rationale`; silent omission rejected; only `negative_coverage_exemption` allows skipping |
 
-> Namespace note. Each prompt-constraint projection has its own internal K1–K5 namespace. Unless explicitly prefixed (e.g. "scoring-judgement K3"), "K9" / "K12" / etc. always refer to the **workflow contract** namespace above.
+> Namespace note. Each prompt-constraint projection has its own internal K1–K5 namespace. Unless explicitly prefixed (e.g. "scoring-judgement K3"), "K9" / "K12" / etc. always refer to the **workflow contract** namespace above. Also: `playbooks/step-09-overall-report.md` uses internal labels K17 / K18 that **collide** with workflow-contract K17 / K18 — those step-09 labels should be renamed `K-S9-TPL` / `K-S9-NAR` in a future cleanup; until then, any "K17" / "K18" inside `step-09-overall-report.md` means the STEP-9-local rules described there, not these workflow-contract rules.
 
 ## The 5 fixed parent dimensions
 
@@ -150,7 +153,8 @@ The authoritative execution graph lives in `contracts/projections/ontology_extra
 | 1.2  | `curateMetrics` | LLM, bounded + auditable, conditional | [`step-1.2-curate-metrics.md`](./playbooks/step-1.2-curate-metrics.md) — `selected_metrics = (candidate − removed) ∪ added` |
 | 1.5  | `parseTestCases` | LLM, conditional (only when `test_case_status == "missing"`) | [`step-1.5-consult-then-synthesize.md`](./playbooks/step-1.5-consult-then-synthesize.md) |
 | 2    | `enrichTestCases` | deterministic, always runs | inline (attaches `applicable_metrics ⊆ selected_metrics` per K10; `*` is wildcard, not a literal) |
-| 3    | `driveEmployeeOnScenario` | dual-role (driver subprocess + host-LLM simulator) | [`step-03-driver-and-simulator-loop.md`](./playbooks/step-03-driver-and-simulator-loop.md) |
+| 2.5  | `planRun` | deterministic, NO LLM | [`step-2.5-plan-run.md`](./playbooks/step-2.5-plan-run.md) — materialises `runs/<eval_id>/run_plan.json` (validated against `runtime-schemas/run_plan.schema.json`): per-scenario literal shell strings for the entire driver lifecycle. Owns **K20**. STEP 3 MUST NOT start before this file exists. |
+| 3    | `driveEmployeeOnScenario` | dual-role (driver subprocess + host-LLM simulator) | [`step-03-driver-and-simulator-loop.md`](./playbooks/step-03-driver-and-simulator-loop.md) — thin executor: reads `run_plan.scenarios[i].commands.*` and runs them **verbatim** (K19 + K20); ONLY `<<JSON_PAYLOAD>>` may be substituted |
 | 4    | `scoreScenario` | LLM fan-out | [`step-04-fanout-scoring.md`](./playbooks/step-04-fanout-scoring.md) |
 | LOOP | (STEP 3, STEP 4) per scenario | — | repeat until all enriched cases done |
 | 5    | `aggregateAcrossScenarios` | deterministic | [`step-05-07-deterministic-rollup.md`](./playbooks/step-05-07-deterministic-rollup.md) |
@@ -229,7 +233,7 @@ The 7 generic metrics: `problem_resolution_completeness`, `response_clarity_and_
 
 ### Authoritative contracts
 
-- [`metric-selection.workflow-contract.projection.json`](./contracts/projections/ontology_extraction/metric-selection/metric-selection.workflow-contract.projection.json) — the 13-step deterministic flow + K1–K18
+- [`metric-selection.workflow-contract.projection.json`](./contracts/projections/ontology_extraction/metric-selection/metric-selection.workflow-contract.projection.json) — the deterministic flow (now with STEP 2.5 `planRun`) + K1–K21
 - [`metric-selection.prompt-constraint.projection.json`](./contracts/projections/ontology_extraction/metric-selection/metric-selection.prompt-constraint.projection.json) — metric-selection guardrails (its own K1–K4 namespace)
 - [`scoring-judgement.prompt-constraint.projection.json`](./contracts/projections/ontology_extraction/scoring-judgement/scoring-judgement.prompt-constraint.projection.json) — layered scoring policy (K1–K5 with `applies_to_layer`)
 - [`metric-library.metric-catalog.projection.json`](./contracts/projections/metric-ontology/metric-library/metric-library.metric-catalog.projection.json) — metric registry contract
