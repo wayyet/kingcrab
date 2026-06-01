@@ -101,6 +101,12 @@
         /* ============================================================
            2. BASE / RESET
            ============================================================ */
+        /* Reinforce the HTML `hidden` attribute — author display rules (e.g.
+           .modal-backdrop { display:flex }) would otherwise override the UA
+           stylesheet's `[hidden] { display:none }`, making hidden elements
+           visible. Using !important here guarantees hidden always wins. */
+        [hidden] { display: none !important; }
+
         *,
         *::before,
         *::after {
@@ -2514,6 +2520,7 @@
         function closeProviderModal() {
             if (!providerModal) return;
             closeModal(providerModal, settingsButton);
+            showNextToolApproval();
         }
 
         /* ---------- First-run card ---------- */
@@ -4276,7 +4283,7 @@
         }
 
         function showNextToolApproval() {
-            if (activeApproval || approvalQueue.length === 0 || !doctorModal.hidden) return;
+            if (activeApproval || approvalQueue.length === 0 || !doctorModal.hidden || !providerModal.hidden) return;
             activeApproval = approvalQueue.shift();
             const toolName = activeApproval.toolName || 'unknown';
             const approvalId = activeApproval.approvalId || '';
@@ -4366,6 +4373,7 @@
                     clearTimeout(reconnectTimer);
                     reconnectTimer = null;
                 }
+                dismissFirstRunCard();
                 refreshChatState();
                 appendSystem('Connected successfully.');
                 sendCanvasReady();
