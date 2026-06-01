@@ -135,6 +135,47 @@
     "tags": {
       "type": "array",
       "items": { "type": "string" }
+    },
+    "industry": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^(\\*|[a-z0-9_]{1,64})$"
+      },
+      "description": "Optional. Industries this metric applies to. The wildcard '*' means match-all. Consumed by STEP 1.2 curation as an add/remove signal. Defaults to empty (no industry signal) when omitted."
+    },
+    "responsibility_tags": {
+      "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9_]{1,64}$"
+      },
+      "description": "Optional. Responsibility tags from the same vocabulary as role-catalog-entry.responsibility_tags. Consumed by STEP 1.2 curation. Defaults to empty when omitted."
+    },
+    "complementary_metrics": {
+      "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]*$"
+      },
+      "description": "Optional. metric_codes recommended together with this metric. STEP 1.2 MAY use this to add a complement when this metric is selected. Defaults to empty when omitted."
+    },
+    "exclusive_with": {
+      "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]*$"
+      },
+      "description": "Optional. metric_codes that conflict with this metric and should not co-occur in the same selected_metrics set. MUST be disjoint from complementary_metrics and MUST NOT contain this metric's own metric_code (enforced by reviewers / STEP 1.2, not by JSON Schema alone). Defaults to empty when omitted."
     }
   }
 }

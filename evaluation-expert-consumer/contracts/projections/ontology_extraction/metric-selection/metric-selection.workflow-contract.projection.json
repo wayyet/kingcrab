@@ -29,13 +29,56 @@
   },
   "concept_mappings": [
     {
+      "concept_id": "PRE_A",
+      "projection_action": "map",
+      "target_kind": "workflow_step",
+      "target_name": "loadRoleCatalog",
+      "attributes": {
+        "executor": "deterministic",
+        "runs_before": "S0",
+        "inputs": ["EVALUATION_ROLES_DIR (env, default ./role-catalog/)"],
+        "outputs": ["role_catalog (map keyed by role_id)"],
+        "validation": "contracts/projections/role-ontology/role-catalog/schemas/role-catalog-entry.schema.json",
+        "discovery": "filesystem scan of ./role-catalog/*.role.json",
+        "inheritance_rule": "When parent_role is non-null: industry overrides (child wins), responsibility_tags set-union dedup. Chain depth cap 8.",
+        "fail_soft_rules": {
+          "absent_parent_or_cycle_or_depth_gt_8": "load entry without inheritance + open_question + proceed",
+          "duplicate_role_id": "keep lexicographically-first filename + open_question + proceed",
+          "malformed_file": "skip file + open_question + proceed"
+        },
+        "notes": "PRE.A loads the Role_Catalog before STEP 0 so resolveEmployee can canonicalize. Fail-soft: a bad role file never blocks the run; only a missing match for the evaluatee's own role degrades to caveat (handled in S0)."
+      }
+    },
+    {
+      "concept_id": "S0",
+      "projection_action": "map",
+      "target_kind": "workflow_step",
+      "target_name": "resolveEmployee",
+      "attributes": {
+        "executor": "llm_with_mandatory_confirmation",
+        "runs_before": "PRE",
+        "inputs": ["employee_id", "optional user free-form description", "role_catalog (from PRE_A)", "EVALUATION_EMPLOYEES_DIR (env, default ./employees/)"],
+        "outputs": ["evaluation_context.employee (object form)", "employee.employee_provenance", "evaluation_context.employee_resolution_log"],
+        "resolution_priority": [
+          "1. authoritative_file: ./employees/<employee_id>.json exists -> load + validate against runtime-schemas/employee.schema.json. parse/schema fail -> block_or_escalate. source=authoritative_file, reliability=high.",
+          "2. user_dialog: no file AND user supplied 1..10000-char description -> LLM parse to draft {role_id,industry,job_responsibilities,scenarios} -> DISPLAY draft -> request confirm|correct|decline. confirm -> source=user_dialog, reliability=high. correct -> apply + re-display (max 5 rounds). decline|120s timeout|5-round-exhaustion -> fall to inferred_fallback.",
+          "3. inferred_fallback: no file AND no usable user description -> LLM best-guess. source=inferred_fallback, reliability=low, caveat=employee_inferred_no_authoritative_source. emit open_question listing unknown fields + absent sources. empty employee_id -> block_or_escalate."
+        ],
+        "canonicalization_rule": "trim role string -> case-insensitive exact match against role_catalog role_id then aliases, catalog iteration order, first-match-wins. Match -> employee.role.role_id = matched role_id, copy industry + responsibility_tags. Miss (non-empty string) -> role_id = trimmed string, append 'role_id_no_catalog_entry' to caveat (dedup). Empty/whitespace role string -> block_or_escalate (cause=role_string_empty).",
+        "single_writer_rule": "S0 is the ONLY step permitted to write employee.role.role_id. Any later step whose output would change role_id is a violation: reject the write, preserve prior value, surface 'unauthorized_role_id_mutation'. Self-checked by the agent like K9/K13.",
+        "legacy_compat": "A bare-string evaluation_context.employee.role is wrapped into object form (role_id=string, empty industry, empty responsibility_tags, append role_id_no_catalog_entry caveat). An already-valid object is left unchanged.",
+        "block_or_escalate_causes": ["employee_id_invalid", "employee_file_parse_or_schema_fail", "role_string_empty", "employee_role_invalid_form", "inferred_fallback_llm_failure", "employee_id_required_for_inferred_fallback"],
+        "notes": "STEP 0 produces the structured employee object that K17 guards and that STEP 1.2 consumes. It is the resolve-then-canonicalize front door that eliminates the 'evaluation blocks because role spelled differently' failure class."
+      }
+    },
+    {
       "concept_id": "PRE",
       "projection_action": "map",
       "target_kind": "workflow_step",
       "target_name": "loadMetricRegistry",
       "attributes": {
         "executor": "deterministic",
-        "inputs": ["EVAL_METRICS_DIR (env, default ./metrics/)"],
+        "inputs": ["EVALUATION_METRICS_DIR (env, default ./metrics/)"],
         "outputs": ["metric_registry"],
         "validation": "schemas/metric.schema.json",
         "on_validation_failure": "drop_invalid_with_warning",
@@ -49,23 +92,23 @@
       "target_name": "resolveEmployeeAndCheckTestCases",
       "attributes": {
         "executor": "deterministic",
-        "inputs": ["employee_id", "metric_registry (from PRE)", "EVAL_TESTCASES_DIR (env, default ./test-cases/)"],
-        "outputs": ["employee", "selected_metrics", "dropped_metrics", "test_case_status"],
+        "inputs": ["employee (from S0, with canonical role.role_id)", "metric_registry (from PRE)", "EVALUATION_TEST_CASES_DIR (env, default ./test-cases/)"],
+        "outputs": ["candidate_metrics", "dropped_metrics", "test_case_status"],
         "test_case_status_enum": ["ready", "missing"],
-        "matching_rule": "applicable_roles ∋ employee.role  (or '*' wildcard)",
-        "selected_metrics_rule": "selected_metrics = [ m for m in metric_registry if (employee.role in m.applicable_roles) OR ('*' in m.applicable_roles) ]. The full metric_registry is the universe; selected_metrics is its role-filtered subset. Copying the full registry into selected_metrics without filtering is FORBIDDEN (see constraint K9).",
-        "dropped_metrics_rule": "dropped_metrics = [ { metric_code, applicable_roles, drop_reason: 'role_mismatch' } for each m in metric_registry not selected ]. This list is REQUIRED for auditability — it lets reviewers verify the role filter was actually applied rather than skipped.",
+        "matching_rule": "applicable_roles ∋ employee.role.role_id  (or '*' wildcard)",
+        "selected_metrics_rule": "candidate_metrics = [ m for m in metric_registry if (employee.role.role_id in m.applicable_roles) OR ('*' in m.applicable_roles) ]. The full metric_registry is the universe; candidate_metrics is its role-filtered subset. STEP 1.2 transforms candidate_metrics into selected_metrics. Copying the full registry into candidate_metrics without filtering is FORBIDDEN (see constraint K9). Note: employee resolution + role canonicalization is now done by S0; S1 consumes the already-canonical employee.role.role_id.",
+        "dropped_metrics_rule": "dropped_metrics = [ { metric_code, applicable_roles, drop_reason: 'role_mismatch' } for each m in metric_registry not in candidate_metrics ]. This list is REQUIRED for auditability — it lets reviewers verify the role filter was actually applied rather than skipped.",
         "selected_metrics_invariants": [
-          "len(selected_metrics) + len(dropped_metrics) == len(metric_registry)",
-          "set(selected_metrics).intersection(set(dropped_metrics)) == empty",
-          "every entry in selected_metrics has either employee.role or '*' in its applicable_roles",
-          "every entry in dropped_metrics has neither employee.role nor '*' in its applicable_roles",
-          "if selected_metrics is empty AND metric_registry is non-empty -> block_or_escalate (no metric applies to this employee role; do NOT proceed to STEP 1.5)"
+          "len(candidate_metrics) + len(dropped_metrics) == len(metric_registry)",
+          "set(candidate_metrics).intersection(set(dropped_metrics)) == empty",
+          "every entry in candidate_metrics has either employee.role.role_id or '*' in its applicable_roles",
+          "every entry in dropped_metrics has neither employee.role.role_id nor '*' in its applicable_roles",
+          "if candidate_metrics is empty AND metric_registry is non-empty -> block_or_escalate (no metric applies to this employee role; do NOT proceed to STEP 1.2)"
         ],
         "worked_example": {
           "comment": "Concrete illustration so the host agent can verify its STEP 1 output by inspection.",
           "given": {
-            "employee.role": "customer-service-ecommerce",
+            "employee.role.role_id": "customer-service-ecommerce",
             "metric_registry": [
               { "metric_code": "tool_call_correctness", "applicable_roles": ["customer-service-ecommerce", "after-sales-agent", "*"] },
               { "metric_code": "interaction_empathy", "applicable_roles": ["customer-service-ecommerce", "after-sales-agent"] },
@@ -74,11 +117,19 @@
               { "metric_code": "bid_clause_completeness", "applicable_roles": ["bid-writer"] },
               { "metric_code": "legal_citation_accuracy", "applicable_roles": ["legal-expert"] },
               { "metric_code": "code_change_risk_disclosure", "applicable_roles": ["software-engineer"] },
-              { "metric_code": "confidentiality_boundary_compliance", "applicable_roles": ["legal-expert", "bid-writer", "hr-attendance", "software-engineer"] }
+              { "metric_code": "confidentiality_boundary_compliance", "applicable_roles": ["legal-expert", "bid-writer", "hr-attendance", "software-engineer"] },
+              { "metric_code": "problem_resolution_completeness", "applicable_roles": ["*"] },
+              { "metric_code": "response_clarity_and_structure", "applicable_roles": ["*"] },
+              { "metric_code": "response_conciseness", "applicable_roles": ["*"] },
+              { "metric_code": "factual_accuracy", "applicable_roles": ["*"] },
+              { "metric_code": "proactive_clarification", "applicable_roles": ["*"] },
+              { "metric_code": "safety_and_ethics_boundary", "applicable_roles": ["*"] },
+              { "metric_code": "professional_tone_consistency", "applicable_roles": ["*"] }
             ]
           },
           "expected_output": {
-            "selected_metrics": ["tool_call_correctness", "interaction_empathy", "order_refund_policy_accuracy"],
+            "candidate_metrics": ["tool_call_correctness", "interaction_empathy", "order_refund_policy_accuracy", "problem_resolution_completeness", "response_clarity_and_structure", "response_conciseness", "factual_accuracy", "proactive_clarification", "safety_and_ethics_boundary", "professional_tone_consistency"],
+            "comment_on_candidate": "10 kept = 3 role-specific (tool_call_correctness via '*', interaction_empathy, order_refund_policy_accuracy) + 7 cross-role generics (all applicable_roles=['*']).",
             "dropped_metrics": [
               { "metric_code": "attendance_rule_compliance", "applicable_roles": ["hr-attendance"], "drop_reason": "role_mismatch" },
               { "metric_code": "bid_clause_completeness", "applicable_roles": ["bid-writer"], "drop_reason": "role_mismatch" },
@@ -88,12 +139,48 @@
             ]
           },
           "forbidden_output": {
-            "comment": "This is the bug observed in eval-001 — the host agent copied the full registry into selected_metrics without filtering. Such an output marks the run as tainted under K9.",
-            "selected_metrics_wrong": ["tool_call_correctness", "interaction_empathy", "order_refund_policy_accuracy", "attendance_rule_compliance", "bid_clause_completeness", "legal_citation_accuracy", "code_change_risk_disclosure", "confidentiality_boundary_compliance"]
+            "comment": "This is the bug observed in eval-xiaofu-001 — the host agent copied the full registry into candidate_metrics without filtering. Such an output marks the run as tainted under K9.",
+            "candidate_metrics_wrong": "all 15 metrics including the 5 role-mismatched ones"
           }
         }
       },
-      "notes": "STEP 1 has TWO independent responsibilities, both deterministic: (a) RESOLVE the evaluatee from employee_id (yielding role + scenarios + sop_documents); (b) FILTER metric_registry by role to produce selected_metrics + dropped_metrics. Both outputs MUST be persisted in evaluation_context.json. Test-case probing only decides whether STEP 1.5 needs to run; it does NOT affect metric filtering."
+      "notes": "STEP 1 is now a single deterministic responsibility: FILTER metric_registry by the canonical employee.role.role_id (resolved by S0) to produce candidate_metrics + dropped_metrics. Both outputs MUST be persisted in evaluation_context.json. candidate_metrics is the deterministic, machine-verifiable input to STEP 1.2; selected_metrics is STEP 1.2's output. Test-case probing only decides whether STEP 1.5 needs to run; it does NOT affect metric filtering."
+    },
+    {
+      "concept_id": "S1_2",
+      "projection_action": "map",
+      "target_kind": "workflow_step",
+      "target_name": "curateMetrics",
+      "attributes": {
+        "executor": "llm_bounded_and_auditable",
+        "runs_between": "S1 (after) and S1_5/S2 (before)",
+        "inputs": ["candidate_metrics (from S1)", "metric_registry (from PRE)", "employee.industry", "employee.role.responsibility_tags", "employee.job_responsibilities", "metric_selection_policy"],
+        "outputs": ["evaluation_context.selected_metrics", "evaluation_context.curate_log[]", "appended evaluation_context.user_consultation_log entries"],
+        "invocation_gate": {
+          "never": "skip; selected_metrics = candidate_metrics",
+          "always": "run unconditionally (even if size-trigger evaluation errors)",
+          "auto": "run iff len(candidate_metrics) < size_triggers.candidate_count_lower_bound (default 3) OR len(candidate_metrics) > size_triggers.candidate_count_upper_bound (default 15); else skip and selected_metrics = candidate_metrics"
+        },
+        "curate_algorithm": [
+          "1. Build prompt slices: employee.{industry, role.responsibility_tags, job_responsibilities} + candidate_metrics[*].{metric_code, description, tags, industry, responsibility_tags} + (metric_registry − candidate_metrics)[*].{same fields} (the addable pool) + metric_selection_policy.",
+          "2. LLM emits removed[] ⊆ candidate_metrics (semantically inappropriate) and added[] ⊆ (metric_registry − candidate_metrics) (string-match missed). Each decision: { metric_code, decision, evidence[], confidence∈[0,1] }.",
+          "3. DETERMINISTIC post-processing (orchestrator, not LLM): validate removed/added disjoint + subset (R10.3); resolve low-confidence adds via user confirmation (R13); selected_metrics = (candidate − removed) ∪ confirmed_adds; enforce max_metrics + min_dimensions_covered (R12.8/9) -> block_or_escalate on violation; persist curate_log + verify K18 evidence citations."
+        ],
+        "confidence_gate": {
+          ">= auto_apply_threshold (default 0.7)": "include; confirmed_by_user = 'auto_applied'",
+          "< threshold AND user confirms": "include; confirmed_by_user = true",
+          "< threshold AND user declines OR 300s timeout": "exclude; confirmed_by_user = false",
+          "multiple low-confidence adds": "prompt one at a time in curate_log order"
+        },
+        "evidence_citation_rule": "Every removed/added decision MUST have >=1 evidence citation naming a source_field (one of employee.industry / employee.job_responsibilities / employee.role.responsibility_tags / metric.description / metric.tags / metric.industry / metric.responsibility_tags / metric.complementary_metrics / metric.exclusive_with) and quoting a verbatim, >=1-char substring of that field's value. Enforced by K18.",
+        "bounds": {
+          "max_metrics": "len(selected_metrics) <= metric_selection_policy.max_metrics (default 8); strictly more -> block_or_escalate + curate_log entry citing observed vs configured.",
+          "min_dimensions_covered": "distinct parent_dimension count across selected_metrics >= metric_selection_policy.min_dimensions_covered (default 1); strictly fewer -> block_or_escalate."
+        },
+        "failure_handling": "Curator failure, malformed output, subset-constraint violation, missing input, or 30s timeout -> fall back to selected_metrics = candidate_metrics + open_question; run proceeds. SAFETY PROPERTY: STEP 1.2 can only refine or no-op, never degrade below the deterministic STEP 1 result.",
+        "legacy_compat": "If evaluation_context carries only legacy selected_metrics (no candidate_metrics), treat selected_metrics as candidate_metrics + open_question (R16.4). If both present, candidate_metrics wins + open_question (R16.5).",
+        "notes": "STEP 1.2 is the LLM curation layer that reasons over employee industry/responsibilities + metric semantic fields to remove false-positive string matches and add semantically-correct misses. K9 is rewritten as selected_metrics = (candidate_metrics − removed) ∪ added; candidate_metrics stays machine-verifiable, removed/added are auditable via curate_log (K18)."
+      }
     },
     {
       "concept_id": "S1_5",
@@ -417,10 +504,13 @@
     }
   ],
   "relation_mappings": [
+    { "relation_id": "Eneg2", "from": "loadRoleCatalog", "to": "resolveEmployee", "kind": "precedes" },
+    { "relation_id": "Eneg1", "from": "resolveEmployee", "to": "loadMetricRegistry", "kind": "precedes" },
     { "relation_id": "E0", "from": "loadMetricRegistry", "to": "resolveEmployeeAndCheckTestCases", "kind": "precedes" },
-    { "relation_id": "E1", "from": "resolveEmployeeAndCheckTestCases", "to": "parseTestCases", "kind": "conditionally_precedes", "condition": "test_case_status == 'missing'" },
+    { "relation_id": "E0b", "from": "resolveEmployeeAndCheckTestCases", "to": "curateMetrics", "kind": "precedes" },
+    { "relation_id": "E1", "from": "curateMetrics", "to": "parseTestCases", "kind": "conditionally_precedes", "condition": "test_case_status == 'missing'" },
     { "relation_id": "E2", "from": "parseTestCases", "to": "enrichTestCases", "kind": "precedes" },
-    { "relation_id": "E2b", "from": "resolveEmployeeAndCheckTestCases", "to": "enrichTestCases", "kind": "conditionally_precedes", "condition": "test_case_status == 'ready'" },
+    { "relation_id": "E2b", "from": "curateMetrics", "to": "enrichTestCases", "kind": "conditionally_precedes", "condition": "test_case_status == 'ready'" },
     { "relation_id": "E3", "from": "enrichTestCases", "to": "driveEmployeeOnScenario", "kind": "loops_over", "loop_var": "enriched_test_cases" },
     { "relation_id": "E4", "from": "driveEmployeeOnScenario", "to": "scoreScenario", "kind": "precedes_within_loop" },
     { "relation_id": "E5", "from": "scoreScenario", "to": "aggregateAcrossScenarios", "kind": "loop_exit_then_precedes" },
@@ -500,7 +590,7 @@
       "target_kind": "workflow_precondition",
       "target_name": "SelectedMetricsRoleFilteredAtStep1",
       "severity_mapping": "critical -> blocking_workflow_precondition",
-      "notes": "STEP 1 MUST persist evaluation_context.selected_metrics = filter(metric_registry, m -> employee.role in m.applicable_roles OR '*' in m.applicable_roles) AND evaluation_context.dropped_metrics for the complement set with drop_reason='role_mismatch'. Copying the full metric_registry into selected_metrics without role filtering is a contract violation; the run MUST be marked tainted via TAINTED.md and STEP 9 MUST surface the violation in EvaluationReport.open_questions. Validation: len(selected_metrics) + len(dropped_metrics) == len(metric_registry); every metric in selected_metrics satisfies the role match; every metric in dropped_metrics fails the role match. If selected_metrics is empty while metric_registry is non-empty, STEP 1 MUST block_or_escalate (do not proceed to subsequent steps)."
+      "notes": "UPDATED for STEP 1.2 curation. STEP 1 MUST persist evaluation_context.candidate_metrics = filter(metric_registry, m -> employee.role.role_id in m.applicable_roles OR '*' in m.applicable_roles) AND evaluation_context.dropped_metrics for the complement set with drop_reason='role_mismatch'. STEP 1.2 then produces evaluation_context.selected_metrics = (candidate_metrics − removed) ∪ added, where removed ⊆ candidate_metrics and added ⊆ (metric_registry − candidate_metrics). candidate_metrics MUST stay machine-verifiable: an automated verifier recomputes it from metric_registry + employee.role.role_id and confirms set equality. Copying the full metric_registry into candidate_metrics without role filtering is a contract violation; the run MUST be marked tainted via TAINTED.md and STEP 9 MUST surface the violation in EvaluationReport.open_questions. Validation: len(candidate_metrics) + len(dropped_metrics) == len(metric_registry); every metric in candidate_metrics satisfies the role match; every metric in dropped_metrics fails it; removed ∩ added == empty; every metric_code in (removed ∪ added) has a curate_log entry (K18). If candidate_metrics is empty while metric_registry is non-empty, STEP 1 MUST block_or_escalate (do not proceed to STEP 1.2). When STEP 1.2 is skipped (mode=never), fails, or times out, selected_metrics MUST equal candidate_metrics."
     },
     {
       "constraint_id": "K10",
@@ -557,6 +647,22 @@
       "target_name": "ScoringMustInvokeEvaluatorLLMPerCaseMetric",
       "severity_mapping": "critical -> blocking_workflow_precondition",
       "notes": "STEP 4 MUST invoke the evaluator LLM EXACTLY ONCE per (test_case_id, metric_code) pair where metric_code ∈ enriched_test_cases[tc].applicable_metrics. Hard rules: (a) the agent MUST NOT batch-fabricate scores from its own knowledge of the trace and metric definitions — every MetricScore JSON file under ./runs/<eval-id>/scores/<tc_id>__<metric_code>.json MUST be the literal output of an LLM call whose prompt was built from (i) that exact trace + (ii) that exact metric definition + (iii) the rubric/red-line config + (iv) per-case stop_conditions; (b) MetricScore.scored_at MUST be the real ISO8601 timestamp captured at LLM-response receipt time, accurate to at least the second, and DIFFERENT across distinct LLM calls (millisecond/microsecond drift expected); (c) tainting heuristic applied at STEP 5 input gate: if MORE THAN ONE score file in the same run shares an identical scored_at value (string equality), the run is marked tainted and STEP 9 MUST list every duplicate-timestamp pair in open_questions with severity='critical' — this catches the eval-soul-001 pattern where all 10 score files carried scored_at='2026-05-29T14:30:00Z' verbatim; (d) MetricScore.scoring_reasoning MUST cite at least one concrete substring/quote from dialog_turns or actual_tool_calls of the trace being scored — reasoning that cites no observable evidence and consists only of generic phrases ('based on standards', 'reasonable demonstration result', 'as a typical case') is rejected as fabrication and the score file MUST be regenerated; (e) FORBIDDEN SHORTCUT (mirror of K14): the agent MUST NOT skip the per-(case,metric) LLM call citing 'demonstration', 'preview', 'sample run', 'illustrative scoring', 'time pressure', or any other reason. STEP 4 is the ONLY LLM-bounded step in the back half of the workflow (per K4); STEPS 5/6/7/8/9 are deterministic roll-ups or LLM-bounded synthesis whose inputs MUST already be real per-(case,metric) scores produced here. Validation script outline: scored_at_set = { read(f).scored_at for f in scores/*.json }; assert len(scored_at_set) == count(scores/*.json), else taint."
+    },
+    {
+      "constraint_id": "K17",
+      "projection_action": "map",
+      "target_kind": "workflow_precondition",
+      "target_name": "EmployeeResolutionProvenanceRequired",
+      "severity_mapping": "critical -> blocking_workflow_precondition",
+      "notes": "STEP 0 MUST persist evaluation_context.employee.employee_provenance as an object with string source ∈ {authoritative_file, user_dialog, inferred_fallback} and string reliability ∈ {high, low}; when reliability == 'low', caveat MUST be a non-empty string. EvaluationReport.employee_provenance MUST be byte-identical to the context value. When source == 'inferred_fallback' the report MUST describe inferred-derived findings as 'indicative', never 'definitive'. VIOLATION (provenance absent / not an object / missing source or reliability / non-string required field / reliability=low with empty-or-absent caveat): apply Tainted_Run_Lifecycle — write TAINTED.md describing the K17 subtype, stop all remaining scoring before any numeric score is produced, and surface the violation in EvaluationReport.open_questions. ATOMICITY: the three taint actions (TAINTED.md write, stop scoring, open_questions surfacing) are a single atomic outcome; if any fails the entire run fails with a non-success completion status and no successful EvaluationReport. If the TAINTED.md write itself fails, still halt scoring and emit the violation to run logs. SINGLE-WRITER: only STEP 0 may write employee.role.role_id; any later mutation is an unauthorized_role_id_mutation violation (self-checked like K9/K13)."
+    },
+    {
+      "constraint_id": "K18",
+      "projection_action": "map",
+      "target_kind": "workflow_precondition",
+      "target_name": "CurateDecisionsMustBeAudited",
+      "severity_mapping": "critical -> blocking_workflow_precondition",
+      "notes": "Every entry in STEP 1.2 removed[] and added[] MUST have a corresponding evaluation_context.curate_log entry, and len(curate_log) == len(removed) + len(added), with each (removed ∪ added) metric_code appearing in exactly one entry. Each curate_log entry MUST carry decision ∈ {removed, added}, metric_code, confidence ∈ [0.0,1.0], and a non-empty evidence array where at least one citation names a source_field (one of employee.industry, employee.job_responsibilities, employee.role.responsibility_tags, metric.description, metric.tags, metric.industry, metric.responsibility_tags, metric.complementary_metrics, metric.exclusive_with) AND quotes a verbatim, >=1-char substring of that field's value. VIOLATION (empty evidence / missing curate_log entry / citation failing the source-field-and-substring check): apply Tainted_Run_Lifecycle — write TAINTED.md describing the K18 subtype (entry index + metric_code), stop remaining scoring, surface in EvaluationReport.open_questions. PARTIAL-FAILURE: if at least one but not all three taint actions succeed, accept partial state, continue the evaluation, and record failed actions in evaluation_context.open_questions; if none succeeds, halt with non-success status and no successful EvaluationReport. STEP 1.2 bounds (R12): len(selected_metrics) <= max_metrics and distinct parent_dimension count >= min_dimensions_covered, else block_or_escalate with a curate_log entry citing observed vs configured. SAFETY: any STEP 1.2 failure/timeout/skip -> selected_metrics = candidate_metrics (never degrades below the deterministic STEP 1 result)."
     }
   ],
   "delivery_artifacts": [],
@@ -566,6 +672,6 @@
     "generated_at": "2026-05-27T00:00:00Z",
     "generated_by": "ontology_extraction",
     "workspace": "kingcrab",
-    "notes": "Deterministic 11-step workflow with one LLM-bounded fan-out scoring step (STEP 4) and two LLM-bounded synthesis steps (STEP 8 per-scenario report, STEP 9 overall report). Role-agnostic; works for any employee whose role/scenario tags are matched by the metric and test-case registries. Hot-pluggable via filesystem scan of metrics/ and test-cases/."
+    "notes": "Deterministic role-agnostic workflow: PRE.A loadRoleCatalog → STEP 0 resolveEmployee → PRE loadMetricRegistry → STEP 1 (candidate_metrics) → STEP 1.2 curateMetrics (selected_metrics) → STEP 1.5 → STEP 2 → [STEP 3 → STEP 4]×N → STEP 5 → STEP 6 → STEP 7 → STEP 8×N → STEP 9. One LLM-with-confirmation step (STEP 0), one LLM-bounded curation step (STEP 1.2), one LLM-bounded fan-out scoring step (STEP 4), two LLM-bounded synthesis steps (STEP 8/9); everything else deterministic. Hot-pluggable via filesystem scan of role-catalog/, employees/, metrics/, test-cases/. K9 rewritten for the candidate→selected split; K17 (employee provenance) and K18 (curate auditability) added."
   }
 }

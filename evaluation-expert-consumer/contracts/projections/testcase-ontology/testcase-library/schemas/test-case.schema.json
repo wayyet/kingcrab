@@ -229,20 +229,39 @@
     "provenance": {
       "type": "object",
       "additionalProperties": false,
+      "description": "Where this test case came from. Required on synthesized cases (STEP 1.5 output); optional on hand-curated catalog cases under ./test-cases/. The K11 user-consultation chain MUST set source/reliability accurately so STEP 9 can downgrade language about Tier-2 findings.",
       "properties": {
         "source": {
           "type": "string",
           "enum": [
-            "employee_sop",
-            "synthesized_from_user_scenarios",
+            "user_provided_scenarios",
+            "synthesized_from_sop",
+            "mixed",
             "manual_curation",
-            "regression_baseline"
-          ]
+            "regression_baseline",
+            "employee_sop"
+          ],
+          "description": "Authoritative origin. STEP 1.5 emits one of: user_provided_scenarios (Tier 1) | synthesized_from_sop (Tier 2) | mixed (Tier 1+2). Curated catalog files use manual_curation or regression_baseline. The legacy value 'employee_sop' is retained as a deprecated alias for synthesized_from_sop."
+        },
+        "reliability": {
+          "type": "string",
+          "enum": ["high", "medium", "low"],
+          "description": "Required on synthesized cases. high = each scenario maps 1:1 to a user-supplied real-world description; medium = mix of user seeds + SOP expansion; low = pure SOP / persona reasoning, no user grounding."
+        },
+        "reliability_caveat": {
+          "type": "string",
+          "description": "Required when reliability='low'. Surface in STEP 9 EvaluationReport.open_questions. Canonical value for SOP-only synthesis is 'synthesized_from_sop_only_no_user_grounding'."
         },
         "source_ref": { "type": "string" },
         "generated_by": { "type": "string" },
         "generated_at": { "type": "string", "format": "date-time" }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "reliability": { "const": "low" } }, "required": ["reliability"] },
+          "then": { "required": ["reliability_caveat"] }
+        }
+      ]
     },
     "polarity": {
       "type": "string",

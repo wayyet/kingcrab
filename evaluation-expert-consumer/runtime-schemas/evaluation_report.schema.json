@@ -9,6 +9,7 @@
     "evaluation_id",
     "generated_at",
     "employee",
+    "employee_provenance",
     "selected_metrics",
     "test_cases",
     "scenario_report_refs",
@@ -27,11 +28,66 @@
       "required": ["employee_id", "role"],
       "properties": {
         "employee_id": { "type": "string", "minLength": 1 },
-        "role": { "type": "string", "minLength": 1 },
+        "role": {
+          "description": "Object form (STEP 0 output) preferred; bare string accepted for legacy reports.",
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": true,
+              "required": ["role_id"],
+              "properties": {
+                "role_id": { "type": "string", "minLength": 1 },
+                "industry": { "type": "string" },
+                "responsibility_tags": { "type": "array", "items": { "type": "string" } },
+                "level": { "type": "string" }
+              }
+            },
+            { "type": "string", "minLength": 1 }
+          ]
+        },
         "scenarios": {
           "type": "array",
           "items": { "type": "string", "minLength": 1 }
         }
+      }
+    },
+    "employee_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "reliability"],
+      "description": "Byte-identical copy of evaluation_context.employee.employee_provenance (K17). When reliability == 'low', caveat is surfaced in open_questions and findings use 'indicative' rather than 'definitive'.",
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["authoritative_file", "user_dialog", "inferred_fallback"]
+        },
+        "reliability": { "type": "string", "enum": ["high", "low"] },
+        "caveat": { "type": "string", "maxLength": 1000 }
+      }
+    },
+    "metric_curation": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "STEP 1.2 surface (R14). Absent when mode == 'never' (no curation occurred). candidate_metrics/selected_metrics are byte-copies of EvaluationContext; removed/added are byte-copies of the matching curate_log subsets.",
+      "required": ["candidate_metrics", "selected_metrics", "removed", "added", "policy_snapshot"],
+      "properties": {
+        "candidate_metrics": {
+          "type": "array",
+          "items": { "type": "object", "additionalProperties": true }
+        },
+        "selected_metrics": {
+          "type": "array",
+          "items": { "type": "object", "additionalProperties": true }
+        },
+        "removed": {
+          "type": "array",
+          "items": { "type": "object", "additionalProperties": true }
+        },
+        "added": {
+          "type": "array",
+          "items": { "type": "object", "additionalProperties": true }
+        },
+        "policy_snapshot": { "type": "object", "additionalProperties": true }
       }
     },
     "selected_metrics": {

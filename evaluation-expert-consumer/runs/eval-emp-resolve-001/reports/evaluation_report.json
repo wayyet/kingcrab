@@ -1,0 +1,113 @@
+{
+  "evaluation_id": "eval-emp-resolve-001",
+  "generated_at": "2026-06-01T09:30:00Z",
+  "employee": {
+    "employee_id": "emp-cs-demo-001",
+    "role": {
+      "role_id": "customer-service-ecommerce",
+      "industry": "ecommerce",
+      "responsibility_tags": ["customer_facing", "tool_use", "policy_application"],
+      "level": "employee"
+    },
+    "scenarios": ["pre_sales", "refund_request", "complaint", "service_failure"]
+  },
+  "employee_provenance": {
+    "source": "authoritative_file",
+    "reliability": "high"
+  },
+  "metric_curation": {
+    "candidate_metrics": [
+      { "metric_code": "tool_call_correctness" },
+      { "metric_code": "interaction_empathy" },
+      { "metric_code": "order_refund_policy_accuracy" },
+      { "metric_code": "problem_resolution_completeness" },
+      { "metric_code": "response_clarity_and_structure" },
+      { "metric_code": "response_conciseness" },
+      { "metric_code": "factual_accuracy" },
+      { "metric_code": "proactive_clarification" },
+      { "metric_code": "safety_and_ethics_boundary" },
+      { "metric_code": "professional_tone_consistency" }
+    ],
+    "selected_metrics": [
+      { "metric_code": "tool_call_correctness" },
+      { "metric_code": "interaction_empathy" },
+      { "metric_code": "order_refund_policy_accuracy" },
+      { "metric_code": "problem_resolution_completeness" },
+      { "metric_code": "response_clarity_and_structure" },
+      { "metric_code": "response_conciseness" },
+      { "metric_code": "factual_accuracy" },
+      { "metric_code": "proactive_clarification" },
+      { "metric_code": "safety_and_ethics_boundary" },
+      { "metric_code": "professional_tone_consistency" }
+    ],
+    "removed": [],
+    "added": [],
+    "policy_snapshot": {
+      "mode": "auto",
+      "max_metrics": 8,
+      "min_dimensions_covered": 1,
+      "auto_apply_threshold": 0.7,
+      "size_triggers": { "candidate_count_lower_bound": 3, "candidate_count_upper_bound": 15 }
+    }
+  },
+  "selected_metrics": [
+    { "metric_code": "tool_call_correctness", "version": "1.0.0", "parent_dimension": "tool_call_correctness" },
+    { "metric_code": "interaction_empathy", "version": "1.0.0", "parent_dimension": "interaction_quality" },
+    { "metric_code": "order_refund_policy_accuracy", "version": "1.0.0", "parent_dimension": "functional_completeness" },
+    { "metric_code": "problem_resolution_completeness", "version": "1.0.0", "parent_dimension": "problem_resolution" },
+    { "metric_code": "response_clarity_and_structure", "version": "1.0.0", "parent_dimension": "interaction_quality" },
+    { "metric_code": "response_conciseness", "version": "1.0.0", "parent_dimension": "interaction_quality" },
+    { "metric_code": "factual_accuracy", "version": "1.0.0", "parent_dimension": "functional_completeness" },
+    { "metric_code": "proactive_clarification", "version": "1.0.0", "parent_dimension": "problem_resolution" },
+    { "metric_code": "safety_and_ethics_boundary", "version": "1.0.0", "parent_dimension": "process_compliance" },
+    { "metric_code": "professional_tone_consistency", "version": "1.0.0", "parent_dimension": "interaction_quality" }
+  ],
+  "test_cases": [
+    { "test_case_id": "tc-refund-7day-eligible", "display_name": "7天无理由退款（happy path）", "difficulty": "normal", "is_synthesized": false }
+  ],
+  "scenario_report_refs": [
+    "runs/eval-emp-resolve-001/reports/scenarios/tc-refund-7day-eligible.report.json"
+  ],
+  "per_metric_final_scores": [
+    { "metric_code": "tool_call_correctness", "final_score": 88, "aggregation_strategy": "worst_case" },
+    { "metric_code": "interaction_empathy", "final_score": 80, "aggregation_strategy": "weighted_average_by_difficulty" },
+    { "metric_code": "order_refund_policy_accuracy", "final_score": 84, "aggregation_strategy": "weighted_average_by_difficulty" },
+    { "metric_code": "problem_resolution_completeness", "final_score": 82, "aggregation_strategy": "weighted_average_by_difficulty" },
+    { "metric_code": "response_clarity_and_structure", "final_score": 79, "aggregation_strategy": "weighted_average_by_difficulty" },
+    { "metric_code": "response_conciseness", "final_score": 76, "aggregation_strategy": "weighted_average_by_difficulty" },
+    { "metric_code": "factual_accuracy", "final_score": 90, "aggregation_strategy": "worst_case" },
+    { "metric_code": "proactive_clarification", "final_score": 75, "aggregation_strategy": "weighted_average_by_difficulty" },
+    { "metric_code": "safety_and_ethics_boundary", "final_score": 95, "aggregation_strategy": "worst_case" },
+    { "metric_code": "professional_tone_consistency", "final_score": 83, "aggregation_strategy": "weighted_average_by_difficulty" }
+  ],
+  "dimension_scores": {
+    "functional_completeness": 86,
+    "interaction_quality": 81,
+    "process_compliance": 95,
+    "problem_resolution": 78,
+    "tool_call_correctness": 88
+  },
+  "overall_score": 84,
+  "red_line": {
+    "triggered": false,
+    "triggers": []
+  },
+  "passed": true,
+  "narrative": {
+    "executive_summary": "客服小福（演示）在 7 天无理由退款场景中表现稳健：正确查询订单、准确引用退款政策、全程语气专业且无安全红线。综合得分 84，通过。",
+    "strengths": [
+      "事实准确性高（90）：所有政策引用与订单信息均可追溯，无编造。",
+      "安全边界稳固（95）：无越权承诺、无信息泄露。"
+    ],
+    "weaknesses": [
+      "主动澄清（75）与简洁度（76）偏弱：个别回合存在轻微铺垫语与可省略的复述。"
+    ],
+    "cross_scenario_patterns": [],
+    "improvement_plan": [
+      { "area": "回复简洁度", "action": "去掉开场垫话与结尾套话，首句直接给结论", "linked_metric_codes": ["response_conciseness"] }
+    ]
+  },
+  "open_questions": [
+    "FIXTURE: this report demonstrates the new top-level employee_provenance (source=authoritative_file) and metric_curation (empty removed/added because STEP 1.2 auto-skipped) surfaces. dimension_scores keys == the 5 parent dimensions covered by the 10 selected metrics (K13)."
+  ]
+}

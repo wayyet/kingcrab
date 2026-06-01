@@ -20,12 +20,30 @@ Adding a new persona is **a directory drop**:
 ```
 simulators/
 └── <simulator_id>/
-    ├── simulator.json    ← required, validated against runtime-schemas/simulator.schema.json
-    ├── system_prompt.md  ← required, template file named in simulator.json.system_prompt
-    └── ...               ← few-shot examples, optional helpers (no executables)
+    ├── simulator.json        ← required, validated against runtime-schemas/simulator.schema.json
+    ├── system_prompt.md      ← required, template file named in simulator.json.system_prompt
+    ├── .no-decide-script     ← required SENTINEL (see below)
+    └── ...                   ← few-shot examples, optional helpers (no executables)
 ```
 
 You do **NOT** edit any `*.projection.json`, `SKILL.md`, or workflow contract when adding a new simulator. You also do **NOT** add any `decide.py` / entry script — there is no subprocess to invoke.
+
+### The `.no-decide-script` sentinel
+
+Every simulator directory MUST contain a hidden file named `.no-decide-script`. It serves three purposes:
+
+1. **Self-documenting marker** that this directory is `kind: "llm_persona"` and has NO entry script.
+2. **K8 audit anchor** — the workflow contract's K8 (`NoAdhocOrchestratorScripts`) extends to `./simulators/<simulator_id>/`. The audit looks for this sentinel to confirm the directory is intentionally script-free; removing it weakens the guard.
+3. **Onboarding hint** — anyone adding a new simulator copies `customer_realistic/.no-decide-script` so the contract is reaffirmed in every new persona.
+
+Sample content (copy verbatim when creating a new simulator):
+
+> SENTINEL — DO NOT REMOVE THIS FILE
+>
+> This simulator is a `llm_persona` profile (see `simulator.json` → `kind: "llm_persona"`).
+> It has NO entry script (no `decide.py` / `run.py` / `*.py` / `*.sh` / `*.ts` / `*.js` / `*.mjs` / `*.ipynb` / Makefile / `*.cmd` / `*.ps1`). The host evaluation-expert agent itself plays the customer in-process using `system_prompt.md`, with its own LLM brain. There is NO subprocess, NO independent LLM api_key, NO HTTP call.
+
+If pre-flight invariant 5 finds an executable file in a simulator directory, it is treated as a K8 violation immediately — the run is tainted before STEP 3 starts.
 
 ## Required input/output contract
 

@@ -5,6 +5,14 @@
   "consumer_skill": "evaluation-expert-consumer",
   "upstream_producer_dependencies": [
     {
+      "producer_skill": "role-ontology",
+      "projection_path": "../role-ontology/contract-index.json",
+      "required_for_views": [
+        "metric-selection/workflow-contract"
+      ],
+      "reason": "metric-selection workflow STEP 0 (resolveEmployee, via PRE.A loadRoleCatalog) requires the RoleCatalog contract and ./role-catalog/*.role.json data layer published by role-ontology to canonicalize the evaluatee's role and inject industry / responsibility_tags for STEP 1.2 curation."
+    },
+    {
       "producer_skill": "metric-ontology",
       "projection_path": "../metric-ontology/contract-index.json",
       "required_for_views": [

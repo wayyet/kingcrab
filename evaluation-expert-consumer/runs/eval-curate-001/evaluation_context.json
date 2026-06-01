@@ -1,0 +1,138 @@
+{
+  "evaluation_id": "eval-curate-001",
+  "created_at": "2026-06-01T10:00:00Z",
+  "employee": {
+    "employee_id": "emp-legal-demo-002",
+    "role": {
+      "role_id": "legal-expert",
+      "industry": "legal",
+      "responsibility_tags": ["citation_accuracy", "compliance", "confidentiality", "advisory", "risk_assessment"],
+      "level": "employee"
+    },
+    "industry": "legal",
+    "job_responsibilities": "面向内部业务团队提供合同与投标文件的法律条款审查，逐条引用法条/判例，核对投标文件法律条款完整性，保护未公开的法律策略，不直接面向终端客户、不调用任何外部工具。",
+    "employee_provenance": {
+      "source": "user_dialog",
+      "reliability": "high"
+    },
+    "scenarios": ["contract_review", "compliance_advisory", "tender_legal_review"]
+  },
+  "candidate_metrics": [
+    { "metric_code": "tool_call_correctness", "version": "1.0.0", "parent_dimension": "tool_call_correctness", "source_path": "metrics/tool_call_correctness.metric.json" },
+    { "metric_code": "legal_citation_accuracy", "version": "1.0.0", "parent_dimension": "functional_completeness", "source_path": "metrics/legal_citation_accuracy.metric.json" },
+    { "metric_code": "confidentiality_boundary_compliance", "version": "1.0.0", "parent_dimension": "process_compliance", "source_path": "metrics/confidentiality_boundary_compliance.metric.json" },
+    { "metric_code": "problem_resolution_completeness", "version": "1.0.0", "parent_dimension": "problem_resolution", "source_path": "metrics/problem_resolution_completeness.metric.json" },
+    { "metric_code": "response_clarity_and_structure", "version": "1.0.0", "parent_dimension": "interaction_quality", "source_path": "metrics/response_clarity_and_structure.metric.json" },
+    { "metric_code": "response_conciseness", "version": "1.0.0", "parent_dimension": "interaction_quality", "source_path": "metrics/response_conciseness.metric.json" },
+    { "metric_code": "factual_accuracy", "version": "1.0.0", "parent_dimension": "functional_completeness", "source_path": "metrics/factual_accuracy.metric.json" },
+    { "metric_code": "proactive_clarification", "version": "1.0.0", "parent_dimension": "problem_resolution", "source_path": "metrics/proactive_clarification.metric.json" },
+    { "metric_code": "safety_and_ethics_boundary", "version": "1.0.0", "parent_dimension": "process_compliance", "source_path": "metrics/safety_and_ethics_boundary.metric.json" },
+    { "metric_code": "professional_tone_consistency", "version": "1.0.0", "parent_dimension": "interaction_quality", "source_path": "metrics/professional_tone_consistency.metric.json" }
+  ],
+  "dropped_metrics": [
+    { "metric_code": "interaction_empathy", "applicable_roles": ["customer-service-ecommerce", "after-sales-agent"], "drop_reason": "role_mismatch" },
+    { "metric_code": "order_refund_policy_accuracy", "applicable_roles": ["customer-service-ecommerce"], "drop_reason": "role_mismatch" },
+    { "metric_code": "attendance_rule_compliance", "applicable_roles": ["hr-attendance"], "drop_reason": "role_mismatch" },
+    { "metric_code": "bid_clause_completeness", "applicable_roles": ["bid-writer"], "drop_reason": "role_mismatch" },
+    { "metric_code": "code_change_risk_disclosure", "applicable_roles": ["software-engineer"], "drop_reason": "role_mismatch" }
+  ],
+  "selected_metrics": [
+    { "metric_code": "legal_citation_accuracy", "version": "1.0.0", "parent_dimension": "functional_completeness", "source_path": "metrics/legal_citation_accuracy.metric.json" },
+    { "metric_code": "confidentiality_boundary_compliance", "version": "1.0.0", "parent_dimension": "process_compliance", "source_path": "metrics/confidentiality_boundary_compliance.metric.json" },
+    { "metric_code": "problem_resolution_completeness", "version": "1.0.0", "parent_dimension": "problem_resolution", "source_path": "metrics/problem_resolution_completeness.metric.json" },
+    { "metric_code": "response_clarity_and_structure", "version": "1.0.0", "parent_dimension": "interaction_quality", "source_path": "metrics/response_clarity_and_structure.metric.json" },
+    { "metric_code": "response_conciseness", "version": "1.0.0", "parent_dimension": "interaction_quality", "source_path": "metrics/response_conciseness.metric.json" },
+    { "metric_code": "factual_accuracy", "version": "1.0.0", "parent_dimension": "functional_completeness", "source_path": "metrics/factual_accuracy.metric.json" },
+    { "metric_code": "proactive_clarification", "version": "1.0.0", "parent_dimension": "problem_resolution", "source_path": "metrics/proactive_clarification.metric.json" },
+    { "metric_code": "safety_and_ethics_boundary", "version": "1.0.0", "parent_dimension": "process_compliance", "source_path": "metrics/safety_and_ethics_boundary.metric.json" },
+    { "metric_code": "professional_tone_consistency", "version": "1.0.0", "parent_dimension": "interaction_quality", "source_path": "metrics/professional_tone_consistency.metric.json" },
+    { "metric_code": "bid_clause_completeness", "version": "1.0.0", "parent_dimension": "functional_completeness", "source_path": "metrics/bid_clause_completeness.metric.json" }
+  ],
+  "curate_log": [
+    {
+      "decision": "removed",
+      "metric_code": "tool_call_correctness",
+      "evidence": [
+        { "source_field": "employee.job_responsibilities", "quote": "不调用任何外部工具" },
+        { "source_field": "metric.description", "quote": "invoked all required tools" }
+      ],
+      "confidence": 0.91,
+      "confirmed_by_user": "auto_applied"
+    },
+    {
+      "decision": "added",
+      "metric_code": "bid_clause_completeness",
+      "evidence": [
+        { "source_field": "employee.job_responsibilities", "quote": "核对投标文件法律条款完整性" }
+      ],
+      "confidence": 0.55,
+      "confirmed_by_user": true
+    }
+  ],
+  "metric_selection_policy": {
+    "mode": "always",
+    "max_metrics": 10,
+    "min_dimensions_covered": 3,
+    "auto_apply_threshold": 0.7,
+    "size_triggers": { "candidate_count_lower_bound": 3, "candidate_count_upper_bound": 15 }
+  },
+  "employee_resolution_log": [
+    {
+      "round": 0,
+      "displayed_draft": { "role_id": "法务专家", "industry": "legal", "job_responsibilities": "合同与投标文件法律条款审查", "scenarios": ["contract_review", "compliance_advisory", "tender_legal_review"] },
+      "user_response": "confirm",
+      "final_confirmed_draft": { "role_id": "legal-expert", "industry": "legal" }
+    }
+  ],
+  "user_consultation_log": [
+    {
+      "asked_at": "2026-06-01T10:05:00Z",
+      "step": "STEP 1.2",
+      "prompt": "STEP 1.2 建议新增指标 bid_clause_completeness（置信度 0.55，低于阈值 0.7）。依据：employee.job_responsibilities 含「核对投标文件法律条款完整性」，该员工虽是 legal-expert，但实际承担投标文件条款完整性审查。是否纳入？",
+      "user_response": "confirm",
+      "decision": "added_metric_confirmed",
+      "metric_code": "bid_clause_completeness"
+    }
+  ],
+  "enriched_test_cases": [
+    {
+      "test_case_id": "tc-tender-legal-clause-completeness",
+      "source_path": "runs/eval-curate-001/enriched-cases/tc-tender-legal-clause-completeness.json",
+      "applicable_metrics": ["legal_citation_accuracy", "confidentiality_boundary_compliance", "problem_resolution_completeness", "response_clarity_and_structure", "response_conciseness", "factual_accuracy", "proactive_clarification", "safety_and_ethics_boundary", "professional_tone_consistency", "bid_clause_completeness"],
+      "is_synthesized": true
+    }
+  ],
+  "fan_out_plan": {
+    "total": 10,
+    "pairs": [
+      { "test_case_id": "tc-tender-legal-clause-completeness", "metric_code": "legal_citation_accuracy" },
+      { "test_case_id": "tc-tender-legal-clause-completeness", "metric_code": "confidentiality_boundary_compliance" },
+      { "test_case_id": "tc-tender-legal-clause-completeness", "metric_code": "problem_resolution_completeness" },
+      { "test_case_id": "tc-tender-legal-clause-completeness", "metric_code": "response_clarity_and_structure" },
+      { "test_case_id": "tc-tender-legal-clause-completeness", "metric_code": "response_conciseness" },
+      { "test_case_id": "tc-tender-legal-clause-completeness", "metric_code": "factual_accuracy" },
+      { "test_case_id": "tc-tender-legal-clause-completeness", "metric_code": "proactive_clarification" },
+      { "test_case_id": "tc-tender-legal-clause-completeness", "metric_code": "safety_and_ethics_boundary" },
+      { "test_case_id": "tc-tender-legal-clause-completeness", "metric_code": "professional_tone_consistency" },
+      { "test_case_id": "tc-tender-legal-clause-completeness", "metric_code": "bid_clause_completeness" }
+    ]
+  },
+  "paths": {
+    "metrics_dir": "./metrics/",
+    "test_cases_dir": "./test-cases/",
+    "run_dir": "./runs/eval-curate-001/",
+    "drivers_dir": "./runtime-drivers/",
+    "simulators_dir": "./simulators/"
+  },
+  "runtime_driver": {
+    "driver_id": "ws_jwt",
+    "driver_config": { "endpoint": "ws://localhost:8080", "token": "demo-jwt" }
+  },
+  "runtime_simulator": {
+    "simulator_id": "customer_realistic"
+  },
+  "global_turn_cap": 30,
+  "open_questions": [
+    "FIXTURE: happy-path demonstrating STEP 1.2 curation (mode=always). candidate_metrics = 10 (tool_call_correctness wrongly string-matched legal-expert via its '*' applicable_roles, plus legal_citation_accuracy, confidentiality_boundary_compliance, and 7 generics). REMOVED tool_call_correctness (this legal-expert calls no tools; conf 0.91 auto). ADDED bid_clause_completeness from the dropped pool (this legal-expert reviews tender clause completeness; conf 0.55 < 0.7 -> user-confirmed). selected = (candidate − {tool_call_correctness}) ∪ {bid_clause_completeness} = 10 metrics. K18: curate_log has 2 entries == len(removed)+len(added). Covers 4 parent_dimensions >= min_dimensions_covered(3); 10 <= max_metrics(10)."
+  ]
+}

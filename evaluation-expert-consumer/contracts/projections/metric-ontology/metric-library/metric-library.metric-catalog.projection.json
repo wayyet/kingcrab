@@ -37,7 +37,7 @@
       "attributes": {
         "discovery_method": "filesystem_scan",
         "discovery_root_default": "evaluation-expert-consumer/metrics/",
-        "discovery_root_env_override": "EVAL_METRICS_DIR",
+        "discovery_root_env_override": "EVALUATION_METRICS_DIR",
         "file_glob": "*.metric.json",
         "key_field": "metric_code",
         "schema_path": "schemas/metric.schema.json",

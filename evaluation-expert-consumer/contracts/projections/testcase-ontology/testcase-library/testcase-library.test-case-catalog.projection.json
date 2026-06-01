@@ -37,7 +37,7 @@
       "attributes": {
         "discovery_method": "filesystem_scan",
         "discovery_root_default": "evaluation-expert-consumer/test-cases/",
-        "discovery_root_env_override": "EVAL_TESTCASES_DIR",
+        "discovery_root_env_override": "EVALUATION_TEST_CASES_DIR",
         "file_glob": "*.tc.json",
         "key_field": "test_case_id",
         "schema_path": "schemas/test-case.schema.json",
