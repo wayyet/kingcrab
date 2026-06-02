@@ -32,6 +32,8 @@ public static class OrganizationAuthModeNames
     public const string BootstrapToken = "bootstrap_token";
     public const string BrowserSession = "browser_session";
     public const string AccountToken = "account_token";
+    /// <summary>OIDC / Keycloak JWT Bearer authentication.</summary>
+    public const string OidcJwt = "oidc_jwt";
 }
 
 public sealed class OperatorIdentitySnapshot

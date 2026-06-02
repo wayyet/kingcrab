@@ -1,4 +1,5 @@
 using System.Net.WebSockets;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using OpenClaw.Core.Security;
@@ -22,7 +23,11 @@ internal static class WebSocketEndpoints
 
             var ws = await ctx.WebSockets.AcceptWebSocketAsync();
             var clientId = ctx.Connection.Id;
-            await runtime.WebSocketChannel.HandleConnectionAsync(ws, clientId, ctx.Connection.RemoteIpAddress, ctx.RequestAborted);
+            // Extract stable user identity from OIDC JWT when available.
+            var userId = ctx.User.Identity?.IsAuthenticated == true
+                ? (ctx.User.FindFirst(ClaimTypes.NameIdentifier) ?? ctx.User.FindFirst("sub"))?.Value
+                : null;
+            await runtime.WebSocketChannel.HandleConnectionAsync(ws, clientId, ctx.Connection.RemoteIpAddress, ctx.RequestAborted, userId);
         });
 
         app.Map("/ws/live", async (HttpContext ctx) =>
@@ -78,7 +83,7 @@ internal static class WebSocketEndpoints
             return false;
         }
 
-        if (startup.IsNonLoopbackBind && !IsAuthorizedTokenRequest(ctx, startup))
+        if (!EndpointHelpers.IsAuthorizedRequest(ctx, startup.Config, startup.IsNonLoopbackBind))
         {
             ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return false;
@@ -91,30 +96,6 @@ internal static class WebSocketEndpoints
         }
 
         return true;
-    }
-
-    private static bool IsAuthorizedTokenRequest(HttpContext ctx, GatewayStartupContext startup)
-    {
-        if (!startup.IsNonLoopbackBind)
-            return true;
-
-        var token = GatewaySecurity.GetToken(ctx, startup.Config.Security.AllowQueryStringToken);
-        if (string.IsNullOrWhiteSpace(token))
-            return false;
-
-        var policy = ctx.RequestServices.GetService<OrganizationPolicyService>()?.GetSnapshot() ?? new OrganizationPolicySnapshot();
-        if (policy.BootstrapTokenEnabled &&
-            policy.AllowedAuthModes.Any(mode => string.Equals(mode, OrganizationAuthModeNames.BootstrapToken, StringComparison.OrdinalIgnoreCase)) &&
-            !string.IsNullOrWhiteSpace(startup.Config.AuthToken) &&
-            GatewaySecurity.IsTokenValid(token, startup.Config.AuthToken))
-        {
-            return true;
-        }
-
-        var operatorAccounts = ctx.RequestServices.GetService<OperatorAccountService>();
-        return operatorAccounts is not null &&
-               policy.AllowedAuthModes.Any(mode => string.Equals(mode, OrganizationAuthModeNames.AccountToken, StringComparison.OrdinalIgnoreCase)) &&
-               operatorAccounts.TryAuthenticateToken(token, out _);
     }
 
     private static bool IsOriginAllowed(HttpContext ctx, GatewayAppRuntime runtime)

@@ -367,6 +367,55 @@ public sealed class SecurityConfig
 
     /// <summary>Lifetime (days) for persistent browser admin sessions created with "Remember me". Default 30 days.</summary>
     public int BrowserRememberDays { get; set; } = 30;
+
+    // ── Authentication Mode ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// Authentication mode. "token" (default) = static AuthToken; "oidc" = OIDC/JWT Bearer (e.g. Keycloak).
+    /// </summary>
+    public string AuthMode { get; set; } = SecurityAuthModeNames.Token;
+
+    /// <summary>OIDC configuration. Only used when <see cref="AuthMode"/> is "oidc".</summary>
+    public OidcConfig Oidc { get; set; } = new();
+
+    /// <summary>
+    /// When true all requests to /api and /mcp must carry a valid token or OIDC JWT even
+    /// when the gateway is bound to a loopback address.
+    /// Has no effect when AuthMode is "oidc" (OIDC mode always enforces auth on all paths).
+    /// </summary>
+    public bool AlwaysRequireAuth { get; set; } = false;
+
+    /// <summary>Convenience: true when <see cref="AuthMode"/> is "oidc".</summary>
+    public bool IsOidcMode => string.Equals(AuthMode, SecurityAuthModeNames.Oidc, StringComparison.OrdinalIgnoreCase);
+}
+
+/// <summary>Authentication mode names for <see cref="SecurityConfig.AuthMode"/>.</summary>
+public static class SecurityAuthModeNames
+{
+    public const string Token = "token";
+    public const string Oidc = "oidc";
+}
+
+/// <summary>OIDC / JWT Bearer configuration. Used when <see cref="SecurityConfig.AuthMode"/> is "oidc".</summary>
+public sealed class OidcConfig
+{
+    /// <summary>
+    /// OIDC Authority URL (e.g. Keycloak realm URL).
+    /// Example: https://auth.example.com/realms/myrealm
+    /// </summary>
+    public string? Authority { get; set; }
+
+    /// <summary>Expected audience claim. Leave empty to skip validation.</summary>
+    public string? Audience { get; set; }
+
+    /// <summary>Whether to require HTTPS for OIDC metadata discovery. Default true.</summary>
+    public bool RequireHttpsMetadata { get; set; } = true;
+
+    /// <summary>
+    /// JWT claim name to extract the operator role from. Default "roles".
+    /// The claim value is mapped to an <see cref="OpenClaw.Core.Models.OperatorRoleNames"/> value.
+    /// </summary>
+    public string RoleClaim { get; set; } = "roles";
 }
 
 public sealed class UrlSafetyConfig

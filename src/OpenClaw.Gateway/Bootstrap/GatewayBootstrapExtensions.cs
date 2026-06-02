@@ -45,9 +45,11 @@ internal static class GatewayBootstrapExtensions
             };
         }
 
-        if (isNonLoopbackBind && string.IsNullOrWhiteSpace(config.AuthToken))
+        // AuthToken is required for non-loopback unless OIDC mode is selected (OIDC replaces token auth).
+        if (isNonLoopbackBind && string.IsNullOrWhiteSpace(config.AuthToken)
+            && !config.Security.IsOidcMode)
         {
-            var message = "OPENCLAW_AUTH_TOKEN must be set when binding to a non-loopback address.";
+            var message = "OPENCLAW_AUTH_TOKEN must be set when binding to a non-loopback address (or set Security.AuthMode=\"oidc\" with Security.Oidc.Authority configured).";
             WriteConfigSourceDiagnostics(configSources);
             if (isDoctorMode)
             {

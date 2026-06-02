@@ -363,6 +363,7 @@ public sealed class SessionDelegationChildSummary
 [JsonSerializable(typeof(StructuredMemoryContextResult))]
 [JsonSerializable(typeof(StructuredMemoryPathRequest))]
 [JsonSerializable(typeof(SecurityConfig))]
+[JsonSerializable(typeof(OidcConfig))]
 [JsonSerializable(typeof(UrlSafetyConfig))]
 [JsonSerializable(typeof(WebSocketConfig))]
 [JsonSerializable(typeof(ToolingConfig))]

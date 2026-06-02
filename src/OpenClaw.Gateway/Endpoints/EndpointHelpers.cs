@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Http.Features;
 using OpenClaw.Core.Models;
@@ -34,8 +35,13 @@ internal static class EndpointHelpers
 
     public static bool IsAuthorizedRequest(HttpContext ctx, GatewayConfig config, bool isNonLoopbackBind)
     {
-        if (!isNonLoopbackBind)
+        // Skip auth for loopback unless the operator explicitly requires it or OIDC is active.
+        if (!isNonLoopbackBind && !config.Security.AlwaysRequireAuth && !config.Security.IsOidcMode)
             return true;
+
+        // OIDC mode: UseAuthentication() middleware has already validated the JWT.
+        if (config.Security.IsOidcMode)
+            return ctx.User.Identity?.IsAuthenticated == true;
 
         if (string.IsNullOrWhiteSpace(config.AuthToken))
             return false;
@@ -54,7 +60,12 @@ internal static class EndpointHelpers
         var operatorAccounts = ctx.RequestServices.GetService<OperatorAccountService>();
         var policy = organizationPolicy?.GetSnapshot() ?? new OrganizationPolicySnapshot();
 
-        if (!startup.IsNonLoopbackBind)
+        var useOidc = startup.Config.Security.IsOidcMode;
+
+        // Loopback bypass: skip auth only when neither AlwaysRequireAuth nor OIDC is active.
+        if (!startup.IsNonLoopbackBind
+            && !startup.Config.Security.AlwaysRequireAuth
+            && !useOidc)
         {
             return new OperatorAuthorizationResult(
                 true,
@@ -65,6 +76,32 @@ internal static class EndpointHelpers
                 AccountId: null,
                 Username: null,
                 DisplayName: "Loopback operator",
+                IsBootstrapAdmin: false);
+        }
+
+        // OIDC mode: UseAuthentication() has already validated the JWT and populated ctx.User.
+        if (useOidc && ctx.User.Identity?.IsAuthenticated == true)
+        {
+            var sub = ctx.User.FindFirstValue(ClaimTypes.NameIdentifier)
+                      ?? ctx.User.FindFirstValue("sub");
+            var username = ctx.User.FindFirstValue("preferred_username")
+                           ?? ctx.User.FindFirstValue(ClaimTypes.Name)
+                           ?? sub;
+            var displayName = ctx.User.FindFirstValue("name")
+                              ?? ctx.User.FindFirstValue(ClaimTypes.GivenName)
+                              ?? username;
+            var rawRole = ctx.User.FindFirstValue(startup.Config.Security.Oidc.RoleClaim)
+                          ?? ctx.User.FindFirstValue(ClaimTypes.Role);
+            var role = OperatorRoleNames.Normalize(rawRole);
+            return new OperatorAuthorizationResult(
+                true,
+                OrganizationAuthModeNames.OidcJwt,
+                UsedBrowserSession: false,
+                BrowserSession: null,
+                Role: role,
+                AccountId: sub,
+                Username: username,
+                DisplayName: displayName,
                 IsBootstrapAdmin: false);
         }
 
@@ -171,6 +208,7 @@ internal static class EndpointHelpers
         {
             "browser-session" when auth.BrowserSession is not null => $"browser:{auth.BrowserSession.SessionId}",
             OrganizationAuthModeNames.AccountToken => $"account-token:{GetRemoteIpKey(ctx)}",
+            OrganizationAuthModeNames.OidcJwt => $"oidc:{GetRemoteIpKey(ctx)}",
             "bearer" => $"bearer:{GetRemoteIpKey(ctx)}",
             "loopback-open" => "loopback",
             _ => $"operator:{GetRemoteIpKey(ctx)}"

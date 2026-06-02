@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using OpenClaw.Core.ExternalCli;
 using OpenClaw.Core.Pipeline;
 using OpenClaw.Core.Security;
@@ -10,6 +11,20 @@ internal static class SecurityServicesExtensions
 {
     public static IServiceCollection AddOpenClawSecurityServices(this IServiceCollection services, GatewayStartupContext startup)
     {
+        // Register OIDC/JWT Bearer authentication when AuthMode is "oidc".
+        // Switch between static token auth and OIDC (e.g. Keycloak) via Security.AuthMode config key.
+        if (startup.Config.Security.IsOidcMode)
+        {
+            services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+                .AddJwtBearer(options =>
+                {
+                    options.Authority = startup.Config.Security.Oidc.Authority;
+                    options.Audience = startup.Config.Security.Oidc.Audience;
+                    options.RequireHttpsMetadata = startup.Config.Security.Oidc.RequireHttpsMetadata;
+                });
+            services.AddAuthorization();
+        }
+
         services.AddSingleton<ToolApprovalService>();
         services.AddSingleton(sp =>
             new PairingManager(
