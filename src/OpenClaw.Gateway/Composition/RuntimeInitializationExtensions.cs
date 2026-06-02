@@ -70,11 +70,13 @@ internal static partial class RuntimeInitializationExtensions
         var blockedPluginIds = services.PluginHealth.GetBlockedPluginIds();
         var channelComposition = await BuildChannelCompositionAsync(app, startup, services, loggerFactory);
 
+        var artifactRuntime = new SkillArtifactRuntime();
         var builtInTools = CreateBuiltInTools(
             config,
             services,
             startup.WorkspacePath,
-            startup.RuntimeState);
+            startup.RuntimeState,
+            artifactRuntime);
         if (config.Plugins.Mcp.Enabled)
             await services.McpRegistry.RegisterToolsAsync(services.NativeRegistry, app.Lifetime.ApplicationStopping);
 
@@ -171,6 +173,11 @@ internal static partial class RuntimeInitializationExtensions
         // Wire the LoadSkillTool/ReadSkillResourceTool closures to the live runtime so
         // hot-reloaded skills resolve through runtime.LoadedSkills.
         runtimeForLoadSkill = agentRuntime;
+
+        // Keep SkillArtifactRuntime in sync whenever the agent reloads skills (hot reload).
+        if (agentRuntime is MafAgentRuntime mafRuntime)
+            mafRuntime.SkillsReloaded += reloadedSkills => artifactRuntime.ReplaceSkills(reloadedSkills);
+        artifactRuntime.ReplaceSkills(skills);
 
         // The native AgentRuntime branch (which wired a CompactHistoryAsync callback
         // for the /compact command) is excluded in kingcrab; MAF runtime handles

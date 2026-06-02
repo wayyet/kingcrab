@@ -504,6 +504,9 @@ public sealed class ToolingConfig
     /// <summary>Enable the <c>handoff</c> tool for transferring sessions to another agent. Default: false.</summary>
     public bool EnableHandoffTool { get; set; } = false;
 
+    /// <summary>Enable the <c>emit_artifact</c> tool for pushing file/data artifacts to the frontend via WebSocket. Default: true.</summary>
+    public bool EnableEmitArtifact { get; set; } = true;
+
     public bool AllowBrowserEvaluate { get; set; } = true;
     public bool BrowserHeadless { get; set; } = true;
     public int BrowserTimeoutSeconds { get; set; } = 30;

@@ -57,6 +57,7 @@ internal static partial class RuntimeInitializationExtensions
             UserProfileStore = app.Services.GetRequiredService<IUserProfileStore>(),
             ProcessService = app.Services.GetRequiredService<ExecutionProcessService>(),
             GeminiMultimodalService = app.Services.GetRequiredService<GeminiMultimodalService>(),
+            MediaCache = app.Services.GetRequiredService<MediaCacheStore>(),
             TextToSpeechService = app.Services.GetRequiredService<TextToSpeechService>(),
             LiveSessionService = app.Services.GetRequiredService<LiveSessionService>(),
             CronJobSource = app.Services.GetRequiredService<ICronJobSource>(),
@@ -574,6 +575,7 @@ internal static partial class RuntimeInitializationExtensions
         public required IUserProfileStore UserProfileStore { get; init; }
         public required ExecutionProcessService ProcessService { get; init; }
         public required GeminiMultimodalService GeminiMultimodalService { get; init; }
+        public required MediaCacheStore MediaCache { get; init; }
         public required TextToSpeechService TextToSpeechService { get; init; }
         public required LiveSessionService LiveSessionService { get; init; }
         public required ICronJobSource CronJobSource { get; init; }

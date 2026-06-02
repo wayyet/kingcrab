@@ -104,7 +104,8 @@ internal static partial class RuntimeInitializationExtensions
         GatewayConfig config,
         RuntimeServices services,
         string? workspacePath,
-        GatewayRuntimeState runtimeState)
+        GatewayRuntimeState runtimeState,
+        SkillArtifactRuntime artifactRuntime)
     {
         var projectId = config.Memory.ProjectId
             ?? Environment.GetEnvironmentVariable("OPENCLAW_PROJECT")
@@ -166,6 +167,9 @@ internal static partial class RuntimeInitializationExtensions
 
         if (config.Tooling.EnableHandoffTool)
             tools.Add(new HandoffTool(services.SessionMetadataStore, config.Handoff));
+
+        if (config.Tooling.EnableEmitArtifact)
+            tools.Add(new EmitArtifactTool(services.MediaCache, services.WebSocketChannel, config, artifactRuntime));
 
         if (config.ExternalCli.Enabled)
             tools.Add(new ExternalCliTool(
