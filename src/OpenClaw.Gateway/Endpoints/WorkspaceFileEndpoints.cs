@@ -429,10 +429,18 @@ internal static class WorkspaceFileEndpoints
                 return Results.Unauthorized();
 
             var rawJson = await mcpConfigStore.TryLoadRawAsync(ctx.RequestAborted);
-            if (rawJson is null)
-                return Results.Ok(new { raw = (string?)null });
+            JsonElement? userConfig = null;
+            if (rawJson is not null)
+            {
+                try { userConfig = JsonSerializer.Deserialize<JsonElement>(rawJson); }
+                catch { userConfig = null; }
+            }
 
-            return Results.Ok(new { raw = rawJson });
+            return Results.Ok(new
+            {
+                builtin = startup.Config.Plugins.Mcp,
+                user = userConfig
+            });
         });
 
         app.MapPut("/admin/workspace/mcp", async (HttpContext ctx) =>
