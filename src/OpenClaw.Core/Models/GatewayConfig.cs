@@ -504,6 +504,9 @@ public sealed class ToolingConfig
     /// <summary>Enable the <c>handoff</c> tool for transferring sessions to another agent. Default: false.</summary>
     public bool EnableHandoffTool { get; set; } = false;
 
+    /// <summary>Enable the <c>publish_file</c> tool that publishes a local file as a downloadable attachment. Default: true.</summary>
+    public bool EnablePublishFile { get; set; } = true;
+
     /// <summary>Enable the <c>emit_artifact</c> tool for pushing file/data artifacts to the frontend via WebSocket. Default: true.</summary>
     public bool EnableEmitArtifact { get; set; } = true;
 

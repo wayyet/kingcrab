@@ -197,6 +197,9 @@ internal static partial class RuntimeInitializationExtensions
         if (config.Payments.Enabled && config.Payments.ToolEnabled)
             tools.Add(PaymentPluginRegistration.CreateTool(services.PaymentRuntime, config.Payments.Provider, config.Payments.Environment));
 
+        if (config.Tooling.EnablePublishFile)
+            tools.Add(new PublishFileTool(config.Tooling));
+
         if (string.Equals(Environment.GetEnvironmentVariable("OPENCLAW_ENABLE_STREAMING_SMOKE_TOOL"), "1", StringComparison.Ordinal))
             tools.Add(new StreamingSmokeEchoTool());
 
