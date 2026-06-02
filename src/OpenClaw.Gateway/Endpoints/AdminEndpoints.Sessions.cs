@@ -432,5 +432,59 @@ internal static partial class AdminEndpoints
                 Items = items
             }, CoreJsonContext.Default.SessionExportResponse);
         });
+
+        app.MapGet("/admin/sessions/active", (HttpContext ctx) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: false, endpointScope: "admin.sessions");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+
+            var ids = runtime.SessionManager.ListActiveAsync(CancellationToken.None).GetAwaiter().GetResult()
+                .Select(s => s.Id)
+                .ToList();
+
+            return Results.Json(ids, CoreJsonContext.Default.ListString);
+        });
+
+        app.MapPost("/admin/sessions/{id}/abort", (HttpContext ctx, string id) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: true, endpointScope: "admin.sessions.abort");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+            var auth = authResult.Authorization!;
+            if (!EndpointHelpers.TryConsumeOperatorRateLimit(ctx, operations, auth, "admin.control", out var blockedByPolicyId))
+                return Results.Json(new OperationStatusResponse { Success = false, Message = $"Rate limit exceeded by policy '{blockedByPolicyId}'." }, CoreJsonContext.Default.OperationStatusResponse, statusCode: StatusCodes.Status429TooManyRequests);
+
+            var session = runtime.SessionManager.TryGetActiveById(id);
+            if (session is null)
+                return Results.Json(new OperationStatusResponse { Success = false, Message = $"No active session found with id '{id}'." }, CoreJsonContext.Default.OperationStatusResponse, statusCode: StatusCodes.Status404NotFound);
+
+            // Cancel any in-flight execution by cancelling the session's pipeline worker token
+            // SessionAbortRegistry is not wired in this project; use SessionManager to remove the active entry
+            runtime.SessionManager.RemoveActive(id);
+            RecordOperatorAudit(ctx, operations, auth, "session_abort", id, $"Aborted session '{id}'.", true, before: null, after: null);
+            return Results.Json(new OperationStatusResponse { Success = true, Message = $"Session '{id}' abort signalled." }, CoreJsonContext.Default.OperationStatusResponse);
+        });
+
+        app.MapDelete("/admin/sessions/{id}", async (HttpContext ctx, string id) =>
+        {
+            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: true, endpointScope: "admin.sessions.delete");
+            if (authResult.Failure is not null)
+                return authResult.Failure;
+            var auth = authResult.Authorization!;
+            if (!EndpointHelpers.TryConsumeOperatorRateLimit(ctx, operations, auth, "admin.control", out var blockedByPolicyId))
+                return Results.Json(new OperationStatusResponse { Success = false, Message = $"Rate limit exceeded by policy '{blockedByPolicyId}'." }, CoreJsonContext.Default.OperationStatusResponse, statusCode: StatusCodes.Status429TooManyRequests);
+
+            var memoryStore = services.MemoryStore;
+            var existing = await memoryStore.GetSessionAsync(id, ctx.RequestAborted);
+            if (existing is null && !runtime.SessionManager.IsActive(id))
+                return Results.Json(new OperationStatusResponse { Success = false, Message = $"Session '{id}' not found." }, CoreJsonContext.Default.OperationStatusResponse, statusCode: StatusCodes.Status404NotFound);
+
+            // Remove from active pool and persistent store
+            runtime.SessionManager.RemoveActive(id);
+            await memoryStore.DeleteSessionAsync(id, ctx.RequestAborted);
+            RecordOperatorAudit(ctx, operations, auth, "session_delete", id, $"Deleted session '{id}'.", true, before: null, after: null);
+            return Results.Json(new OperationStatusResponse { Success = true, Message = $"Session '{id}' deleted." }, CoreJsonContext.Default.OperationStatusResponse);
+        });
     }
 }

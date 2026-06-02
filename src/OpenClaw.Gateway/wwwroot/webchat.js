@@ -3230,6 +3230,7 @@ async function switchToSession(sessionId, title) {
         if (chatStateBarClone) chatContainer.appendChild(chatStateBarClone);
         const emptyStateEl = document.getElementById('empty-state');
         if (emptyStateEl) chatContainer.appendChild(emptyStateEl);
+        chatContainer.appendChild(typingRow);
 
         for (const turn of history) {
             if (!turn.role || (!turn.content && (!turn.toolCalls || !turn.toolCalls.length))) continue;
@@ -3282,7 +3283,7 @@ function returnToCurrentSession() {
     chatContainer.appendChild(chatStateBarEl);
     const emptyEl = document.getElementById('empty-state');
     if (emptyEl) chatContainer.appendChild(emptyEl);
-    document.getElementById('typing-row')?.remove();
+    chatContainer.appendChild(typingRow);
     updateEmptyState();
     appendSystem('已返回当前会话。');
     document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
@@ -3294,6 +3295,7 @@ async function startNewChatSession() {
     chatContainer.innerHTML = '';
     const emptyEl = document.getElementById('empty-state');
     if (emptyEl) chatContainer.appendChild(emptyEl);
+    chatContainer.appendChild(typingRow);
     appendSystem('新对话已开始。');
     updateEmptyState();
     if (sessionSidebar && !sessionSidebar.hidden) {

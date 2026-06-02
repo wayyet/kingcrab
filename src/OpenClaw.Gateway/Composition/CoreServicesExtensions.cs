@@ -231,6 +231,11 @@ internal static class CoreServicesExtensions
                 sp.GetRequiredService<IAutomationRunDispatcher>()));
         // CronSchedulerStartupService is excluded together with TickerQ
         // (see docs/migration/exclusion-list.md §1.1). No hosted tick loop is registered.
+        services.AddSingleton(sp =>
+            new McpConfigStore(
+                config.Memory.StoragePath,
+                sp.GetRequiredService<ILogger<McpConfigStore>>()));
+        services.AddSingleton<McpWatcherHolder>();
         services.AddSingleton(new WebSocketChannel(config.WebSocket));
         services.AddSingleton<CanvasCommandBroker>();
         services.AddSingleton<GatewayRuntimeShutdownCoordinator>();

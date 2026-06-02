@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Text.Json;
 using OpenClaw.Core.Models;
 using OpenClaw.Core.Security;
 using OpenClaw.Gateway.Bootstrap;
@@ -277,6 +278,71 @@ internal static class WorkspaceFileEndpoints
                 CoreJsonContext.Default.WorkspaceTreeResponse);
         });
 
+        // GET /admin/workspace/browse?path=<relative-path>
+        // Returns a flat (one-level) directory listing with { files: [{ name, path, isDirectory, size }] }.
+        app.MapGet("/admin/workspace/browse", async (HttpContext ctx) =>
+        {
+            var auth = EndpointHelpers.AuthorizeOperatorRequest(ctx, startup, browserSessions, requireCsrf: false);
+            if (!auth.IsAuthorized)
+                return Results.Unauthorized();
+
+            var workspacePath = startup.WorkspacePath
+                ?? SecretResolver.Resolve(startup.Config.Tooling.WorkspaceRoot);
+            if (string.IsNullOrWhiteSpace(workspacePath))
+                return Results.Json(
+                    new WorkspaceBrowseResponse { Success = false, Error = "Workspace path is not configured (OPENCLAW_WORKSPACE not set)." },
+                    CoreJsonContext.Default.WorkspaceBrowseResponse,
+                    statusCode: StatusCodes.Status501NotImplemented);
+
+            var workspaceRoot = Path.GetFullPath(workspacePath);
+
+            var pathParam = ctx.Request.Query["path"].FirstOrDefault() ?? "";
+            var targetPath = ResolveAndValidatePath(workspaceRoot, pathParam, out var pathError);
+            if (targetPath is null)
+                return Results.Json(
+                    new WorkspaceBrowseResponse { Success = false, Error = pathError },
+                    CoreJsonContext.Default.WorkspaceBrowseResponse,
+                    statusCode: StatusCodes.Status400BadRequest);
+
+            if (!Directory.Exists(targetPath))
+                return Results.Json(
+                    new WorkspaceBrowseResponse { Success = false, Error = "Path does not exist or is not a directory." },
+                    CoreJsonContext.Default.WorkspaceBrowseResponse,
+                    statusCode: StatusCodes.Status404NotFound);
+
+            var entries = new List<WorkspaceBrowseEntry>();
+            try
+            {
+                foreach (var dir in Directory.GetDirectories(targetPath).OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+                    entries.Add(new WorkspaceBrowseEntry
+                    {
+                        Name = Path.GetFileName(dir),
+                        Path = Path.GetRelativePath(workspaceRoot, dir).Replace('\\', '/'),
+                        IsDirectory = true
+                    });
+                foreach (var file in Directory.GetFiles(targetPath).OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+                    entries.Add(new WorkspaceBrowseEntry
+                    {
+                        Name = Path.GetFileName(file),
+                        Path = Path.GetRelativePath(workspaceRoot, file).Replace('\\', '/'),
+                        IsDirectory = false,
+                        Size = new FileInfo(file).Length
+                    });
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(
+                    new WorkspaceBrowseResponse { Success = false, Error = $"Failed to list directory: {ex.Message}" },
+                    CoreJsonContext.Default.WorkspaceBrowseResponse,
+                    statusCode: StatusCodes.Status500InternalServerError);
+            }
+
+            await ValueTask.CompletedTask;
+            return Results.Json(
+                new WorkspaceBrowseResponse { Success = true, Files = entries },
+                CoreJsonContext.Default.WorkspaceBrowseResponse);
+        });
+
         // GET /admin/workspace/download?path=<relative-path>
         // - File  → streamed directly with appropriate Content-Type.
         // - Directory → packed as ZIP and streamed.
@@ -351,6 +417,57 @@ internal static class WorkspaceFileEndpoints
                 new WorkspaceUploadResponse { Success = false, Error = $"Path not found: '{pathParam}'." },
                 CoreJsonContext.Default.WorkspaceUploadResponse,
                 statusCode: StatusCodes.Status404NotFound);
+        });
+
+        var mcpConfigStore = app.Services.GetRequiredService<OpenClaw.Gateway.Mcp.McpConfigStore>();
+        var mcpWatcherHolder = app.Services.GetRequiredService<OpenClaw.Gateway.Mcp.McpWatcherHolder>();
+
+        app.MapGet("/admin/workspace/mcp", async (HttpContext ctx) =>
+        {
+            var auth = EndpointHelpers.AuthorizeOperatorRequest(ctx, startup, browserSessions, requireCsrf: false);
+            if (!auth.IsAuthorized)
+                return Results.Unauthorized();
+
+            var rawJson = await mcpConfigStore.TryLoadRawAsync(ctx.RequestAborted);
+            if (rawJson is null)
+                return Results.Ok(new { raw = (string?)null });
+
+            return Results.Ok(new { raw = rawJson });
+        });
+
+        app.MapPut("/admin/workspace/mcp", async (HttpContext ctx) =>
+        {
+            var auth = EndpointHelpers.AuthorizeOperatorRequest(ctx, startup, browserSessions, requireCsrf: true);
+            if (!auth.IsAuthorized)
+                return Results.Unauthorized();
+
+            if (!EndpointHelpers.TryConsumeOperatorRateLimit(ctx, operations, auth, "admin.control", out var blockedByPolicyId))
+                return Results.Json(
+                    new WorkspaceUploadResponse { Success = false, Error = $"Rate limit exceeded by policy '{blockedByPolicyId}'." },
+                    CoreJsonContext.Default.WorkspaceUploadResponse,
+                    statusCode: StatusCodes.Status429TooManyRequests);
+
+            string body;
+            using (var reader = new System.IO.StreamReader(ctx.Request.Body))
+                body = await reader.ReadToEndAsync(ctx.RequestAborted);
+
+            if (string.IsNullOrWhiteSpace(body))
+                return Results.BadRequest(new WorkspaceUploadResponse { Success = false, Error = "Request body is required." });
+
+            // Validate JSON is parseable
+            try
+            {
+                JsonDocument.Parse(body);
+            }
+            catch (JsonException ex)
+            {
+                return Results.BadRequest(new WorkspaceUploadResponse { Success = false, Error = $"Invalid JSON: {ex.Message}" });
+            }
+
+            await mcpConfigStore.SaveAsync(body, ctx.RequestAborted);
+            mcpWatcherHolder.Watcher?.TriggerReload();
+            AppendAudit(ctx, operations, auth, "workspace_mcp_update", "mcp.json", "Updated workspace MCP configuration.", success: true);
+            return Results.Ok(new WorkspaceUploadResponse { Success = true });
         });
     }
 

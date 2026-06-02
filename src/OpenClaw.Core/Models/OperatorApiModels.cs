@@ -197,6 +197,20 @@ public sealed class SkillListResponse
     public IReadOnlyList<SkillHealthSnapshot> Items { get; init; } = [];
 }
 
+public sealed class SkillInstallRequest
+{
+    public string Name { get; init; } = "";
+    public string Content { get; init; } = "";
+}
+
+public sealed class SkillMutationResponse
+{
+    public bool Success { get; init; }
+    public string? Error { get; init; }
+    public int TotalLoaded { get; init; }
+    public IReadOnlyList<string> LoadedNames { get; init; } = [];
+}
+
 /// <summary>
 /// Per-skill cost breakdown for the SKILL progressive-disclosure dashboard.
 /// All values are character counts of the prompt fragments emitted by
@@ -695,6 +709,21 @@ public sealed class ActorRateLimitResponse
 {
     public IReadOnlyList<ActorRateLimitPolicy> Policies { get; init; } = [];
     public IReadOnlyList<ActorRateLimitStatus> Active { get; init; } = [];
+}
+
+public sealed class WorkspaceBrowseEntry
+{
+    public string Name { get; init; } = "";
+    public string Path { get; init; } = "";
+    public bool IsDirectory { get; init; }
+    public long? Size { get; init; }
+}
+
+public sealed class WorkspaceBrowseResponse
+{
+    public bool Success { get; init; }
+    public string? Error { get; init; }
+    public IReadOnlyList<WorkspaceBrowseEntry> Files { get; init; } = [];
 }
 
 public sealed class SecurityPostureResponse

@@ -7776,6 +7776,7 @@ public sealed class GatewayAdminEndpointTests
     {
         public ValueTask<Session?> GetSessionAsync(string sessionId, CancellationToken ct) => inner.GetSessionAsync(sessionId, ct);
         public ValueTask SaveSessionAsync(Session session, CancellationToken ct) => throw new IOException("Simulated persistence failure.");
+        public ValueTask DeleteSessionAsync(string sessionId, CancellationToken ct) => inner.DeleteSessionAsync(sessionId, ct);
         public ValueTask<string?> LoadNoteAsync(string key, CancellationToken ct) => inner.LoadNoteAsync(key, ct);
         public ValueTask SaveNoteAsync(string key, string content, CancellationToken ct) => inner.SaveNoteAsync(key, content, ct);
         public ValueTask DeleteNoteAsync(string key, CancellationToken ct) => inner.DeleteNoteAsync(key, ct);

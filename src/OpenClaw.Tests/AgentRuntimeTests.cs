@@ -335,6 +335,9 @@ public class AgentRuntimeTests
             return ValueTask.CompletedTask;
         }
 
+        public ValueTask DeleteSessionAsync(string sessionId, CancellationToken ct)
+            => ValueTask.CompletedTask;
+
         public ValueTask<string?> LoadNoteAsync(string key, CancellationToken ct)
             => ValueTask.FromResult<string?>(null);
 
