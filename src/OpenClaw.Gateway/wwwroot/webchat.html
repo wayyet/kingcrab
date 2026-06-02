@@ -47,6 +47,43 @@
                 </svg>
             </button>
 
+            <!-- Session sidebar toggle -->
+            <button id="sessions-toggle-btn" class="btn-icon" type="button" title="会话列表" aria-label="会话列表">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+                </svg>
+            </button>
+            <!-- MCP Servers button -->
+            <button id="mcp-panel-btn" class="btn-icon" type="button" title="MCP Servers">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+                </svg>
+            </button>
+            <!-- Channel Config button -->
+            <button id="channel-panel-btn" class="btn-icon" type="button" title="渠道配置">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/>
+                </svg>
+            </button>
+            <!-- Digital Employee button -->
+            <button id="de-panel-btn" class="btn-icon" type="button" title="数字员工管理">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
+                </svg>
+            </button>
+            <!-- Workspace Files button -->
+            <button id="wf-panel-btn" class="btn-icon" type="button" title="工作区文件">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                </svg>
+            </button>
+            <!-- Cron / Automation button -->
+            <button id="cron-panel-btn" class="btn-icon" type="button" title="定时任务">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                </svg>
+            </button>
+
             <button id="theme-toggle" class="btn-icon" type="button" title="Toggle theme" aria-label="Toggle theme">
                 <svg id="theme-icon-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <circle cx="12" cy="12" r="4"/>
@@ -71,7 +108,34 @@
     </div>
 
     <main class="workspace" id="workspace">
+        <!-- Session Sidebar -->
+        <aside id="session-sidebar" class="session-sidebar" hidden>
+            <div class="session-sidebar__header">
+                <span class="session-sidebar__title">会话历史</span>
+                <div style="display:flex;gap:0.4rem;">
+                    <button id="new-chat-btn" class="btn btn-sm btn-primary" type="button">新对话</button>
+                    <button id="session-sidebar-close" class="btn-icon" type="button" aria-label="关闭">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                    </button>
+                </div>
+            </div>
+            <div class="session-sidebar__search">
+                <input type="search" id="session-search-input" class="input" placeholder="搜索会话...">
+            </div>
+            <div id="session-list" class="session-list">
+                <div class="session-empty">暂无历史会话</div>
+            </div>
+            <div class="session-sidebar__footer">
+                <button id="clear-all-sessions-btn" class="btn btn-sm btn-ghost" type="button">清空所有会话</button>
+            </div>
+        </aside>
+
         <section class="chat-pane">
+            <!-- History session banner -->
+            <div id="history-banner" class="banner banner--info" hidden role="status" style="margin-top: 0.6rem;">
+                <span class="banner__text" id="history-banner-text">正在查看历史会话</span>
+                <button id="history-banner-close" class="btn btn-sm btn-secondary" type="button">返回当前</button>
+            </div>
             <!-- Connection / auth banners (only visible when relevant). -->
             <div id="connection-banner" class="banner banner--warning" hidden style="margin-top: 0.6rem;" role="status">
                 <span class="banner__text" id="connection-banner-text">Connection lost. Reconnecting...</span>
@@ -144,9 +208,15 @@
                         <button id="clear-attachments-button" class="btn btn-ghost btn-sm" type="button">Clear</button>
                     </div>
 
+                    <!-- File chips (non-image uploaded files) -->
+                    <div id="file-chips" class="file-chips" hidden></div>
+
                     <div class="composer-shell" id="composer-shell">
                         <button id="attach-button" type="button" title="Attach image" aria-label="Attach image">+</button>
                         <input id="image-input" type="file" accept="image/*" multiple>
+                        <!-- File upload (non-image) -->
+                        <button id="attach-file-btn" type="button" title="附加文件" aria-label="附加文件" style="background:none;border:none;cursor:pointer;padding:0 0.4rem;color:var(--text-secondary);font-size:0.8rem;">📎</button>
+                        <input id="file-input" type="file" multiple style="display:none;">
                         <textarea id="message-input" rows="1" placeholder="Message OpenClaw.NET..." aria-label="Message OpenClaw.NET" disabled></textarea>
                         <button id="send-button" type="button" disabled title="Send message" aria-label="Send message">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -411,6 +481,311 @@
             <div class="modal-actions">
                 <button id="doctor-copy-button" class="btn btn-secondary" type="button">Copy</button>
                 <button id="doctor-add-chat-button" class="btn btn-secondary" type="button">Also add to chat</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================
+         MCP Servers Panel
+         ============================================================ -->
+    <div id="mcp-overlay" class="panel-overlay" hidden>
+        <div class="panel-card">
+            <div class="panel-header">
+                <h2>MCP Servers</h2>
+                <button id="mcp-close-btn" class="btn-icon" type="button" aria-label="关闭">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="panel-body">
+                <div id="mcp-server-list" class="panel-list"></div>
+                <div id="mcp-form-section" class="panel-form" hidden>
+                    <div class="panel-form-header">
+                        <h3 id="mcp-form-title">Add Server</h3>
+                        <div id="mcp-form-error" class="panel-error" hidden></div>
+                    </div>
+                    <label class="form-field">
+                        <span>Server ID</span>
+                        <input type="text" id="mcp-f-id" class="input" placeholder="my-server">
+                    </label>
+                    <label class="form-field">
+                        <span>Display Name</span>
+                        <input type="text" id="mcp-f-name" class="input" placeholder="Optional name">
+                    </label>
+                    <label class="form-field">
+                        <span>Transport</span>
+                        <select id="mcp-f-transport" class="input">
+                            <option value="streamable-http">Streamable HTTP</option>
+                            <option value="sse">SSE</option>
+                        </select>
+                    </label>
+                    <label class="form-field">
+                        <span>URL</span>
+                        <input type="url" id="mcp-f-url" class="input" placeholder="https://...">
+                    </label>
+                    <label class="form-field">
+                        <span>Bearer Token (optional)</span>
+                        <input type="password" id="mcp-f-token" class="input" placeholder="Leave blank for none" autocomplete="off">
+                    </label>
+                    <label class="form-field">
+                        <span>Tool Name Prefix (optional)</span>
+                        <input type="text" id="mcp-f-prefix" class="input" placeholder="my-server.">
+                    </label>
+                    <label class="form-field">
+                        <span>Startup Timeout (seconds)</span>
+                        <input type="number" id="mcp-f-startup-timeout" class="input" placeholder="30" min="1">
+                    </label>
+                    <label class="form-field">
+                        <span>Request Timeout (seconds)</span>
+                        <input type="number" id="mcp-f-request-timeout" class="input" placeholder="60" min="1">
+                    </label>
+                    <label class="toggle">
+                        <input type="checkbox" id="mcp-f-enabled" checked>
+                        <span>Enabled</span>
+                    </label>
+                    <div class="panel-form-actions">
+                        <button id="mcp-cancel-btn" class="btn btn-secondary" type="button">Cancel</button>
+                        <button id="mcp-save-btn" class="btn btn-primary" type="button">Save</button>
+                    </div>
+                </div>
+            </div>
+            <div class="panel-footer">
+                <div id="mcp-panel-status" class="panel-status" hidden></div>
+                <button id="mcp-add-btn" class="btn btn-primary btn-sm" type="button">+ Add Server</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================
+         Channel Config Panel
+         ============================================================ -->
+    <div id="channel-overlay" class="panel-overlay" hidden>
+        <div class="panel-card">
+            <div class="panel-header">
+                <h2>渠道配置</h2>
+                <button id="channel-close-btn" class="btn-icon" type="button" aria-label="关闭">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="panel-body">
+                <div class="panel-tabs">
+                    <button class="panel-tab ch-tab active" data-channel="feishu" type="button">飞书</button>
+                    <button class="panel-tab ch-tab" data-channel="dingtalk" type="button">钉钉</button>
+                    <button class="panel-tab ch-tab" data-channel="wecom" type="button">企业微信</button>
+                </div>
+                <div id="ch-form-error" class="panel-error" hidden></div>
+                <!-- Feishu Form -->
+                <div id="ch-feishu-form" class="panel-tab-content">
+                    <label class="form-field"><span>App ID</span><input type="text" id="feishu-appid" class="input" placeholder="cli_..."></label>
+                    <label class="form-field"><span>App Secret</span><input type="password" id="feishu-appsecret" class="input" placeholder="(当前会话内有效)" autocomplete="off"></label>
+                    <label class="form-field"><span>App Secret 引用 (Secret Ref)</span><input type="text" id="feishu-appsecret-ref" class="input" placeholder="env:FEISHU_SECRET"></label>
+                </div>
+                <!-- DingTalk Form -->
+                <div id="ch-dingtalk-form" class="panel-tab-content" hidden>
+                    <label class="form-field"><span>App ID</span><input type="text" id="dingtalk-appid" class="input" placeholder="dingxxxx"></label>
+                    <label class="form-field"><span>App Key</span><input type="text" id="dingtalk-appkey" class="input"></label>
+                    <label class="form-field"><span>App Secret</span><input type="password" id="dingtalk-appsecret" class="input" autocomplete="off"></label>
+                </div>
+                <!-- WeCom Form -->
+                <div id="ch-wecom-form" class="panel-tab-content" hidden>
+                    <label class="form-field"><span>Bot ID</span><input type="text" id="wecom-botid" class="input"></label>
+                    <label class="form-field"><span>Bot Secret</span><input type="password" id="wecom-botsecret" class="input" autocomplete="off"></label>
+                </div>
+            </div>
+            <div class="panel-footer">
+                <div id="ch-panel-status" class="panel-status" hidden></div>
+                <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+                    <button id="channel-load-btn" class="btn btn-secondary btn-sm" type="button">加载</button>
+                    <button id="channel-revert-btn" class="btn btn-secondary btn-sm" type="button">恢复默认</button>
+                    <button id="channel-save-btn" class="btn btn-primary btn-sm" type="button">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================
+         Digital Employee Panel
+         ============================================================ -->
+    <div id="de-overlay" class="panel-overlay" hidden>
+        <div class="panel-card">
+            <div class="panel-header">
+                <h2>数字员工管理</h2>
+                <button id="de-close-btn" class="btn-icon" type="button" aria-label="关闭">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="panel-body">
+                <div class="panel-tabs">
+                    <button class="panel-tab active" id="de-tab-list" type="button">技能列表</button>
+                    <button class="panel-tab" id="de-tab-skill-pkg" type="button">技能 ZIP 上传</button>
+                    <button class="panel-tab" id="de-tab-pkg" type="button">数字员工包</button>
+                </div>
+                <!-- Skills List Tab -->
+                <div id="de-panel-list" class="panel-tab-content">
+                    <div id="de-skill-list"><div class="panel-hint">加载中…</div></div>
+                    <div class="panel-tab-actions">
+                        <button id="de-refresh-btn" class="btn btn-secondary btn-sm" type="button">刷新</button>
+                    </div>
+                </div>
+                <!-- Skill ZIP Upload Tab -->
+                <div id="de-panel-skill-pkg" class="panel-tab-content" hidden>
+                    <div id="de-skill-dropzone" class="upload-zone">
+                        <p>拖放技能 ZIP 文件至此，或 <button class="link-btn" id="de-skill-pkg-browse-btn" type="button">点击选择</button></p>
+                        <input type="file" id="de-skill-pkg-file-input" accept=".zip" style="display:none;">
+                        <div id="de-skill-pkg-filename" class="upload-zone__filename" hidden></div>
+                    </div>
+                    <div id="de-skill-pkg-result" class="panel-result" hidden></div>
+                    <div class="panel-tab-actions">
+                        <button id="de-skill-pkg-upload-btn" class="btn btn-primary btn-sm" type="button" disabled>上传安装</button>
+                    </div>
+                </div>
+                <!-- Package Upload Tab -->
+                <div id="de-panel-pkg" class="panel-tab-content" hidden>
+                    <div id="de-pkg-dropzone" class="upload-zone">
+                        <p>拖放数字员工包至此，或 <button class="link-btn" id="de-pkg-browse-btn" type="button">点击选择</button></p>
+                        <input type="file" id="de-pkg-file-input" style="display:none;">
+                        <div id="de-pkg-filename" class="upload-zone__filename" hidden></div>
+                    </div>
+                    <div id="de-pkg-result" class="panel-result" hidden></div>
+                    <div class="panel-tab-actions">
+                        <button id="de-pkg-upload-btn" class="btn btn-primary btn-sm" type="button" disabled>上传安装</button>
+                    </div>
+                </div>
+            </div>
+            <div class="panel-footer">
+                <div id="de-panel-status" class="panel-status" hidden></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================
+         Workspace Files Panel
+         ============================================================ -->
+    <div id="wf-overlay" class="panel-overlay" hidden>
+        <div class="panel-card">
+            <div class="panel-header">
+                <h2>工作区文件</h2>
+                <button id="wf-close-btn" class="btn-icon" type="button" aria-label="关闭">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="panel-body">
+                <div class="panel-tabs">
+                    <button class="panel-tab active" id="wf-tab-browse" type="button">浏览</button>
+                    <button class="panel-tab" id="wf-tab-upload" type="button">上传</button>
+                </div>
+                <!-- Browse Tab -->
+                <div id="wf-panel-browse" class="panel-tab-content">
+                    <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;">
+                        <input type="text" id="wf-path-input" class="input" placeholder="路径 (留空为根目录)" style="flex:1;">
+                        <button id="wf-browse-btn" class="btn btn-secondary btn-sm" type="button">浏览</button>
+                    </div>
+                    <div id="wf-file-list" class="panel-list"></div>
+                </div>
+                <!-- Upload Tab -->
+                <div id="wf-panel-upload" class="panel-tab-content" hidden>
+                    <div id="wf-upload-dropzone" class="upload-zone">
+                        <p>拖放文件至此，或 <button class="link-btn" id="wf-upload-browse-btn" type="button">点击选择</button></p>
+                        <input type="file" id="wf-upload-file-input" multiple style="display:none;">
+                        <div id="wf-upload-filename" class="upload-zone__filename" hidden></div>
+                    </div>
+                    <label class="form-field" style="margin-top:0.75rem;">
+                        <span>目标路径 (可选)</span>
+                        <input type="text" id="wf-upload-path" class="input" placeholder="folder/subfolder">
+                    </label>
+                    <div class="panel-tab-actions">
+                        <button id="wf-upload-btn" class="btn btn-primary btn-sm" type="button" disabled>上传</button>
+                    </div>
+                    <div id="wf-upload-result" class="panel-result" hidden></div>
+                </div>
+            </div>
+            <div class="panel-footer">
+                <div id="wf-panel-status" class="panel-status" hidden></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================
+         Cron / Automation Panel
+         ============================================================ -->
+    <div id="cron-overlay" class="panel-overlay" hidden>
+        <div class="panel-card">
+            <div class="panel-header">
+                <h2>定时任务</h2>
+                <div style="display:flex;gap:0.4rem;">
+                    <button id="cron-refresh-btn" class="btn-icon" type="button" title="刷新">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                    </button>
+                    <button id="cron-close-btn" class="btn-icon" type="button" aria-label="关闭">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                    </button>
+                </div>
+            </div>
+            <div class="panel-body">
+                <!-- Job List -->
+                <div id="cron-job-list" class="panel-list"></div>
+                <!-- Add/Edit Form -->
+                <div id="cron-form-section" class="panel-form" hidden>
+                    <h3 id="cron-form-title">新建定时任务</h3>
+                    <div id="cron-form-error" class="panel-error" hidden></div>
+                    <label class="form-field"><span>任务名称</span><input type="text" id="cron-f-name" class="input" placeholder="每日汇报"></label>
+                    <label class="form-field"><span>提示词</span><textarea id="cron-f-prompt" class="input" rows="3" placeholder="请生成今日工作汇报..."></textarea></label>
+                    <!-- Schedule tabs -->
+                    <div class="form-field">
+                        <span>执行计划</span>
+                        <div class="panel-tabs" style="margin-top:0.4rem;">
+                            <button class="panel-tab cron-freq-tab active" data-preset="daily" type="button">每日</button>
+                            <button class="panel-tab cron-freq-tab" data-preset="interval" type="button">间隔</button>
+                            <button class="panel-tab cron-freq-tab" data-preset="custom" type="button">自定义</button>
+                        </div>
+                        <div id="cron-preset-daily" style="margin-top:0.5rem;display:flex;gap:0.75rem;flex-wrap:wrap;">
+                            <label class="form-field" style="flex:1;min-width:120px;"><span>时间</span><input type="time" id="cron-daily-time" class="input" value="09:00"></label>
+                            <label class="toggle" style="align-self:flex-end;padding-bottom:0.1rem;"><input type="checkbox" id="cron-daily-weekday"><span>仅工作日</span></label>
+                        </div>
+                        <div id="cron-preset-interval" style="margin-top:0.5rem;display:flex;gap:0.75rem;flex-wrap:wrap;" hidden>
+                            <label class="form-field" style="flex:1;"><span>间隔值</span><input type="number" id="cron-interval-val" class="input" value="1" min="1"></label>
+                            <label class="form-field" style="flex:1;"><span>单位</span><select id="cron-interval-unit" class="input"><option value="hour">小时</option><option value="min">分钟</option></select></label>
+                        </div>
+                        <div id="cron-preset-custom" style="margin-top:0.5rem;" hidden>
+                            <label class="form-field"><span>Cron 表达式</span><input type="text" id="cron-f-schedule-raw" class="input" placeholder="0 9 * * *"></label>
+                        </div>
+                    </div>
+                    <label class="form-field"><span>时区</span><input type="text" id="cron-f-timezone" class="input" placeholder="Asia/Shanghai"></label>
+                    <label class="form-field"><span>模型 ID (可选)</span><input type="text" id="cron-f-model" class="input" placeholder="留空则使用默认"></label>
+                    <label class="form-field"><span>渠道 ID (可选)</span><input type="text" id="cron-f-channel" class="input" placeholder="feishu / dingtalk / ..."></label>
+                    <label class="form-field"><span>接收方 ID (可选)</span><input type="text" id="cron-f-recipient" class="input"></label>
+                    <label class="toggle"><input type="checkbox" id="cron-f-enabled" checked><span>启用</span></label>
+                    <div class="panel-form-actions">
+                        <button id="cron-form-cancel-btn" class="btn btn-secondary" type="button">取消</button>
+                        <button id="cron-form-save-btn" class="btn btn-primary" type="button">保存</button>
+                    </div>
+                </div>
+                <!-- History Section -->
+                <div id="cron-history-section" class="panel-form" hidden>
+                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                        <h3 id="cron-history-title">执行历史</h3>
+                        <div style="display:flex;gap:0.4rem;">
+                            <button id="cron-session-view-btn" class="btn btn-secondary btn-sm" type="button" hidden>查看完整会话</button>
+                            <button id="cron-history-close-btn" class="btn-icon btn-sm" type="button" aria-label="关闭">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="cron-history-list" class="panel-list"></div>
+                </div>
+                <!-- Session View Section -->
+                <div id="cron-session-section" class="panel-form" hidden>
+                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                        <h3 id="cron-session-title">完整会话</h3>
+                        <button id="cron-session-close-btn" class="btn-icon btn-sm" type="button" aria-label="关闭">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                        </button>
+                    </div>
+                    <div id="cron-session-list" class="panel-list" style="max-height:360px;overflow-y:auto;"></div>
+                </div>
+            </div>
+            <div class="panel-footer">
+                <div id="cron-panel-status" class="panel-status" hidden></div>
+                <button id="cron-add-btn" class="btn btn-primary btn-sm" type="button">+ 新建任务</button>
             </div>
         </div>
     </div>

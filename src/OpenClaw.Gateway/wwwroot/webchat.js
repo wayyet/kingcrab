@@ -99,6 +99,20 @@ const attachmentCount = document.getElementById('attachment-count');
 const attachmentList = document.getElementById('attachment-list');
 const clearAttachmentsButton = document.getElementById('clear-attachments-button');
 const composerDisabledReason = document.getElementById('composer-disabled-reason');
+// New panel buttons and elements
+const sessionToggleBtn = document.getElementById('sessions-toggle-btn');
+const sessionSidebar = document.getElementById('session-sidebar');
+const sessionSidebarClose = document.getElementById('session-sidebar-close');
+const newChatBtn = document.getElementById('new-chat-btn');
+const sessionList = document.getElementById('session-list');
+const sessionSearchInput = document.getElementById('session-search-input');
+const clearAllSessionsBtn = document.getElementById('clear-all-sessions-btn');
+const historyBanner = document.getElementById('history-banner');
+const historyBannerText = document.getElementById('history-banner-text');
+const historyBannerClose = document.getElementById('history-banner-close');
+const fileChips = document.getElementById('file-chips');
+const attachFileBtn = document.getElementById('attach-file-btn');
+const fileInput = document.getElementById('file-input');
 const approvalModal = document.getElementById('approval-modal');
 const approvalToolName = document.getElementById('approval-tool-name');
 const approvalIdEl = document.getElementById('approval-id');
@@ -148,6 +162,11 @@ let activeApproval = null;
 const canvasSurfaces = new Map();
 let activeCanvasSurfaceId = 'main';
 let canvasHtmlUpdatedAt = null;
+// Session management state
+let currentSessionId = null;
+let isViewingHistory = false;
+let allSessions = [];
+let pendingFileUrls = []; // non-image files queued for upload
 
 const WEBCHAT_CONFIG = {
     streamRenderDebounceMs: Math.max(20, Number(window.OPENCLAW_WEBCHAT_CONFIG?.streamRenderDebounceMs ?? 120)),
@@ -178,6 +197,20 @@ function persistToken(token) {
         localStorage.removeItem(TOKEN_KEY_PERSIST);
     }
 }
+
+// ── Admin panel helpers ─────────────────────────────────────────────────────
+function getBasePath() {
+    const path = window.location.pathname;
+    const lastSlash = path.lastIndexOf('/');
+    return lastSlash > 0 ? path.substring(0, lastSlash) : '';
+}
+
+async function getAuthHeaders() {
+    const token = getCurrentToken();
+    if (!token || token === 'bypass') return {};
+    return { Authorization: 'Bearer ' + token };
+}
+// ────────────────────────────────────────────────────────────────────────────
 
 function escapeHtml(value) {
     return String(value ?? '')
@@ -2354,11 +2387,20 @@ function connect() {
         sendCanvasReady();
         updateComposerAvailability();
         messageInput.focus();
+        // Load sessions into sidebar
+        void loadSessions();
     };
 
     ws.onmessage = (event) => {
         try {
             const env = JSON.parse(event.data);
+
+            // Capture sessionId from server messages
+            if (env.sessionId && !isViewingHistory) {
+                if (!currentSessionId || currentSessionId !== env.sessionId) {
+                    currentSessionId = env.sessionId;
+                }
+            }
 
             if (isCanvasEnvelopeType(env.type)) {
                 handleCanvasEnvelope(env);
@@ -2419,6 +2461,24 @@ function connect() {
 
                 case 'tool_approval_required': {
                     enqueueToolApproval(env);
+                    break;
+                }
+
+                case 'file_attachment': {
+                    const row = createRow('assistant');
+                    const a = document.createElement('a');
+                    a.className = 'file-attachment-msg';
+                    a.textContent = '📎 ' + (env.filename || env.name || env.url || 'File');
+                    a.href = env.url || '#';
+                    a.setAttribute('data-media-url', env.url || '');
+                    row.appendChild(a);
+                    chatContainer.insertBefore(row, typingRow);
+                    scrollToBottom();
+                    break;
+                }
+
+                case 'artifact': {
+                    appendArtifactCard(env);
                     break;
                 }
             }
@@ -2509,14 +2569,15 @@ function updateAttachmentSummary() {
 async function sendMessage() {
     const text = messageInput.value.trim();
     const imageFiles = Array.from(imageInput.files || []);
-    if (!text && imageFiles.length === 0) return;
+    const hasFiles = pendingFileUrls.length > 0;
+    if (!text && imageFiles.length === 0 && !hasFiles) return;
     if (isLiveMode()) {
         if (!isLiveConnected()) {
             appendSystem('Start a live session before sending live messages.', true);
             return;
         }
-        if (imageFiles.length > 0) {
-            appendSystem('Image attachments are available in Chat mode.', true);
+        if (imageFiles.length > 0 || hasFiles) {
+            appendSystem('File attachments are available in Chat mode.', true);
             clearImageSelection();
             return;
         }
@@ -2526,7 +2587,7 @@ async function sendMessage() {
 
     let outboundText = text;
     if (!isLiveMode()) {
-        outboundText = text || 'Describe this image.';
+        outboundText = text || (imageFiles.length > 0 ? 'Describe this image.' : '');
         try {
             for (const file of imageFiles) {
                 outboundText += `\n[IMAGE_URL:${await readImageAsDataUrl(file)}]`;
@@ -2536,12 +2597,35 @@ async function sendMessage() {
             clearImageSelection();
             return;
         }
+        // Append pending file URLs (non-image uploads)
+        for (const fileRef of pendingFileUrls) {
+            outboundText += `\n[FILE_URL:${fileRef.url}]`;
+        }
     }
 
     const row = createRow('user');
     const div = document.createElement('div');
     div.className = 'message user';
-    div.textContent = text || `${imageFiles.length} image attachment${imageFiles.length === 1 ? '' : 's'}`;
+    const displayParts = [];
+    if (text) displayParts.push(text);
+    if (imageFiles.length > 0) displayParts.push(`${imageFiles.length} image${imageFiles.length === 1 ? '' : 's'}`);
+    if (pendingFileUrls.length > 0) {
+        for (const f of pendingFileUrls) {
+            const a = document.createElement('a');
+            a.className = 'file-attachment-msg';
+            a.textContent = '📎 ' + f.name;
+            a.href = f.url;
+            a.setAttribute('data-media-url', f.url);
+            div.appendChild(a);
+        }
+    }
+    if (displayParts.length > 0) {
+        const t = document.createElement('div');
+        t.textContent = displayParts.join(' · ');
+        div.insertBefore(t, div.firstChild);
+    } else if (pendingFileUrls.length === 0 && imageFiles.length > 0) {
+        div.textContent = `${imageFiles.length} image attachment${imageFiles.length === 1 ? '' : 's'}`;
+    }
     addMessageMeta(div, 'User');
     row.appendChild(div);
 
@@ -2558,12 +2642,14 @@ async function sendMessage() {
     } else {
         ws.send(JSON.stringify({
             type: "user_message",
-            text: outboundText
+            text: outboundText,
+            ...(currentSessionId ? { sessionId: currentSessionId } : {})
         }));
     }
 
     messageInput.value = '';
     clearImageSelection();
+    clearPendingFiles();
     messageInput.style.height = 'auto';
     sendButton.style.opacity = '0.7';
     activeResponseDiv = null;
@@ -2865,3 +2951,1398 @@ handleOidcCallback().catch(() => {}).finally(() => {
     updateEmptyState();
     updateConnectionBanner();
 });
+
+// ============================================================
+// MEDIA DOWNLOAD — intercept /media/ clicks, send Bearer token
+// ============================================================
+chatContainer.addEventListener('click', async (e) => {
+    const a = e.target.closest('[data-media-url]');
+    if (!a) return;
+    const url = a.getAttribute('data-media-url');
+    if (!url || !url.startsWith('/media/')) return;
+    e.preventDefault();
+    try {
+        const headers = await getAuthHeaders();
+        const resp = await fetch(url, { headers });
+        if (!resp.ok) { appendSystem('Download failed: ' + resp.status, true); return; }
+        const blob = await resp.blob();
+        const objUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = objUrl;
+        const disp = resp.headers.get('Content-Disposition') || '';
+        const match = disp.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        link.download = match ? match[1].replace(/['"]/g, '') : 'download';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(objUrl), 30000);
+    } catch (err) {
+        appendSystem('Download failed: ' + err.message, true);
+    }
+});
+
+// ============================================================
+// NON-IMAGE FILE UPLOAD
+// ============================================================
+function clearPendingFiles() {
+    pendingFileUrls = [];
+    fileInput.value = '';
+    renderFileChips();
+}
+
+function renderFileChips() {
+    fileChips.innerHTML = '';
+    if (!pendingFileUrls.length) {
+        fileChips.hidden = true;
+        return;
+    }
+    fileChips.hidden = false;
+    for (let i = 0; i < pendingFileUrls.length; i++) {
+        const f = pendingFileUrls[i];
+        const chip = document.createElement('span');
+        chip.className = 'file-chip';
+        chip.textContent = '📎 ' + f.name;
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'file-chip__remove';
+        removeBtn.title = '移除';
+        removeBtn.innerHTML = '&#x2715;';
+        const idx = i;
+        removeBtn.addEventListener('click', () => {
+            pendingFileUrls.splice(idx, 1);
+            renderFileChips();
+        });
+        chip.appendChild(removeBtn);
+        fileChips.appendChild(chip);
+    }
+}
+
+async function uploadFilesToMedia(files) {
+    const results = [];
+    for (const file of files) {
+        try {
+            const headers = await getAuthHeaders();
+            const formData = new FormData();
+            formData.append('file', file);
+            const resp = await fetch(getBasePath() + '/media/upload', { method: 'POST', headers, body: formData });
+            if (!resp.ok) {
+                appendSystem('File upload failed (' + resp.status + '): ' + file.name, true);
+                continue;
+            }
+            const data = await resp.json().catch(() => null);
+            const url = data?.url || data?.mediaUrl || ('/media/' + (data?.id || data?.mediaId || ''));
+            results.push({ name: file.name, url });
+        } catch (err) {
+            appendSystem('File upload error: ' + err.message, true);
+        }
+    }
+    return results;
+}
+
+if (attachFileBtn && fileInput) {
+    attachFileBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', async () => {
+        const files = Array.from(fileInput.files || []);
+        if (!files.length) return;
+        appendSystem('上传文件中...');
+        const uploaded = await uploadFilesToMedia(files);
+        pendingFileUrls.push(...uploaded);
+        renderFileChips();
+        fileInput.value = '';
+        if (uploaded.length) appendSystem(`已上传 ${uploaded.length} 个文件`);
+    });
+}
+
+// ============================================================
+// ARTIFACT CARD
+// ============================================================
+function appendArtifactCard(env) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'artifact-card';
+
+    const header = document.createElement('div');
+    header.className = 'artifact-header';
+
+    const icon = document.createElement('span');
+    icon.className = 'artifact-icon';
+    const type = (env.artifactType || env.type || '').toLowerCase();
+    icon.textContent = type.includes('image') ? '🖼️' : type.includes('table') || type.includes('csv') ? '📊' : type.includes('code') ? '💻' : '📄';
+
+    const title = document.createElement('span');
+    title.className = 'artifact-title';
+    title.textContent = env.title || env.filename || env.name || 'Artifact';
+    title.title = title.textContent;
+
+    header.appendChild(icon);
+    header.appendChild(title);
+
+    if (env.url) {
+        const dlBtn = document.createElement('button');
+        dlBtn.className = 'artifact-download';
+        dlBtn.textContent = '下载';
+        dlBtn.type = 'button';
+        dlBtn.setAttribute('data-media-url', env.url);
+        dlBtn.addEventListener('click', async () => {
+            const headers = await getAuthHeaders();
+            const resp = await fetch(env.url, { headers });
+            if (!resp.ok) { appendSystem('Download failed: ' + resp.status, true); return; }
+            const blob = await resp.blob();
+            const objUrl = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = objUrl; a.download = env.filename || env.name || 'artifact';
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(objUrl), 30000);
+        });
+        header.appendChild(dlBtn);
+    }
+
+    wrapper.appendChild(header);
+
+    const body = document.createElement('div');
+    body.className = 'artifact-body';
+    const content = env.content || env.text || '';
+    if (type.includes('table') || type.includes('csv')) {
+        try {
+            const lines = String(content).trim().split('\n');
+            const table = document.createElement('table');
+            table.className = 'artifact-table';
+            lines.forEach((line, i) => {
+                const tr = document.createElement('tr');
+                const cells = line.split(',').map(c => c.trim());
+                cells.forEach(cell => {
+                    const el = document.createElement(i === 0 ? 'th' : 'td');
+                    el.textContent = cell;
+                    tr.appendChild(el);
+                });
+                table.appendChild(tr);
+            });
+            body.appendChild(table);
+        } catch (_) {
+            const pre = document.createElement('pre'); pre.textContent = content; body.appendChild(pre);
+        }
+    } else if (content) {
+        const pre = document.createElement('pre'); pre.textContent = content; body.appendChild(pre);
+    }
+    wrapper.appendChild(body);
+
+    const row = createRow('assistant');
+    row.appendChild(wrapper);
+    chatContainer.insertBefore(row, typingRow);
+    scrollToBottom();
+}
+
+// ============================================================
+// SESSION SIDEBAR
+// ============================================================
+async function loadSessions() {
+    try {
+        const headers = await getAuthHeaders();
+        const resp = await fetch(getBasePath() + '/admin/sessions', { headers });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        allSessions = data.sessions || data.items || [];
+        renderSessionList(allSessions);
+    } catch (_) { /* silently fail */ }
+}
+
+function renderSessionList(sessions) {
+    sessionList.innerHTML = '';
+    const query = sessionSearchInput ? sessionSearchInput.value.trim().toLowerCase() : '';
+    const filtered = query
+        ? sessions.filter(s => {
+            const title = (s.title || s.id || '').toLowerCase();
+            const preview = (s.preview || s.lastMessage || '').toLowerCase();
+            return title.includes(query) || preview.includes(query);
+        })
+        : sessions;
+
+    if (!filtered.length) {
+        const empty = document.createElement('div');
+        empty.className = 'session-empty';
+        empty.textContent = query ? '没有匹配的会话' : '暂无历史会话';
+        sessionList.appendChild(empty);
+        return;
+    }
+
+    // Sort by updated time, newest first
+    const sorted = [...filtered].sort((a, b) => {
+        const ta = new Date(a.updatedAt || a.createdAt || 0).getTime();
+        const tb = new Date(b.updatedAt || b.createdAt || 0).getTime();
+        return tb - ta;
+    });
+
+    for (const session of sorted) {
+        const item = document.createElement('div');
+        item.className = 'session-item' + (session.id === currentSessionId ? ' active' : '');
+        item.dataset.sessionId = session.id;
+
+        const body = document.createElement('div');
+        body.className = 'session-item__body';
+
+        const titleEl = document.createElement('div');
+        titleEl.className = 'session-item__title';
+        titleEl.textContent = session.title || session.id || 'Session';
+        titleEl.title = titleEl.textContent;
+
+        const meta = document.createElement('div');
+        meta.className = 'session-item__meta';
+        const ts = session.updatedAt || session.createdAt;
+        if (ts) {
+            const d = new Date(ts);
+            meta.textContent = d.toLocaleDateString('zh-CN') + ' ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+        }
+
+        body.appendChild(titleEl);
+        body.appendChild(meta);
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'session-item__del';
+        delBtn.type = 'button';
+        delBtn.title = '删除会话';
+        delBtn.innerHTML = '&#x2715;';
+        delBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            if (!confirm('确定删除此会话？')) return;
+            await deleteSession(session.id);
+        });
+
+        item.appendChild(body);
+        item.appendChild(delBtn);
+
+        item.addEventListener('click', () => void switchToSession(session.id, session.title));
+        sessionList.appendChild(item);
+    }
+}
+
+async function switchToSession(sessionId, title) {
+    if (isViewingHistory && currentSessionId === sessionId) return;
+
+    try {
+        const headers = await getAuthHeaders();
+        const resp = await fetch(getBasePath() + '/admin/sessions/' + encodeURIComponent(sessionId), { headers });
+        if (!resp.ok) { appendSystem('Failed to load session: ' + resp.status, true); return; }
+        const data = await resp.json();
+        const history = data.session?.history || data.history || [];
+
+        // Render session history into chat
+        chatContainer.innerHTML = '';
+        const chatStateBarClone = document.getElementById('chat-state-bar');
+        if (chatStateBarClone) chatContainer.appendChild(chatStateBarClone);
+        const emptyStateEl = document.getElementById('empty-state');
+        if (emptyStateEl) chatContainer.appendChild(emptyStateEl);
+
+        for (const turn of history) {
+            if (!turn.role || (!turn.content && (!turn.toolCalls || !turn.toolCalls.length))) continue;
+            if (turn.role === 'user') {
+                const row = createRow('user');
+                const div = document.createElement('div');
+                div.className = 'message user';
+                div.textContent = turn.content || '';
+                addMessageMeta(div, 'User');
+                row.appendChild(div);
+                chatContainer.insertBefore(row, document.getElementById('typing-row'));
+            } else if (turn.role === 'assistant') {
+                if (turn.content) {
+                    appendAssistantMarkdown(turn.content);
+                }
+                if (turn.toolCalls) {
+                    for (const tc of turn.toolCalls) {
+                        appendToolPill(tc.toolName || 'tool');
+                    }
+                }
+            }
+        }
+
+        isViewingHistory = true;
+        currentSessionId = sessionId;
+        historyBanner.hidden = false;
+        historyBannerText.textContent = '正在查看历史会话：' + (title || sessionId);
+        updateEmptyState();
+        scrollToBottom();
+
+        // Update active state in sidebar
+        document.querySelectorAll('.session-item').forEach(el => {
+            el.classList.toggle('active', el.dataset.sessionId === sessionId);
+        });
+    } catch (err) {
+        appendSystem('Failed to load session: ' + err.message, true);
+    }
+}
+
+function returnToCurrentSession() {
+    isViewingHistory = false;
+    currentSessionId = null;
+    historyBanner.hidden = true;
+    // Clear chat
+    chatContainer.innerHTML = '';
+    const chatStateBarEl = document.createElement('div');
+    chatStateBarEl.id = 'chat-state-bar';
+    chatStateBarEl.hidden = true;
+    chatStateBarEl.setAttribute('aria-hidden', 'true');
+    chatContainer.appendChild(chatStateBarEl);
+    const emptyEl = document.getElementById('empty-state');
+    if (emptyEl) chatContainer.appendChild(emptyEl);
+    document.getElementById('typing-row')?.remove();
+    updateEmptyState();
+    appendSystem('已返回当前会话。');
+    document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
+}
+
+async function startNewChatSession() {
+    if (isViewingHistory) returnToCurrentSession();
+    currentSessionId = null;
+    chatContainer.innerHTML = '';
+    const emptyEl = document.getElementById('empty-state');
+    if (emptyEl) chatContainer.appendChild(emptyEl);
+    appendSystem('新对话已开始。');
+    updateEmptyState();
+    if (sessionSidebar && !sessionSidebar.hidden) {
+        await loadSessions();
+    }
+}
+
+async function deleteSession(sessionId) {
+    try {
+        const headers = await getAuthHeaders();
+        const resp = await fetch(getBasePath() + '/admin/sessions/' + encodeURIComponent(sessionId), {
+            method: 'DELETE', headers
+        });
+        if (!resp.ok) { appendSystem('删除失败: ' + resp.status, true); return; }
+        allSessions = allSessions.filter(s => s.id !== sessionId);
+        if (currentSessionId === sessionId) {
+            returnToCurrentSession();
+        }
+        renderSessionList(allSessions);
+        appendSystem('会话已删除');
+    } catch (err) {
+        appendSystem('删除失败: ' + err.message, true);
+    }
+}
+
+// Session sidebar event wiring
+if (sessionToggleBtn && sessionSidebar) {
+    sessionToggleBtn.addEventListener('click', () => {
+        const hidden = sessionSidebar.hidden;
+        sessionSidebar.hidden = !hidden;
+        if (!hidden) return;
+        void loadSessions();
+    });
+}
+if (sessionSidebarClose && sessionSidebar) {
+    sessionSidebarClose.addEventListener('click', () => { sessionSidebar.hidden = true; });
+}
+if (newChatBtn) {
+    newChatBtn.addEventListener('click', () => void startNewChatSession());
+}
+if (historyBannerClose) {
+    historyBannerClose.addEventListener('click', returnToCurrentSession);
+}
+if (sessionSearchInput) {
+    sessionSearchInput.addEventListener('input', () => renderSessionList(allSessions));
+}
+if (clearAllSessionsBtn) {
+    clearAllSessionsBtn.addEventListener('click', async () => {
+        if (!confirm('确定清空所有历史会话？此操作不可撤销。')) return;
+        for (const s of [...allSessions]) {
+            await deleteSession(s.id);
+        }
+        allSessions = [];
+        renderSessionList([]);
+    });
+}
+
+// ============================================================
+// MCP SERVERS PANEL
+// ============================================================
+(() => {
+    const overlay = document.getElementById('mcp-overlay');
+    const openBtn = document.getElementById('mcp-panel-btn');
+    const closeBtn = document.getElementById('mcp-close-btn');
+    const serverList = document.getElementById('mcp-server-list');
+    const formSection = document.getElementById('mcp-form-section');
+    const formTitle = document.getElementById('mcp-form-title');
+    const formError = document.getElementById('mcp-form-error');
+    const addBtn = document.getElementById('mcp-add-btn');
+    const cancelBtn = document.getElementById('mcp-cancel-btn');
+    const saveBtn = document.getElementById('mcp-save-btn');
+    const statusBar = document.getElementById('mcp-panel-status');
+    const fId = document.getElementById('mcp-f-id');
+    const fName = document.getElementById('mcp-f-name');
+    const fTransport = document.getElementById('mcp-f-transport');
+    const fUrl = document.getElementById('mcp-f-url');
+    const fToken = document.getElementById('mcp-f-token');
+    const fPrefix = document.getElementById('mcp-f-prefix');
+    const fStartupTimeout = document.getElementById('mcp-f-startup-timeout');
+    const fRequestTimeout = document.getElementById('mcp-f-request-timeout');
+    const fEnabled = document.getElementById('mcp-f-enabled');
+
+    if (!overlay) return;
+
+    let mcpConfig = { Enabled: true, Servers: {} };
+    let builtinConfig = { Servers: {} };
+    let editingId = null;
+
+    function showStatus(msg, isErr) {
+        statusBar.textContent = msg;
+        statusBar.className = 'panel-status ' + (isErr ? 'err' : 'ok');
+        statusBar.hidden = false;
+        clearTimeout(showStatus._t);
+        if (!isErr) showStatus._t = setTimeout(() => { statusBar.hidden = true; }, 3000);
+    }
+
+    function normalizePascal(obj) {
+        if (!obj || typeof obj !== 'object') return obj;
+        const out = {};
+        for (const [k, v] of Object.entries(obj)) {
+            const key = k.charAt(0).toUpperCase() + k.slice(1);
+            out[key] = v;
+        }
+        return out;
+    }
+
+    function buildCard(id, cfg, builtin) {
+        const card = document.createElement('div');
+        card.className = 'mcp-server-card' + (cfg.Enabled === false ? ' disabled' : '');
+
+        const info = document.createElement('div');
+        info.className = 'mcp-server-info';
+        const nameEl = document.createElement('div');
+        nameEl.className = 'mcp-server-name';
+        nameEl.textContent = cfg.Name || id;
+        const urlEl = document.createElement('div');
+        urlEl.className = 'mcp-server-url';
+        urlEl.textContent = cfg.Url || cfg.Command || '';
+        info.appendChild(nameEl); info.appendChild(urlEl);
+
+        const badge = document.createElement('span');
+        badge.className = 'mcp-server-badge' + (builtin ? ' builtin' : '');
+        badge.textContent = builtin
+            ? (cfg.Enabled === false ? 'builtin · off' : 'builtin')
+            : (cfg.Enabled === false ? 'disabled' : (cfg.Transport || 'http'));
+
+        const actions = document.createElement('div');
+        actions.className = 'mcp-server-actions';
+
+        if (!builtin) {
+            const toggleBtn = document.createElement('button');
+            toggleBtn.className = 'panel-icon-btn';
+            toggleBtn.title = cfg.Enabled === false ? 'Enable' : 'Disable';
+            toggleBtn.innerHTML = cfg.Enabled === false
+                ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>'
+                : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/></svg>';
+            toggleBtn.addEventListener('click', () => {
+                mcpConfig.Servers[id] = { ...cfg, Enabled: cfg.Enabled === false };
+                renderList(); void saveConfig();
+            });
+
+            const editBtn = document.createElement('button');
+            editBtn.className = 'panel-icon-btn';
+            editBtn.title = 'Edit';
+            editBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+            editBtn.addEventListener('click', () => openForm(id));
+
+            const delBtn = document.createElement('button');
+            delBtn.className = 'panel-icon-btn danger';
+            delBtn.title = 'Delete';
+            delBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
+            delBtn.addEventListener('click', () => {
+                if (!confirm('Delete "' + (cfg.Name || id) + '"?')) return;
+                delete mcpConfig.Servers[id]; renderList(); void saveConfig();
+            });
+            actions.append(toggleBtn, editBtn, delBtn);
+        }
+
+        card.append(info, badge, actions);
+        return card;
+    }
+
+    function renderList() {
+        serverList.innerHTML = '';
+        const builtinIds = Object.keys(builtinConfig.Servers || {});
+        const userIds = Object.keys(mcpConfig.Servers || {});
+        if (!builtinIds.length && !userIds.length) {
+            const empty = document.createElement('div');
+            empty.className = 'mcp-server-empty';
+            empty.textContent = 'No MCP servers configured.';
+            serverList.appendChild(empty);
+            return;
+        }
+        if (builtinIds.length) {
+            const lbl = document.createElement('div'); lbl.className = 'mcp-section-label'; lbl.textContent = 'Built-in';
+            serverList.appendChild(lbl);
+            builtinIds.forEach(id => serverList.appendChild(buildCard(id, builtinConfig.Servers[id], true)));
+        }
+        if (userIds.length) {
+            const lbl = document.createElement('div'); lbl.className = 'mcp-section-label'; lbl.textContent = 'Workspace';
+            serverList.appendChild(lbl);
+            userIds.forEach(id => serverList.appendChild(buildCard(id, mcpConfig.Servers[id], false)));
+        }
+    }
+
+    function openForm(serverId) {
+        editingId = serverId || null;
+        formTitle.textContent = serverId ? 'Edit Server' : 'Add Server';
+        formError.hidden = true;
+        if (serverId) {
+            const cfg = mcpConfig.Servers[serverId] || {};
+            fId.value = serverId; fId.readOnly = true;
+            fName.value = cfg.Name || '';
+            fTransport.value = cfg.Transport || 'streamable-http';
+            fUrl.value = cfg.Url || '';
+            const auth = (cfg.Headers && cfg.Headers['Authorization']) || '';
+            fToken.value = auth.startsWith('Bearer ') ? auth.slice(7) : auth;
+            fPrefix.value = cfg.ToolNamePrefix || '';
+            fStartupTimeout.value = cfg.StartupTimeoutSeconds != null ? cfg.StartupTimeoutSeconds : '';
+            fRequestTimeout.value = cfg.RequestTimeoutSeconds != null ? cfg.RequestTimeoutSeconds : '';
+            fEnabled.checked = cfg.Enabled !== false;
+        } else {
+            fId.value = 'server-' + Math.random().toString(36).slice(2, 7); fId.readOnly = false;
+            fName.value = ''; fTransport.value = 'streamable-http'; fUrl.value = ''; fToken.value = '';
+            fPrefix.value = ''; fStartupTimeout.value = ''; fRequestTimeout.value = ''; fEnabled.checked = true;
+        }
+        formSection.hidden = false;
+        addBtn.hidden = true;
+    }
+
+    function closeForm() {
+        formSection.hidden = true;
+        addBtn.hidden = false;
+        editingId = null;
+    }
+
+    function buildServerConfig() {
+        const id = fId.value.trim();
+        if (!id) return { error: 'Server ID is required.' };
+        if (!/^[\w\-\.]+$/.test(id)) return { error: 'Invalid server ID format.' };
+        const url = fUrl.value.trim();
+        if (!url) return { error: 'URL is required.' };
+        try { new URL(url); } catch (_) { return { error: 'URL is not valid.' }; }
+        const cfg = { Transport: fTransport.value || 'streamable-http', Url: url, Enabled: fEnabled.checked };
+        const name = fName.value.trim(); if (name) cfg.Name = name;
+        const token = fToken.value.trim();
+        if (token) cfg.Headers = { Authorization: 'Bearer ' + token };
+        const prefix = fPrefix.value.trim(); if (prefix) cfg.ToolNamePrefix = prefix;
+        const st = parseInt(fStartupTimeout.value, 10); if (!isNaN(st) && st > 0) cfg.StartupTimeoutSeconds = st;
+        const rt = parseInt(fRequestTimeout.value, 10); if (!isNaN(rt) && rt > 0) cfg.RequestTimeoutSeconds = rt;
+        return { id, cfg };
+    }
+
+    async function loadConfig() {
+        try {
+            const headers = await getAuthHeaders();
+            const resp = await fetch(getBasePath() + '/admin/workspace/mcp', { headers });
+            if (resp.ok) {
+                const data = await resp.json();
+                const rawBuiltin = data.builtin || {};
+                builtinConfig = { Servers: {} };
+                for (const [id, srv] of Object.entries(rawBuiltin.servers || rawBuiltin.Servers || {})) {
+                    builtinConfig.Servers[id] = normalizePascal(srv);
+                }
+                const u = data.user || {};
+                mcpConfig = { Enabled: !!(u.Enabled ?? u.enabled ?? true), Servers: { ...((u.Servers || u.servers || {})) } };
+            } else {
+                showStatus('Load failed (' + resp.status + ')', true);
+            }
+        } catch (e) { showStatus('Load failed: ' + e.message, true); }
+        renderList();
+    }
+
+    async function saveConfig() {
+        try {
+            const headers = { 'Content-Type': 'application/json', ...(await getAuthHeaders()) };
+            const resp = await fetch(getBasePath() + '/admin/workspace/mcp', {
+                method: 'PUT', headers, body: JSON.stringify(mcpConfig)
+            });
+            if (resp.ok) showStatus('Saved — hot-reload will apply.', false);
+            else showStatus('Save failed (' + resp.status + ')', true);
+        } catch (e) { showStatus('Save failed: ' + e.message, true); }
+    }
+
+    openBtn.addEventListener('click', async () => { overlay.hidden = false; closeForm(); statusBar.hidden = true; await loadConfig(); });
+    closeBtn.addEventListener('click', () => { overlay.hidden = true; });
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.hidden = true; });
+    addBtn.addEventListener('click', () => openForm(null));
+    cancelBtn.addEventListener('click', closeForm);
+    saveBtn.addEventListener('click', async () => {
+        const result = buildServerConfig();
+        if (result.error) { formError.textContent = result.error; formError.hidden = false; return; }
+        formError.hidden = true;
+        mcpConfig.Servers[result.id] = result.cfg;
+        renderList(); closeForm(); await saveConfig();
+    });
+})();
+
+// ============================================================
+// CHANNEL CONFIG PANEL
+// ============================================================
+(() => {
+    const overlay = document.getElementById('channel-overlay');
+    const openBtn = document.getElementById('channel-panel-btn');
+    const closeBtn = document.getElementById('channel-close-btn');
+    const statusBar = document.getElementById('ch-panel-status');
+    const formError = document.getElementById('ch-form-error');
+    const loadBtn = document.getElementById('channel-load-btn');
+    const revertBtn = document.getElementById('channel-revert-btn');
+    const saveBtn = document.getElementById('channel-save-btn');
+    const fForm = document.getElementById('ch-feishu-form');
+    const dForm = document.getElementById('ch-dingtalk-form');
+    const wForm = document.getElementById('ch-wecom-form');
+    const fAppId = document.getElementById('feishu-appid');
+    const fAppSecret = document.getElementById('feishu-appsecret');
+    const fAppSecretRef = document.getElementById('feishu-appsecret-ref');
+    const dAppId = document.getElementById('dingtalk-appid');
+    const dAppKey = document.getElementById('dingtalk-appkey');
+    const dAppSecret = document.getElementById('dingtalk-appsecret');
+    const wBotId = document.getElementById('wecom-botid');
+    const wBotSecret = document.getElementById('wecom-botsecret');
+
+    if (!overlay) return;
+
+    let activeChannel = 'feishu';
+
+    function setVis() {
+        fForm.hidden = activeChannel !== 'feishu';
+        dForm.hidden = activeChannel !== 'dingtalk';
+        wForm.hidden = activeChannel !== 'wecom';
+    }
+
+    function showStatus(msg, isErr) {
+        statusBar.textContent = msg;
+        statusBar.className = 'panel-status ' + (isErr ? 'err' : 'ok');
+        statusBar.hidden = false;
+    }
+
+    function val(el) { return el ? el.value.trim() : ''; }
+    function set(el, v) { if (el) el.value = v ?? ''; }
+
+    function populateFeishu(cfg) { set(fAppId, cfg.AppId ?? cfg.appId); set(fAppSecret, cfg.AppSecret ?? cfg.appSecret); set(fAppSecretRef, cfg.AppSecretRef ?? cfg.appSecretRef); }
+    function buildFeishu() { const c = { enabled: true }; const v = val(fAppId); if (v) c.appId = v; const s = val(fAppSecret); if (s) c.appSecret = s; const r = val(fAppSecretRef); if (r) c.appSecretRef = r; return c; }
+    function populateDingTalk(cfg) { set(dAppId, cfg.AppId ?? cfg.appId); set(dAppKey, cfg.AppKey ?? cfg.appKey); set(dAppSecret, cfg.AppSecret ?? cfg.appSecret); }
+    function buildDingTalk() { const c = { enabled: true }; const a = val(dAppId); if (a) c.appId = a; const k = val(dAppKey); if (k) c.appKey = k; const s = val(dAppSecret); if (s) c.appSecret = s; return c; }
+    function populateWeCom(cfg) { set(wBotId, cfg.BotId ?? cfg.botId); set(wBotSecret, cfg.BotSecret ?? cfg.botSecret); }
+    function buildWeCom() { const c = { enabled: true }; const b = val(wBotId); if (b) c.botId = b; const s = val(wBotSecret); if (s) c.botSecret = s; return c; }
+
+    async function loadChannel() {
+        formError.hidden = true;
+        showStatus('加载中...', false);
+        try {
+            const headers = await getAuthHeaders();
+            const resp = await fetch(getBasePath() + '/admin/channels/' + activeChannel, { headers });
+            if (!resp.ok) { showStatus('加载失败 (' + resp.status + ')', true); return; }
+            const cfg = await resp.json();
+            if (activeChannel === 'feishu') populateFeishu(cfg);
+            if (activeChannel === 'dingtalk') populateDingTalk(cfg);
+            if (activeChannel === 'wecom') populateWeCom(cfg);
+            showStatus('已加载当前配置', false);
+        } catch (e) { showStatus('加载失败: ' + e.message, true); }
+    }
+
+    async function saveChannel() {
+        formError.hidden = true;
+        let body = activeChannel === 'feishu' ? buildFeishu() : activeChannel === 'dingtalk' ? buildDingTalk() : buildWeCom();
+        showStatus('保存中...', false);
+        try {
+            const headers = { 'Content-Type': 'application/json', ...(await getAuthHeaders()) };
+            const resp = await fetch(getBasePath() + '/admin/channels/' + activeChannel + '/update', { method: 'POST', headers, body: JSON.stringify(body) });
+            const data = await resp.json().catch(() => null);
+            if (resp.ok) showStatus('已保存并重连渠道 ✓', false);
+            else showStatus('保存失败: ' + (data?.error ?? resp.status), true);
+        } catch (e) { showStatus('保存失败: ' + e.message, true); }
+    }
+
+    async function revertChannel() {
+        if (!confirm('确定恢复默认配置？这将清除所有 API 保存的覆盖。')) return;
+        showStatus('恢复中...', false);
+        try {
+            const headers = await getAuthHeaders();
+            const resp = await fetch(getBasePath() + '/admin/channels/' + activeChannel + '/override', { method: 'DELETE', headers });
+            const data = await resp.json().catch(() => null);
+            if (resp.ok) { showStatus('已恢复默认配置 ✓', false); await loadChannel(); }
+            else showStatus('恢复失败: ' + (data?.error ?? resp.status), true);
+        } catch (e) { showStatus('恢复失败: ' + e.message, true); }
+    }
+
+    openBtn.addEventListener('click', async () => { overlay.hidden = false; statusBar.hidden = true; formError.hidden = true; setVis(); await loadChannel(); });
+    closeBtn.addEventListener('click', () => { overlay.hidden = true; });
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.hidden = true; });
+    loadBtn.addEventListener('click', loadChannel);
+    saveBtn.addEventListener('click', saveChannel);
+    revertBtn.addEventListener('click', revertChannel);
+    document.querySelectorAll('.ch-tab').forEach(tab => {
+        tab.addEventListener('click', async () => {
+            document.querySelectorAll('.ch-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            activeChannel = tab.dataset.channel;
+            formError.hidden = true; statusBar.hidden = true;
+            setVis(); await loadChannel();
+        });
+    });
+})();
+
+// ============================================================
+// DIGITAL EMPLOYEE PANEL
+// ============================================================
+(() => {
+    const overlay = document.getElementById('de-overlay');
+    const openBtn = document.getElementById('de-panel-btn');
+    const closeBtn = document.getElementById('de-close-btn');
+    const statusBar = document.getElementById('de-panel-status');
+    const tabList = document.getElementById('de-tab-list');
+    const tabSkillPkg = document.getElementById('de-tab-skill-pkg');
+    const tabPkg = document.getElementById('de-tab-pkg');
+    const panelList = document.getElementById('de-panel-list');
+    const panelSkillPkg = document.getElementById('de-panel-skill-pkg');
+    const panelPkg = document.getElementById('de-panel-pkg');
+    const skillListEl = document.getElementById('de-skill-list');
+    const refreshBtn = document.getElementById('de-refresh-btn');
+    const skillDropzone = document.getElementById('de-skill-dropzone');
+    const skillPkgInput = document.getElementById('de-skill-pkg-file-input');
+    const skillPkgBrowseBtn = document.getElementById('de-skill-pkg-browse-btn');
+    const skillPkgFilename = document.getElementById('de-skill-pkg-filename');
+    const skillPkgUploadBtn = document.getElementById('de-skill-pkg-upload-btn');
+    const skillPkgResult = document.getElementById('de-skill-pkg-result');
+    const pkgDropzone = document.getElementById('de-pkg-dropzone');
+    const pkgFileInput = document.getElementById('de-pkg-file-input');
+    const pkgBrowseBtn = document.getElementById('de-pkg-browse-btn');
+    const pkgFilename = document.getElementById('de-pkg-filename');
+    const pkgUploadBtn = document.getElementById('de-pkg-upload-btn');
+    const pkgResult = document.getElementById('de-pkg-result');
+
+    if (!overlay) return;
+
+    let skillPkgFile = null, pkgFile = null;
+
+    function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    function showStatus(msg, isErr) {
+        statusBar.textContent = msg; statusBar.className = 'panel-status ' + (isErr ? 'err' : 'ok');
+        statusBar.hidden = false;
+    }
+
+    function switchTab(tab) {
+        tabList.classList.toggle('active', tab === 'list');
+        tabSkillPkg.classList.toggle('active', tab === 'skill-pkg');
+        tabPkg.classList.toggle('active', tab === 'pkg');
+        panelList.hidden = tab !== 'list';
+        panelSkillPkg.hidden = tab !== 'skill-pkg';
+        panelPkg.hidden = tab !== 'pkg';
+        statusBar.hidden = true;
+    }
+
+    async function loadSkills() {
+        skillListEl.innerHTML = '<div class="panel-hint">加载中…</div>';
+        try {
+            const headers = await getAuthHeaders();
+            const resp = await fetch(getBasePath() + '/admin/skills', { headers });
+            if (!resp.ok) { skillListEl.innerHTML = '<div class="panel-hint">加载失败 (HTTP ' + resp.status + ')</div>'; return; }
+            const data = await resp.json();
+            renderSkillList(data.skills || []);
+        } catch (e) { skillListEl.innerHTML = '<div class="panel-hint">加载失败: ' + esc(e.message) + '</div>'; }
+    }
+
+    function renderSkillList(skills) {
+        if (!skills.length) { skillListEl.innerHTML = '<div class="panel-hint">暂无已安装的技能</div>'; return; }
+        skillListEl.innerHTML = '';
+        for (const s of skills) {
+            const card = document.createElement('div');
+            card.className = 'de-skill-card';
+            card.innerHTML = `<div class="de-skill-emoji">${s.emoji || '🔧'}</div>
+                <div class="de-skill-info"><div class="de-skill-name">${esc(s.name)}</div>${s.description ? `<div class="de-skill-desc">${esc(s.description)}</div>` : ''}</div>
+                <span class="de-skill-badge ${s.source || 'builtin'}">${s.source === 'workspace' ? '用户安装' : s.source === 'plugin' ? '插件' : '内置'}</span>`;
+            if (s.isUserInstalled) {
+                const delBtn = document.createElement('button');
+                delBtn.className = 'panel-icon-btn danger';
+                delBtn.title = '删除';
+                delBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
+                delBtn.addEventListener('click', async () => {
+                    if (!confirm('确定删除技能 "' + s.name + '"？')) return;
+                    delBtn.disabled = true;
+                    try {
+                        const h = await getAuthHeaders();
+                        const r = await fetch(getBasePath() + '/admin/skills/' + encodeURIComponent(s.name), { method: 'DELETE', headers: h });
+                        const d = await r.json().catch(() => null);
+                        if (r.ok && d?.success) { showStatus('已删除', false); await loadSkills(); }
+                        else { showStatus('删除失败: ' + (d?.error || r.status), true); delBtn.disabled = false; }
+                    } catch (e) { showStatus('删除失败: ' + e.message, true); delBtn.disabled = false; }
+                });
+                card.appendChild(delBtn);
+            }
+            skillListEl.appendChild(card);
+        }
+    }
+
+    function setSkillPkgFile(file) {
+        skillPkgFile = file;
+        skillPkgFilename.textContent = file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)';
+        skillPkgFilename.hidden = false;
+        skillPkgUploadBtn.disabled = false;
+        skillPkgResult.hidden = true;
+    }
+
+    function setPkgFile(file) {
+        pkgFile = file;
+        pkgFilename.textContent = file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)';
+        pkgFilename.hidden = false;
+        pkgUploadBtn.disabled = false;
+        pkgResult.hidden = true;
+    }
+
+    if (skillPkgBrowseBtn) skillPkgBrowseBtn.addEventListener('click', () => skillPkgInput.click());
+    if (skillPkgInput) skillPkgInput.addEventListener('change', () => { if (skillPkgInput.files[0]) setSkillPkgFile(skillPkgInput.files[0]); });
+    if (skillDropzone) {
+        skillDropzone.addEventListener('dragover', e => { e.preventDefault(); skillDropzone.classList.add('drag-over'); });
+        skillDropzone.addEventListener('dragleave', () => skillDropzone.classList.remove('drag-over'));
+        skillDropzone.addEventListener('drop', e => { e.preventDefault(); skillDropzone.classList.remove('drag-over'); if (e.dataTransfer.files[0]) setSkillPkgFile(e.dataTransfer.files[0]); });
+    }
+    if (pkgBrowseBtn) pkgBrowseBtn.addEventListener('click', () => pkgFileInput.click());
+    if (pkgFileInput) pkgFileInput.addEventListener('change', () => { if (pkgFileInput.files[0]) setPkgFile(pkgFileInput.files[0]); });
+    if (pkgDropzone) {
+        pkgDropzone.addEventListener('dragover', e => { e.preventDefault(); pkgDropzone.classList.add('drag-over'); });
+        pkgDropzone.addEventListener('dragleave', () => pkgDropzone.classList.remove('drag-over'));
+        pkgDropzone.addEventListener('drop', e => { e.preventDefault(); pkgDropzone.classList.remove('drag-over'); if (e.dataTransfer.files[0]) setPkgFile(e.dataTransfer.files[0]); });
+    }
+
+    if (skillPkgUploadBtn) skillPkgUploadBtn.addEventListener('click', async () => {
+        if (!skillPkgFile) return;
+        skillPkgUploadBtn.disabled = true; skillPkgUploadBtn.textContent = '上传中…';
+        skillPkgResult.hidden = true;
+        try {
+            const h = await getAuthHeaders(); const fd = new FormData(); fd.append('file', skillPkgFile);
+            const resp = await fetch(getBasePath() + '/admin/skills/upload', { method: 'POST', headers: h, body: fd });
+            const data = await resp.json().catch(() => null);
+            if (resp.ok && data?.success) {
+                skillPkgResult.innerHTML = '<strong>技能安装成功</strong><br>当前技能总数：' + (data.totalLoaded ?? 0);
+                skillPkgResult.className = 'panel-result ok'; skillPkgResult.hidden = false;
+                showStatus('✅ 技能安装成功', false);
+            } else {
+                skillPkgResult.textContent = '安装失败: ' + (data?.error || resp.status);
+                skillPkgResult.className = 'panel-result err'; skillPkgResult.hidden = false;
+                showStatus('❌ 安装失败', true);
+            }
+        } catch (e) {
+            skillPkgResult.textContent = '上传失败: ' + e.message;
+            skillPkgResult.className = 'panel-result err'; skillPkgResult.hidden = false;
+            showStatus('❌ 上传失败', true);
+        }
+        skillPkgUploadBtn.disabled = false; skillPkgUploadBtn.textContent = '上传安装';
+    });
+
+    if (pkgUploadBtn) pkgUploadBtn.addEventListener('click', async () => {
+        if (!pkgFile) return;
+        pkgUploadBtn.disabled = true; pkgUploadBtn.textContent = '上传中…';
+        pkgResult.hidden = true;
+        try {
+            const h = await getAuthHeaders(); const fd = new FormData(); fd.append('file', pkgFile);
+            const resp = await fetch(getBasePath() + '/admin/digital-employee/upload', { method: 'POST', headers: h, body: fd });
+            const data = await resp.json().catch(() => null);
+            if (resp.ok && (data?.success !== false)) {
+                pkgResult.innerHTML = '<strong>数字员工包安装成功</strong>';
+                pkgResult.className = 'panel-result ok'; pkgResult.hidden = false;
+                showStatus('✅ 安装成功', false);
+            } else {
+                pkgResult.textContent = '安装失败: ' + (data?.error || resp.status);
+                pkgResult.className = 'panel-result err'; pkgResult.hidden = false;
+                showStatus('❌ 安装失败', true);
+            }
+        } catch (e) {
+            pkgResult.textContent = '上传失败: ' + e.message;
+            pkgResult.className = 'panel-result err'; pkgResult.hidden = false;
+            showStatus('❌ 上传失败', true);
+        }
+        pkgUploadBtn.disabled = false; pkgUploadBtn.textContent = '上传安装';
+    });
+
+    if (tabList) tabList.addEventListener('click', () => switchTab('list'));
+    if (tabSkillPkg) tabSkillPkg.addEventListener('click', () => switchTab('skill-pkg'));
+    if (tabPkg) tabPkg.addEventListener('click', () => switchTab('pkg'));
+    if (refreshBtn) refreshBtn.addEventListener('click', loadSkills);
+    openBtn.addEventListener('click', async () => { overlay.hidden = false; switchTab('list'); await loadSkills(); });
+    closeBtn.addEventListener('click', () => { overlay.hidden = true; });
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.hidden = true; });
+})();
+
+// ============================================================
+// WORKSPACE FILES PANEL
+// ============================================================
+(() => {
+    const overlay = document.getElementById('wf-overlay');
+    const openBtn = document.getElementById('wf-panel-btn');
+    const closeBtn = document.getElementById('wf-close-btn');
+    const statusBar = document.getElementById('wf-panel-status');
+    const tabBrowse = document.getElementById('wf-tab-browse');
+    const tabUpload = document.getElementById('wf-tab-upload');
+    const panelBrowse = document.getElementById('wf-panel-browse');
+    const panelUpload = document.getElementById('wf-panel-upload');
+    const pathInput = document.getElementById('wf-path-input');
+    const browseBtn = document.getElementById('wf-browse-btn');
+    const fileList = document.getElementById('wf-file-list');
+    const uploadDropzone = document.getElementById('wf-upload-dropzone');
+    const uploadFileInput = document.getElementById('wf-upload-file-input');
+    const uploadBrowseBtn = document.getElementById('wf-upload-browse-btn');
+    const uploadFilename = document.getElementById('wf-upload-filename');
+    const uploadPathInput = document.getElementById('wf-upload-path');
+    const uploadBtn = document.getElementById('wf-upload-btn');
+    const uploadResult = document.getElementById('wf-upload-result');
+
+    if (!overlay) return;
+
+    let uploadFiles = [];
+
+    function showStatus(msg, isErr) {
+        statusBar.textContent = msg; statusBar.className = 'panel-status ' + (isErr ? 'err' : 'ok');
+        statusBar.hidden = false;
+        clearTimeout(showStatus._t);
+        if (!isErr) showStatus._t = setTimeout(() => { statusBar.hidden = true; }, 3000);
+    }
+
+    function switchWfTab(tab) {
+        tabBrowse.classList.toggle('active', tab === 'browse');
+        tabUpload.classList.toggle('active', tab === 'upload');
+        panelBrowse.hidden = tab !== 'browse';
+        panelUpload.hidden = tab !== 'upload';
+        statusBar.hidden = true;
+    }
+
+    function formatBytes(b) {
+        if (b == null) return '';
+        if (b < 1024) return b + ' B';
+        if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+        return (b / 1024 / 1024).toFixed(1) + ' MB';
+    }
+
+    async function doBrowse() {
+        const path = pathInput.value.trim();
+        fileList.innerHTML = '<div class="panel-hint">加载中…</div>';
+        try {
+            const headers = await getAuthHeaders();
+            const url = getBasePath() + '/admin/workspace/browse' + (path ? '?path=' + encodeURIComponent(path) : '');
+            const resp = await fetch(url, { headers });
+            if (!resp.ok) { fileList.innerHTML = '<div class="panel-hint">加载失败 (' + resp.status + ')</div>'; return; }
+            const data = await resp.json();
+            const files = data.files || data.items || [];
+            fileList.innerHTML = '';
+            if (!files.length) { fileList.innerHTML = '<div class="panel-hint">目录为空</div>'; return; }
+            for (const f of files) {
+                const item = document.createElement('div');
+                item.className = 'wf-file-item';
+                const nameEl = document.createElement('div');
+                nameEl.className = 'wf-file-name';
+                nameEl.textContent = (f.isDirectory ? '📁 ' : '📄 ') + (f.name || f.path || '');
+                const sizeEl = document.createElement('div');
+                sizeEl.className = 'wf-file-size';
+                sizeEl.textContent = f.isDirectory ? '' : formatBytes(f.size);
+                item.appendChild(nameEl); item.appendChild(sizeEl);
+                if (!f.isDirectory && f.path) {
+                    const dlBtn = document.createElement('button');
+                    dlBtn.className = 'panel-icon-btn';
+                    dlBtn.title = '下载';
+                    dlBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+                    dlBtn.addEventListener('click', async () => {
+                        const dlHeaders = await getAuthHeaders();
+                        const dlResp = await fetch(getBasePath() + '/admin/workspace/download?path=' + encodeURIComponent(f.path), { headers: dlHeaders });
+                        if (!dlResp.ok) { showStatus('下载失败', true); return; }
+                        const blob = await dlResp.blob();
+                        const objUrl = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = objUrl; a.download = f.name || 'file';
+                        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                        setTimeout(() => URL.revokeObjectURL(objUrl), 30000);
+                    });
+                    item.appendChild(dlBtn);
+                } else if (f.isDirectory) {
+                    nameEl.style.cursor = 'pointer';
+                    nameEl.addEventListener('click', () => { pathInput.value = f.path || f.name; void doBrowse(); });
+                }
+                fileList.appendChild(item);
+            }
+        } catch (e) { fileList.innerHTML = '<div class="panel-hint">加载失败: ' + e.message + '</div>'; }
+    }
+
+    function setUploadFiles(files) {
+        uploadFiles = Array.from(files);
+        uploadFilename.textContent = uploadFiles.map(f => f.name).join(', ');
+        uploadFilename.hidden = !uploadFiles.length;
+        uploadBtn.disabled = !uploadFiles.length;
+        uploadResult.hidden = true;
+    }
+
+    if (uploadBrowseBtn) uploadBrowseBtn.addEventListener('click', () => uploadFileInput.click());
+    if (uploadFileInput) uploadFileInput.addEventListener('change', () => setUploadFiles(uploadFileInput.files || []));
+    if (uploadDropzone) {
+        uploadDropzone.addEventListener('dragover', e => { e.preventDefault(); uploadDropzone.classList.add('drag-over'); });
+        uploadDropzone.addEventListener('dragleave', () => uploadDropzone.classList.remove('drag-over'));
+        uploadDropzone.addEventListener('drop', e => { e.preventDefault(); uploadDropzone.classList.remove('drag-over'); setUploadFiles(e.dataTransfer.files); });
+    }
+
+    if (uploadBtn) uploadBtn.addEventListener('click', async () => {
+        if (!uploadFiles.length) return;
+        uploadBtn.disabled = true; uploadBtn.textContent = '上传中…';
+        uploadResult.hidden = true;
+        const destPath = uploadPathInput ? uploadPathInput.value.trim() : '';
+        let successCount = 0;
+        for (const file of uploadFiles) {
+            try {
+                const headers = await getAuthHeaders();
+                const fd = new FormData();
+                fd.append('file', file);
+                if (destPath) fd.append('path', destPath);
+                const resp = await fetch(getBasePath() + '/admin/workspace/upload', { method: 'POST', headers, body: fd });
+                if (resp.ok) successCount++;
+                else showStatus('上传失败: ' + file.name + ' (' + resp.status + ')', true);
+            } catch (e) { showStatus('上传失败: ' + e.message, true); }
+        }
+        if (successCount > 0) {
+            uploadResult.textContent = `已上传 ${successCount}/${uploadFiles.length} 个文件`;
+            uploadResult.className = 'panel-result ok'; uploadResult.hidden = false;
+            showStatus('上传完成', false);
+        }
+        uploadBtn.disabled = false; uploadBtn.textContent = '上传';
+        setUploadFiles([]);
+        if (panelBrowse && !panelBrowse.hidden) void doBrowse();
+    });
+
+    if (tabBrowse) tabBrowse.addEventListener('click', () => switchWfTab('browse'));
+    if (tabUpload) tabUpload.addEventListener('click', () => switchWfTab('upload'));
+    if (browseBtn) browseBtn.addEventListener('click', doBrowse);
+    if (pathInput) pathInput.addEventListener('keydown', e => { if (e.key === 'Enter') void doBrowse(); });
+    openBtn.addEventListener('click', async () => { overlay.hidden = false; switchWfTab('browse'); await doBrowse(); });
+    closeBtn.addEventListener('click', () => { overlay.hidden = true; });
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.hidden = true; });
+})();
+
+// ============================================================
+// CRON / AUTOMATION PANEL
+// ============================================================
+(() => {
+    const overlay = document.getElementById('cron-overlay');
+    const openBtn = document.getElementById('cron-panel-btn');
+    const closeBtn = document.getElementById('cron-close-btn');
+    const refreshBtn = document.getElementById('cron-refresh-btn');
+    const addBtn = document.getElementById('cron-add-btn');
+    const jobList = document.getElementById('cron-job-list');
+    const formSection = document.getElementById('cron-form-section');
+    const formTitle = document.getElementById('cron-form-title');
+    const formError = document.getElementById('cron-form-error');
+    const cancelBtn = document.getElementById('cron-form-cancel-btn');
+    const saveBtn = document.getElementById('cron-form-save-btn');
+    const statusBar = document.getElementById('cron-panel-status');
+    const histSection = document.getElementById('cron-history-section');
+    const histTitle = document.getElementById('cron-history-title');
+    const histList = document.getElementById('cron-history-list');
+    const histCloseBtn = document.getElementById('cron-history-close-btn');
+    const sessViewBtn = document.getElementById('cron-session-view-btn');
+    const sessSection = document.getElementById('cron-session-section');
+    const sessTitle = document.getElementById('cron-session-title');
+    const sessList = document.getElementById('cron-session-list');
+    const sessCloseBtn = document.getElementById('cron-session-close-btn');
+    const fName = document.getElementById('cron-f-name');
+    const fPrompt = document.getElementById('cron-f-prompt');
+    const fTimezone = document.getElementById('cron-f-timezone');
+    const fModel = document.getElementById('cron-f-model');
+    const fChannel = document.getElementById('cron-f-channel');
+    const fRecipient = document.getElementById('cron-f-recipient');
+    const fEnabled = document.getElementById('cron-f-enabled');
+    const fScheduleRaw = document.getElementById('cron-f-schedule-raw');
+    const dailyTime = document.getElementById('cron-daily-time');
+    const dailyWeekday = document.getElementById('cron-daily-weekday');
+    const intervalVal = document.getElementById('cron-interval-val');
+    const intervalUnit = document.getElementById('cron-interval-unit');
+
+    if (!overlay) return;
+
+    let editingId = null;
+    let currentHistJob = null;
+    let currentPreset = 'daily';
+
+    function showStatus(msg, isErr) {
+        statusBar.textContent = msg; statusBar.className = 'panel-status ' + (isErr ? 'err' : 'ok');
+        statusBar.hidden = false;
+        clearTimeout(showStatus._t);
+        if (!isErr) showStatus._t = setTimeout(() => { statusBar.hidden = true; }, 3500);
+    }
+
+    document.querySelectorAll('.cron-freq-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.cron-freq-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            currentPreset = tab.dataset.preset;
+            document.getElementById('cron-preset-daily').style.display = currentPreset === 'daily' ? '' : 'none';
+            document.getElementById('cron-preset-interval').style.display = currentPreset === 'interval' ? '' : 'none';
+            document.getElementById('cron-preset-custom').style.display = currentPreset === 'custom' ? '' : 'none';
+        });
+    });
+
+    function buildSchedule() {
+        if (currentPreset === 'custom') return fScheduleRaw.value.trim();
+        if (currentPreset === 'daily') {
+            const parts = (dailyTime.value || '09:00').split(':');
+            const h = parseInt(parts[0], 10) || 9, m = parseInt(parts[1], 10) || 0;
+            return `${m} ${h} * * ${dailyWeekday.checked ? '1-5' : '*'}`;
+        }
+        if (currentPreset === 'interval') {
+            const v = parseInt(intervalVal.value, 10) || 1;
+            return intervalUnit.value === 'min' ? `*/${v} * * * *` : `0 */${v} * * *`;
+        }
+        return '';
+    }
+
+    function applyScheduleToPreset(schedule) {
+        if (!schedule) return;
+        const daily = schedule.match(/^(\d+)\s+(\d+)\s+\*\s+\*\s+([\d\-,]+|\*)$/);
+        if (daily) {
+            const h = parseInt(daily[2], 10), m = parseInt(daily[1], 10);
+            dailyTime.value = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+            dailyWeekday.checked = daily[3] === '1-5';
+            setPreset('daily'); return;
+        }
+        const minM = schedule.match(/^\*\/(\d+)\s+\*\s+\*\s+\*\s+\*$/);
+        if (minM) { intervalVal.value = minM[1]; intervalUnit.value = 'min'; setPreset('interval'); return; }
+        const hrM = schedule.match(/^0\s+\*\/(\d+)\s+\*\s+\*\s+\*$/);
+        if (hrM) { intervalVal.value = hrM[1]; intervalUnit.value = 'hour'; setPreset('interval'); return; }
+        fScheduleRaw.value = schedule; setPreset('custom');
+    }
+
+    function setPreset(preset) {
+        currentPreset = preset;
+        document.querySelectorAll('.cron-freq-tab').forEach(t => t.classList.toggle('active', t.dataset.preset === preset));
+        document.getElementById('cron-preset-daily').style.display = preset === 'daily' ? '' : 'none';
+        document.getElementById('cron-preset-interval').style.display = preset === 'interval' ? '' : 'none';
+        document.getElementById('cron-preset-custom').style.display = preset === 'custom' ? '' : 'none';
+    }
+
+    function relTime(iso) {
+        if (!iso) return '—';
+        const sec = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+        if (sec < 60) return '刚刚';
+        if (sec < 3600) return Math.floor(sec/60) + ' 分钟前';
+        if (sec < 86400) return Math.floor(sec/3600) + ' 小时前';
+        return new Date(iso).toLocaleString('zh-CN');
+    }
+
+    function srcLabel(s) { return s === 'legacy-cron' ? '内置' : s === 'agent' ? 'Agent' : 'Web'; }
+    function srcCls(s) { return s === 'legacy-cron' ? 'source-legacy' : s === 'agent' ? 'source-agent' : 'source-webchat'; }
+
+    function buildCard(job) {
+        const isStatic = job.source === 'legacy-cron';
+        const card = document.createElement('div');
+        card.className = 'cron-job-card' + (job.enabled === false ? ' disabled' : '');
+
+        const dot = document.createElement('div'); dot.className = 'cron-job-status';
+        const info = document.createElement('div'); info.className = 'cron-job-info';
+        const nameEl = document.createElement('div'); nameEl.className = 'cron-job-name'; nameEl.textContent = job.name || job.id;
+        const meta = document.createElement('div'); meta.className = 'cron-job-meta'; meta.textContent = job.schedule || '';
+        info.appendChild(nameEl); info.appendChild(meta);
+
+        const badge = document.createElement('span');
+        badge.className = `cron-job-badge ${srcCls(job.source)}`; badge.textContent = srcLabel(job.source);
+
+        const actions = document.createElement('div'); actions.className = 'cron-job-actions';
+
+        const runBtn = document.createElement('button');
+        runBtn.className = 'panel-icon-btn'; runBtn.title = '立即执行';
+        runBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
+        runBtn.addEventListener('click', () => void runJob(job.id));
+
+        const histBtn = document.createElement('button');
+        histBtn.className = 'panel-icon-btn'; histBtn.title = '执行历史';
+        histBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
+        histBtn.addEventListener('click', () => void loadHistory(job));
+
+        actions.append(runBtn, histBtn);
+
+        if (!isStatic) {
+            const editBtn = document.createElement('button');
+            editBtn.className = 'panel-icon-btn'; editBtn.title = '编辑';
+            editBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+            editBtn.addEventListener('click', () => openForm(job));
+
+            const delBtn = document.createElement('button');
+            delBtn.className = 'panel-icon-btn danger'; delBtn.title = '删除';
+            delBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
+            delBtn.addEventListener('click', () => void deleteJob(job.id, job.name || job.id));
+            actions.append(editBtn, delBtn);
+        }
+
+        card.append(dot, info, badge, actions);
+        return card;
+    }
+
+    function renderJobs(items) {
+        jobList.innerHTML = '';
+        if (!items?.length) { const e = document.createElement('div'); e.className = 'panel-hint'; e.textContent = '暂无定时任务'; jobList.appendChild(e); return; }
+        const sorted = [...items].sort((a, b) => {
+            const as = a.source === 'legacy-cron' ? 0 : 1, bs = b.source === 'legacy-cron' ? 0 : 1;
+            return as - bs || (a.name || a.id).localeCompare(b.name || b.id, 'zh-CN');
+        });
+        sorted.forEach(j => jobList.appendChild(buildCard(j)));
+    }
+
+    async function loadJobs() {
+        try {
+            const h = await getAuthHeaders();
+            const r = await fetch(getBasePath() + '/admin/automations', { headers: h });
+            if (r.ok) { const d = await r.json(); renderJobs(d.items || []); }
+            else showStatus('加载失败 (' + r.status + ')', true);
+        } catch (e) { showStatus('加载失败: ' + e.message, true); }
+    }
+
+    async function loadHistory(job) {
+        currentHistJob = job;
+        histTitle.textContent = (job.name || job.id) + ' · 执行历史';
+        histList.innerHTML = '<div class="panel-hint">加载中…</div>';
+        formSection.hidden = true; sessSection.hidden = true; histSection.hidden = false;
+        sessViewBtn.hidden = false;
+        try {
+            const h = await getAuthHeaders();
+            const r = await fetch(getBasePath() + '/admin/automations/' + encodeURIComponent(job.id), { headers: h });
+            if (!r.ok) { histList.innerHTML = '<div class="panel-hint">加载失败 (' + r.status + ')</div>'; return; }
+            const d = await r.json();
+            renderHistory(d.runState);
+        } catch (e) { histList.innerHTML = '<div class="panel-hint">加载失败: ' + e.message + '</div>'; }
+    }
+
+    function renderHistory(runState) {
+        histList.innerHTML = '';
+        if (!runState) { histList.innerHTML = '<div class="panel-hint">无历史记录</div>'; return; }
+        if (runState.lastRunAtUtc) {
+            const s = document.createElement('div');
+            s.className = 'panel-hint';
+            const o = runState.outcome === 'success' ? '✅ 成功' : runState.outcome === 'failure' ? '❌ 失败' : runState.outcome || '—';
+            s.textContent = '上次执行: ' + relTime(runState.lastRunAtUtc) + ' · ' + o;
+            histList.appendChild(s);
+        }
+        const runs = runState.recentRuns || [];
+        if (!runs.length) { const e = document.createElement('div'); e.className = 'panel-hint'; e.textContent = '暂无详细记录'; histList.appendChild(e); return; }
+        for (const run of runs) {
+            const row = document.createElement('div'); row.className = 'cron-history-row';
+            const dotEl = document.createElement('div'); dotEl.className = 'cron-history-dot ' + (run.outcome === 'success' ? 'ok' : run.outcome === 'failure' ? 'error' : '');
+            const meta = document.createElement('div'); meta.className = 'cron-history-meta';
+            const tk = (run.inputTokens || run.outputTokens) ? ' · ' + ((run.inputTokens||0)+(run.outputTokens||0)) + ' tokens' : '';
+            meta.textContent = relTime(run.ranAtUtc) + tk;
+            const prev = document.createElement('div'); prev.className = 'cron-history-preview'; prev.textContent = run.messagePreview || '—';
+            const detail = document.createElement('div'); detail.className = 'cron-history-detail'; detail.hidden = true;
+            const o = run.outcome === 'success' ? '✅ 成功' : run.outcome === 'failure' ? '❌ 失败' : run.outcome || '—';
+            detail.innerHTML = `<div class="cron-history-detail-row"><span>执行时间</span><span>${run.ranAtUtc ? new Date(run.ranAtUtc).toLocaleString() : '—'}</span></div>
+                <div class="cron-history-detail-row"><span>结果</span><span>${o}</span></div>
+                <div class="cron-history-detail-row"><span>输入 tokens</span><span>${run.inputTokens ?? 0}</span></div>
+                <div class="cron-history-detail-row"><span>输出 tokens</span><span>${run.outputTokens ?? 0}</span></div>
+                ${run.messagePreview ? `<div class="cron-history-detail-preview">${run.messagePreview.replace(/</g,'&lt;')}</div>` : ''}`;
+            row.addEventListener('click', () => { detail.hidden = !detail.hidden; row.classList.toggle('cron-history-row-open', !detail.hidden); });
+            row.append(dotEl, meta, prev);
+            histList.appendChild(row); histList.appendChild(detail);
+        }
+    }
+
+    function openForm(job) {
+        editingId = job ? job.id : null;
+        formTitle.textContent = job ? '编辑定时任务' : '新建定时任务';
+        formError.hidden = true; histSection.hidden = true;
+        if (job) {
+            fName.value = job.name || ''; fPrompt.value = job.prompt || '';
+            fTimezone.value = job.timezone || ''; fModel.value = job.modelId || '';
+            fChannel.value = job.deliveryChannelId || ''; fRecipient.value = job.deliveryRecipientId || '';
+            fEnabled.checked = job.enabled !== false;
+            applyScheduleToPreset(job.schedule || '');
+        } else {
+            fName.value = ''; fPrompt.value = ''; fTimezone.value = 'Asia/Shanghai'; fModel.value = '';
+            fChannel.value = ''; fRecipient.value = ''; fEnabled.checked = true;
+            dailyTime.value = '09:00'; dailyWeekday.checked = false;
+            intervalVal.value = '1'; intervalUnit.value = 'hour'; fScheduleRaw.value = '';
+            setPreset('daily');
+        }
+        formSection.hidden = false; addBtn.hidden = true;
+        fName.focus();
+    }
+
+    function closeForm() { formSection.hidden = true; histSection.hidden = true; addBtn.hidden = false; editingId = null; }
+
+    async function saveJob() {
+        const name = fName.value.trim(), schedule = buildSchedule(), prompt = fPrompt.value.trim();
+        if (!name) { formError.textContent = '请填写任务名称'; formError.hidden = false; return; }
+        if (!schedule) { formError.textContent = '请设置执行计划'; formError.hidden = false; return; }
+        if (!prompt) { formError.textContent = '请填写提示词'; formError.hidden = false; return; }
+        formError.hidden = true;
+        const payload = { id: editingId || '', name, schedule, prompt,
+            timezone: fTimezone.value.trim() || null, modelId: fModel.value.trim() || null,
+            deliveryChannelId: fChannel.value.trim() || null, deliveryRecipientId: fRecipient.value.trim() || null,
+            enabled: fEnabled.checked, source: editingId ? undefined : 'webchat' };
+        try {
+            const h = { 'Content-Type': 'application/json', ...(await getAuthHeaders()) };
+            const url = getBasePath() + '/admin/automations' + (editingId ? '/' + encodeURIComponent(editingId) : '');
+            const resp = await fetch(url, { method: editingId ? 'PUT' : 'POST', headers: h, body: JSON.stringify(payload) });
+            if (!resp.ok) {
+                const e = await resp.json().catch(() => ({ error: '保存失败 (' + resp.status + ')' }));
+                formError.textContent = e.error || '保存失败 (' + resp.status + ')'; formError.hidden = false; return;
+            }
+            closeForm(); showStatus('保存成功！', false); await loadJobs();
+        } catch (e) { formError.textContent = '保存失败: ' + e.message; formError.hidden = false; }
+    }
+
+    async function deleteJob(id, name) {
+        if (!confirm(`确定删除 "${name}"？`)) return;
+        try {
+            const h = await getAuthHeaders();
+            const r = await fetch(getBasePath() + '/admin/automations/' + encodeURIComponent(id), { method: 'DELETE', headers: h });
+            if (r.ok) { showStatus('已删除', false); await loadJobs(); }
+            else { const e = await r.json().catch(() => ({ error: '删除失败' })); showStatus(e.error || '删除失败', true); }
+        } catch (e) { showStatus('删除失败: ' + e.message, true); }
+    }
+
+    async function runJob(id) {
+        try {
+            const h = { 'Content-Type': 'application/json', ...(await getAuthHeaders()) };
+            const r = await fetch(getBasePath() + '/admin/automations/' + encodeURIComponent(id) + '/run', { method: 'POST', headers: h });
+            if (r.ok) showStatus('已触发执行！', false);
+            else { const e = await r.json().catch(() => ({ error: '执行失败' })); showStatus(e.error || '执行失败', true); }
+        } catch (e) { showStatus('执行失败: ' + e.message, true); }
+    }
+
+    async function loadSession() {
+        if (!currentHistJob) return;
+        const sessionId = currentHistJob.sessionId || ('automation:' + currentHistJob.id);
+        sessTitle.textContent = (currentHistJob.name || currentHistJob.id) + ' · 完整会话';
+        sessList.innerHTML = '<div class="panel-hint">加载中…</div>';
+        histSection.hidden = true; sessSection.hidden = false;
+        try {
+            const h = await getAuthHeaders();
+            const r = await fetch(getBasePath() + '/admin/sessions/' + encodeURIComponent(sessionId), { headers: h });
+            if (r.status === 404) { sessList.innerHTML = '<div class="panel-hint">暂无会话记录</div>'; return; }
+            if (!r.ok) { sessList.innerHTML = '<div class="panel-hint">加载失败 (' + r.status + ')</div>'; return; }
+            const d = await r.json();
+            renderCronSession(d.session?.history || []);
+        } catch (e) { sessList.innerHTML = '<div class="panel-hint">加载失败: ' + e.message + '</div>'; }
+    }
+
+    function renderCronSession(history) {
+        sessList.innerHTML = '';
+        if (!history?.length) { sessList.innerHTML = '<div class="panel-hint">暂无对话记录</div>'; return; }
+        for (const turn of history) {
+            if (!turn.content && !turn.toolCalls?.length) continue;
+            const wrap = document.createElement('div');
+            wrap.className = 'cron-sess-turn cron-sess-turn-' + (turn.role === 'user' ? 'user' : 'assistant');
+            const hdr = document.createElement('div'); hdr.className = 'cron-sess-turn-header';
+            hdr.textContent = (turn.role === 'user' ? '指令' : 'AI 回复') + (turn.timestamp ? '  ' + new Date(turn.timestamp).toLocaleString('zh-CN') : '');
+            const body = document.createElement('div'); body.className = 'cron-sess-turn-body'; body.textContent = turn.content || '';
+            wrap.appendChild(hdr); wrap.appendChild(body);
+            if (turn.toolCalls?.length) {
+                for (const tc of turn.toolCalls) {
+                    const t = document.createElement('div'); t.className = 'cron-sess-tool-call';
+                    t.textContent = '🔧 ' + tc.toolName; t.title = tc.arguments || '';
+                    wrap.appendChild(t);
+                }
+            }
+            sessList.appendChild(wrap);
+        }
+        sessList.scrollTop = sessList.scrollHeight;
+    }
+
+    openBtn.addEventListener('click', async () => { overlay.hidden = false; closeForm(); statusBar.hidden = true; await loadJobs(); });
+    closeBtn.addEventListener('click', () => { overlay.hidden = true; closeForm(); });
+    overlay.addEventListener('click', e => { if (e.target === overlay) { overlay.hidden = true; closeForm(); } });
+    refreshBtn.addEventListener('click', loadJobs);
+    addBtn.addEventListener('click', () => openForm(null));
+    cancelBtn.addEventListener('click', closeForm);
+    histCloseBtn.addEventListener('click', closeForm);
+    sessViewBtn.addEventListener('click', loadSession);
+    sessCloseBtn.addEventListener('click', () => { sessSection.hidden = true; histSection.hidden = false; });
+    saveBtn.addEventListener('click', saveJob);
+})();
