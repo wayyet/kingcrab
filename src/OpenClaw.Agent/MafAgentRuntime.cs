@@ -597,7 +597,7 @@ public sealed class MafAgentRuntime : IAgentRuntime
         }
 
         var effectiveSkills = ResolveSkillsForTurn(loadedSkills, userMessage, out var blockedRoutes);
-        var skillSection = SkillPromptBuilder.Build(effectiveSkills);
+        var skillSection = SkillPromptBuilder.BuildIndex(effectiveSkills);
         var systemPrompt = string.IsNullOrEmpty(skillSection)
             ? baseSystemPrompt
             : baseSystemPrompt + "\n" + skillSection;
