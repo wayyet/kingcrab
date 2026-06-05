@@ -31,7 +31,7 @@ internal static class DigitalEmployeeEndpoints
         // Package structure expected inside the ZIP:
         //   [prefix/]config/{AGENTS,SOUL,IDENTITY,MEMORY}.md  → written to workspace root
         //   [prefix/]skills/<name>/**                          → written to workspace/skills/<name>/
-        //   [prefix/]ontology/*.md                            → written to workspace/ontology/
+        //   [prefix/]ontology/*.{md,json}                    → written to workspace/ontology/
         //   [prefix/]manifest.json                            → read for package name; not written
         //
         // Config files whose names are not in the allowed list are silently skipped.
@@ -255,12 +255,13 @@ internal static class DigitalEmployeeEndpoints
             return "skills" + Path.DirectorySeparatorChar + afterSkills.Replace('/', Path.DirectorySeparatorChar);
         }
 
-        // ontology/*.md → ontology/*.md (no sub-directories; only .md files).
+        // ontology/*.{md,json} → ontology/*.{md,json} (no sub-directories).
         if (rel.StartsWith("ontology/", StringComparison.OrdinalIgnoreCase))
         {
             var afterOntology = rel["ontology/".Length..];
             if (afterOntology.Contains('/') || afterOntology.Contains('\\')) return null;
-            if (!afterOntology.EndsWith(".md", StringComparison.OrdinalIgnoreCase)) return null;
+            if (!afterOntology.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
+                && !afterOntology.EndsWith(".json", StringComparison.OrdinalIgnoreCase)) return null;
             return "ontology" + Path.DirectorySeparatorChar + afterOntology;
         }
 
