@@ -165,10 +165,11 @@ internal static class ControlEndpoints
 
         app.MapPost("/tools/approve", async (HttpContext ctx, string approvalId, bool approved, string? requesterChannelId, string? requesterSenderId) =>
         {
-            var authResult = EndpointHelpers.AuthorizeOperatorEndpoint(ctx, startup, browserSessions, operations, requireCsrf: true, endpointScope: "admin.approvals.mutate");
-            if (authResult.Failure is not null)
-                return authResult.Failure;
-            var auth = authResult.Authorization!;
+            var auth = EndpointHelpers.AuthorizeOperatorRequest(ctx, startup, browserSessions, requireCsrf: false);
+            if (!auth.IsAuthorized)
+                return Results.Unauthorized();
+            if (!EndpointHelpers.TryConsumeOperatorRateLimit(ctx, operations, auth, "admin.control", out var blockedByPolicyId))
+                return Results.Json(new OperationStatusResponse { Success = false, Error = $"Rate limit exceeded by policy '{blockedByPolicyId}'." }, CoreJsonContext.Default.OperationStatusResponse, statusCode: StatusCodes.Status429TooManyRequests);
 
             if (string.IsNullOrWhiteSpace(approvalId))
                 return Results.Json(
@@ -182,18 +183,6 @@ internal static class ControlEndpoints
 
             if (!startup.Config.Security.RequireRequesterMatchForHttpToolApproval && !hasRequesterIdentity)
             {
-                if (!OperatorRoleNames.CanAccess(auth.Role, OperatorRoleNames.Admin))
-                {
-                    return Results.Json(
-                        new OperationStatusResponse
-                        {
-                            Success = false,
-                            Error = "Endpoint 'admin.approvals.override' requires role 'admin'."
-                        },
-                        CoreJsonContext.Default.OperationStatusResponse,
-                        statusCode: StatusCodes.Status403Forbidden);
-                }
-
                 var adminOutcome = runtime.ToolApprovalService.TrySetDecisionWithRequest(approvalId, approved, requesterChannelId: null, requesterSenderId: null, requireRequesterMatch: false);
                 if (adminOutcome.Result == ToolApprovalDecisionResult.Recorded && adminOutcome.Request is not null)
                 {
