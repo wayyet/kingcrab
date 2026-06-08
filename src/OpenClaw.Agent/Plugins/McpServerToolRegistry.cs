@@ -190,10 +190,13 @@ public sealed class McpServerToolRegistry : IDisposable, IAsyncDisposable
     {
         var prefix = toolNamePrefix;
         if (prefix is null)
-            prefix = $"{SanitizePrefixPart(serverId)}.";
+            prefix = $"{SanitizePrefixPart(serverId)}";
 
         var sanitizedRemoteName = SanitizeLlmToolNamePart(remoteName);
-        return string.IsNullOrEmpty(prefix) ? sanitizedRemoteName : prefix + sanitizedRemoteName;
+        // Dots are not allowed by OpenAI-compatible APIs (^[a-zA-Z0-9_-]+$).
+        // Replace any dot in the final assembled name with underscore.
+        var name = string.IsNullOrEmpty(prefix) ? sanitizedRemoteName : prefix + sanitizedRemoteName;
+        return name.Replace('.', '_');
     }
 
     private static string SanitizePrefixPart(string value)
@@ -216,8 +219,9 @@ public sealed class McpServerToolRegistry : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Sanitizes a string so every character satisfies the LLM tool-name pattern <c>^[a-zA-Z0-9_.\-]+$</c>.
-    /// Non-conforming characters (e.g. CJK, spaces) are replaced with <c>_uXXXX</c> (lowercase hex code point).
+    /// Sanitizes a string so every character satisfies the LLM tool-name pattern <c>^[a-zA-Z0-9_-]+$</c>.
+    /// Dots are replaced with <c>_</c>; other non-conforming ASCII characters are also replaced with <c>_</c>;
+    /// non-ASCII characters are replaced with <c>_uXXXX</c> (lowercase hex code point).
     /// </summary>
     private static string SanitizeLlmToolNamePart(string value)
     {
@@ -229,8 +233,10 @@ public sealed class McpServerToolRegistry : IDisposable, IAsyncDisposable
         {
             if (IsLlmToolNameChar(ch))
                 sb.Append(ch);
-            else
+            else if (ch > 0x7F)
                 sb.Append($"_u{(int)ch:x4}");
+            else
+                sb.Append('_');
         }
 
         return sb.Length == 0 ? "_" : sb.ToString();
@@ -238,7 +244,7 @@ public sealed class McpServerToolRegistry : IDisposable, IAsyncDisposable
 
     private static bool IsLlmToolNameChar(char ch)
         => (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')
-           || ch is '_' or '-' or '.';
+           || ch is '_' or '-';
 
     /// <summary>
     /// Hot-reloads workspace MCP servers from <paramref name="newServers"/>.

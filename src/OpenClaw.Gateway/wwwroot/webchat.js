@@ -3591,7 +3591,7 @@ if (clearAllSessionsBtn) {
             fId.value = 'streaming-' + Math.random().toString(36).slice(2, 8); fId.readOnly = false;
             fName.value = ''; fTransport.value = 'streamable-http'; fUrl.value = ''; fToken.value = '';
             clearHeaderRows();
-            fPrefix.value = 'streaming.'; fStartupTimeout.value = ''; fRequestTimeout.value = '';
+            fPrefix.value = 'streaming_'; fStartupTimeout.value = ''; fRequestTimeout.value = '';
             fEnabled.checked = true;
         }
         formSection.hidden = false; addBtn.hidden = true;
