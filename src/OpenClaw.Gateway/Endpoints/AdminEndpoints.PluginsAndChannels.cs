@@ -158,9 +158,11 @@ internal static partial class AdminEndpoints
             if (string.IsNullOrWhiteSpace(wsPath))
                 return Results.Json(new SkillMutationResponse { Success = false, Error = "Workspace path is not configured." }, CoreJsonContext.Default.SkillMutationResponse, statusCode: StatusCodes.Status501NotImplemented);
 
-            // Only allow deleting workspace-sourced skills
+            // Only allow deleting workspace-sourced skills.
+            // Use the resolved wsPath (not startup.WorkspacePath which may be null when
+            // workspace is configured via Tooling.WorkspaceRoot rather than the env var).
             var logger = ctx.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("SkillLoader");
-            var allSkills = OpenClaw.Core.Skills.SkillLoader.LoadAll(startup.Config.Skills, startup.WorkspacePath, logger);
+            var allSkills = OpenClaw.Core.Skills.SkillLoader.LoadAll(startup.Config.Skills, wsPath, logger);
             var target = allSkills.FirstOrDefault(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase));
             if (target is not null && target.Source != OpenClaw.Core.Skills.SkillSource.Workspace)
                 return Results.Json(new SkillMutationResponse { Success = false, Error = $"Skill '{name}' is a built-in skill and cannot be deleted." }, CoreJsonContext.Default.SkillMutationResponse, statusCode: StatusCodes.Status403Forbidden);
@@ -235,16 +237,33 @@ internal static partial class AdminEndpoints
             if (!System.Text.RegularExpressions.Regex.IsMatch(skillName, @"^[a-zA-Z0-9][a-zA-Z0-9_\-.]{0,63}$"))
                 return Results.Json(new SkillMutationResponse { Success = false, Error = $"Skill name '{skillName}' contains invalid characters." }, CoreJsonContext.Default.SkillMutationResponse, statusCode: StatusCodes.Status400BadRequest);
 
-            var skillDir = Path.Combine(wsPath, "skills", skillName);
+            var skillDir = Path.GetFullPath(Path.Combine(wsPath, "skills", skillName));
+            var skillDirPrefix = skillDir + Path.DirectorySeparatorChar;
 
-            // Phase 2: determine zip prefix (top-level folder or none)
-            string zipPrefix;
-            using (var stream2 = upload.OpenReadStream())
-            using (var zip2 = new System.IO.Compression.ZipArchive(stream2, System.IO.Compression.ZipArchiveMode.Read))
+            // Determine the prefix inside the ZIP to strip (= parent directory of SKILL.md,
+            // matching the old ControlEndpoints approach which is more precise than using the
+            // first-entry top-level folder).
+            var lastSlashIdx = skillMdEntry.FullName.LastIndexOf('/');
+            var zipPrefix = lastSlashIdx >= 0 ? skillMdEntry.FullName[..(lastSlashIdx + 1)] : "";
+
+            // Phase 2: ZIP slip validation — reject any entry that would escape skillDir
+            try
             {
-                var firstEntry = zip2.Entries.FirstOrDefault();
-                var topFolder = firstEntry?.FullName.Split('/')[0] ?? "";
-                zipPrefix = zip2.Entries.All(e => e.FullName.StartsWith(topFolder + "/", StringComparison.Ordinal)) ? topFolder + "/" : "";
+                using var stream2 = upload.OpenReadStream();
+                using var zip2 = new System.IO.Compression.ZipArchive(stream2, System.IO.Compression.ZipArchiveMode.Read);
+                foreach (var entry in zip2.Entries)
+                {
+                    var rel = zipPrefix.Length > 0 && entry.FullName.StartsWith(zipPrefix, StringComparison.OrdinalIgnoreCase)
+                        ? entry.FullName[zipPrefix.Length..] : entry.FullName;
+                    if (string.IsNullOrEmpty(rel)) continue;
+                    var destFull = Path.GetFullPath(Path.Combine(skillDir, rel));
+                    if (!destFull.StartsWith(skillDirPrefix, StringComparison.OrdinalIgnoreCase))
+                        return Results.Json(new SkillMutationResponse { Success = false, Error = "ZIP contains a path traversal entry and was rejected." }, CoreJsonContext.Default.SkillMutationResponse, statusCode: StatusCodes.Status400BadRequest);
+                }
+            }
+            catch (InvalidDataException)
+            {
+                return Results.Json(new SkillMutationResponse { Success = false, Error = "Invalid or corrupted ZIP file." }, CoreJsonContext.Default.SkillMutationResponse, statusCode: StatusCodes.Status400BadRequest);
             }
 
             // Phase 3: extract to workspace
