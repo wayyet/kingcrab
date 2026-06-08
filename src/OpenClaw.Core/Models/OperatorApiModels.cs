@@ -173,7 +173,10 @@ public sealed class SkillHealthSnapshot
 {
     public required string Name { get; init; }
     public string Description { get; init; } = "";
+    public string? Emoji { get; init; }
     public required string Source { get; init; }
+    /// <summary>True when the skill was installed by the user via the workspace (can be deleted).</summary>
+    public bool IsUserInstalled { get; init; }
     public required string Location { get; init; }
     public string TrustLevel { get; init; } = "untrusted";
     public string TrustReason { get; init; } = "";

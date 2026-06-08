@@ -527,7 +527,9 @@ internal static partial class AdminEndpoints
         {
             Name = skill.Name,
             Description = skill.Description,
+            Emoji = skill.Metadata.Emoji,
             Source = skill.Source.ToString().ToLowerInvariant(),
+            IsUserInstalled = skill.Source == SkillSource.Workspace,
             Location = skill.Location,
             TrustLevel = trustLevel,
             TrustReason = trustReason,
