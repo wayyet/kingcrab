@@ -4295,7 +4295,7 @@ if (clearAllSessionsBtn) {
             tab.classList.add('active');
             currentPreset = tab.dataset.preset;
             document.getElementById('cron-preset-daily').style.display = currentPreset === 'daily' ? '' : 'none';
-            document.getElementById('cron-preset-interval').style.display = currentPreset === 'interval' ? '' : 'none';
+            document.getElementById('cron-preset-interval').style.display = currentPreset === 'interval' ? 'flex' : 'none';
             document.getElementById('cron-preset-custom').style.display = currentPreset === 'custom' ? '' : 'none';
         });
     });
@@ -4334,7 +4334,7 @@ if (clearAllSessionsBtn) {
         currentPreset = preset;
         document.querySelectorAll('.cron-freq-tab').forEach(t => t.classList.toggle('active', t.dataset.preset === preset));
         document.getElementById('cron-preset-daily').style.display = preset === 'daily' ? '' : 'none';
-        document.getElementById('cron-preset-interval').style.display = preset === 'interval' ? '' : 'none';
+        document.getElementById('cron-preset-interval').style.display = preset === 'interval' ? 'flex' : 'none';
         document.getElementById('cron-preset-custom').style.display = preset === 'custom' ? '' : 'none';
     }
 

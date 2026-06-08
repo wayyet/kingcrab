@@ -317,9 +317,6 @@ internal static class EndpointHelpers
             scope.StartsWith("admin.harness.mutate", StringComparison.Ordinal) ||
             scope.StartsWith("admin.governance.mutate", StringComparison.Ordinal) ||
             scope.StartsWith("admin.webhooks.mutate", StringComparison.Ordinal) ||
-            scope.StartsWith("admin.automations.mutate", StringComparison.Ordinal) ||
-            scope.StartsWith("admin.automations.run", StringComparison.Ordinal) ||
-            scope.StartsWith("admin.automations.migrate", StringComparison.Ordinal) ||
             scope.StartsWith("admin.pulse.mutate", StringComparison.Ordinal) ||
             scope.StartsWith("admin.pulse.run", StringComparison.Ordinal) ||
             scope.StartsWith("admin.pulse.status", StringComparison.Ordinal) ||
