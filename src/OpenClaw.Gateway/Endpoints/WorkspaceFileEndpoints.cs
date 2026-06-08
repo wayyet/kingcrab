@@ -428,6 +428,25 @@ internal static class WorkspaceFileEndpoints
             if (!auth.IsAuthorized)
                 return Results.Unauthorized();
 
+            // Built-in servers from appsettings — strip Headers so tokens are never sent to the browser
+            var builtinCfg = startup.Config.Plugins.Mcp;
+            var builtinServers = builtinCfg.Servers
+                .ToDictionary(
+                    kv => kv.Key,
+                    kv => (object)new
+                    {
+                        kv.Value.Enabled,
+                        kv.Value.Name,
+                        kv.Value.Transport,
+                        kv.Value.Url,
+                        kv.Value.ToolNamePrefix,
+                        kv.Value.StartupTimeoutSeconds,
+                        kv.Value.RequestTimeoutSeconds,
+                        HasToken = kv.Value.Headers.ContainsKey("Authorization")
+                    },
+                    StringComparer.Ordinal);
+            var builtinPayload = new { builtinCfg.Enabled, Servers = builtinServers };
+
             var rawJson = await mcpConfigStore.TryLoadRawAsync(ctx.RequestAborted);
             JsonElement? userConfig = null;
             if (rawJson is not null)
@@ -438,7 +457,7 @@ internal static class WorkspaceFileEndpoints
 
             return Results.Ok(new
             {
-                builtin = startup.Config.Plugins.Mcp,
+                builtin = (object)builtinPayload,
                 user = userConfig
             });
         });
