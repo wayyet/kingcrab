@@ -263,9 +263,12 @@ function clearOidcConfig() {
     sessionStorage.removeItem(OIDC_VERIFIER_KEY);
 }
 
+const OIDC_DEFAULT_AUTHORITY = 'https://passport.ai4c.cn/realms/ai4c-saas';
+const OIDC_DEFAULT_CLIENT_ID  = 'ncrew-client';
+
 function getClientAuthMode() {
     const v = localStorage.getItem(AUTH_CLIENT_MODE_KEY);
-    return v === 'oidc' ? 'oidc' : 'token';
+    return v === 'token' ? 'token' : 'oidc';
 }
 
 function setClientAuthMode(mode) {
@@ -2815,15 +2818,13 @@ const oidcClientIdInput  = document.getElementById('oidc-client-id-input');
 const oidcConfigSave     = document.getElementById('oidc-config-save');
 const oidcConfigClear    = document.getElementById('oidc-config-clear');
 
-// Initialise auth mode and pre-populate OIDC fields from localStorage
+// Initialise auth mode and pre-populate OIDC fields from localStorage (or built-in defaults)
 (function initAuthMode() {
     const mode = getClientAuthMode();
     applyAuthMode(mode);
-    if (mode === 'oidc') {
-        const cfg = getOidcConfig();
-        if (oidcAuthorityInput && cfg.authority) oidcAuthorityInput.value = cfg.authority;
-        if (oidcClientIdInput  && cfg.clientId)  oidcClientIdInput.value  = cfg.clientId;
-    }
+    const cfg = getOidcConfig();
+    if (oidcAuthorityInput) oidcAuthorityInput.value = cfg.authority || OIDC_DEFAULT_AUTHORITY;
+    if (oidcClientIdInput)  oidcClientIdInput.value  = cfg.clientId  || OIDC_DEFAULT_CLIENT_ID;
 })();
 
 // Radio button listeners — switch auth mode
@@ -2835,8 +2836,8 @@ document.querySelectorAll('input[name="client-auth-mode"]').forEach(radio => {
         // Populate OIDC fields when switching to OIDC
         if (mode === 'oidc') {
             const cfg = getOidcConfig();
-            if (oidcAuthorityInput && cfg.authority) oidcAuthorityInput.value = cfg.authority;
-            if (oidcClientIdInput  && cfg.clientId)  oidcClientIdInput.value  = cfg.clientId;
+            if (oidcAuthorityInput) oidcAuthorityInput.value = cfg.authority || OIDC_DEFAULT_AUTHORITY;
+            if (oidcClientIdInput)  oidcClientIdInput.value  = cfg.clientId  || OIDC_DEFAULT_CLIENT_ID;
         }
         // Reconnect so the token selection changes take effect
         if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
@@ -3357,32 +3358,102 @@ if (clearAllSessionsBtn) {
 // MCP SERVERS PANEL
 // ============================================================
 (() => {
-    const overlay = document.getElementById('mcp-overlay');
-    const openBtn = document.getElementById('mcp-panel-btn');
-    const closeBtn = document.getElementById('mcp-close-btn');
-    const serverList = document.getElementById('mcp-server-list');
+    const overlay     = document.getElementById('mcp-overlay');
+    const openBtn     = document.getElementById('mcp-panel-btn');
+    const closeBtn    = document.getElementById('mcp-close-btn');
+    const serverList  = document.getElementById('mcp-server-list');
     const formSection = document.getElementById('mcp-form-section');
-    const formTitle = document.getElementById('mcp-form-title');
-    const formError = document.getElementById('mcp-form-error');
-    const addBtn = document.getElementById('mcp-add-btn');
-    const cancelBtn = document.getElementById('mcp-cancel-btn');
-    const saveBtn = document.getElementById('mcp-save-btn');
-    const statusBar = document.getElementById('mcp-panel-status');
-    const fId = document.getElementById('mcp-f-id');
-    const fName = document.getElementById('mcp-f-name');
-    const fTransport = document.getElementById('mcp-f-transport');
-    const fUrl = document.getElementById('mcp-f-url');
-    const fToken = document.getElementById('mcp-f-token');
-    const fPrefix = document.getElementById('mcp-f-prefix');
+    const formTitle   = document.getElementById('mcp-form-title');
+    const formError   = document.getElementById('mcp-form-error');
+    const addBtn      = document.getElementById('mcp-add-btn');
+    const cancelBtn   = document.getElementById('mcp-cancel-btn');
+    const saveBtn     = document.getElementById('mcp-save-btn');
+    const statusBar   = document.getElementById('mcp-panel-status');
+    const fId             = document.getElementById('mcp-f-id');
+    const fName           = document.getElementById('mcp-f-name');
+    const fTransport      = document.getElementById('mcp-f-transport');
+    const fUrl            = document.getElementById('mcp-f-url');
+    const fToken          = document.getElementById('mcp-f-token');
+    const fHeadersRows    = document.getElementById('mcp-f-headers-rows');
+    const fAddHeaderBtn   = document.getElementById('mcp-f-add-header-btn');
+    const fPrefix         = document.getElementById('mcp-f-prefix');
     const fStartupTimeout = document.getElementById('mcp-f-startup-timeout');
     const fRequestTimeout = document.getElementById('mcp-f-request-timeout');
-    const fEnabled = document.getElementById('mcp-f-enabled');
+    const fEnabled        = document.getElementById('mcp-f-enabled');
 
     if (!overlay) return;
 
-    let mcpConfig = { Enabled: true, Servers: {} };
-    let builtinConfig = { Servers: {} };
-    let editingId = null;
+    let mcpConfig     = { Enabled: true, Servers: {} };
+    let builtinConfig = { Enabled: false, Servers: {} };
+    let editingId     = null;
+
+    // ── Headers editor helpers ──────────────────────────────────────────
+    function clearHeaderRows() { if (fHeadersRows) fHeadersRows.innerHTML = ''; }
+
+    function addHeaderRow(key, value, disabled) {
+        if (!fHeadersRows) return;
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;gap:0.25rem;margin-top:0.2rem';
+
+        const kInput = document.createElement('input');
+        kInput.type = 'text'; kInput.className = 'input';
+        kInput.placeholder = 'Header name'; kInput.value = key || ''; kInput.autocomplete = 'off';
+        kInput.style.flex = '1'; kInput.disabled = !!disabled;
+
+        const vInput = document.createElement('input');
+        vInput.type = 'text'; vInput.className = 'input';
+        vInput.placeholder = 'Value'; vInput.value = value || ''; vInput.autocomplete = 'off';
+        vInput.style.flex = '1'; vInput.disabled = !!disabled;
+
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button'; delBtn.className = 'btn btn-ghost btn-sm'; delBtn.title = 'Remove';
+        delBtn.disabled = !!disabled;
+        delBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+        delBtn.addEventListener('click', () => row.remove());
+
+        row.append(kInput, vInput, delBtn);
+        fHeadersRows.appendChild(row);
+    }
+
+    function getHeadersFromRows() {
+        if (!fHeadersRows) return null;
+        const result = {};
+        fHeadersRows.querySelectorAll('div').forEach(row => {
+            const inputs = row.querySelectorAll('input');
+            if (inputs.length >= 2) {
+                const k = inputs[0].value.trim(), v = inputs[1].value.trim();
+                if (k) result[k] = v;
+            }
+        });
+        return Object.keys(result).length ? result : null;
+    }
+
+    function setHeadersFromConfig(headers, disabled) {
+        clearHeaderRows();
+        if (headers && typeof headers === 'object') {
+            for (const [k, v] of Object.entries(headers)) addHeaderRow(k, v, disabled);
+        }
+    }
+
+    function setAllFormDisabled(disabled) {
+        [fId, fName, fTransport, fUrl, fToken, fPrefix, fStartupTimeout, fRequestTimeout, fEnabled]
+            .forEach(el => { if (el) el.disabled = disabled; });
+        if (fAddHeaderBtn) fAddHeaderBtn.style.display = disabled ? 'none' : '';
+        if (fHeadersRows) fHeadersRows.querySelectorAll('input, button').forEach(el => { el.disabled = disabled; });
+    }
+
+    if (fAddHeaderBtn) fAddHeaderBtn.addEventListener('click', () => addHeaderRow('', '', false));
+
+    // ── Normalize camelCase → PascalCase (from ASP.NET JSON) ─────────────
+    function normalizePascal(obj) {
+        if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return obj;
+        const out = {};
+        for (const [k, v] of Object.entries(obj)) {
+            const key = k.charAt(0).toUpperCase() + k.slice(1);
+            out[key] = (v && typeof v === 'object' && !Array.isArray(v)) ? normalizePascal(v) : v;
+        }
+        return out;
+    }
 
     function showStatus(msg, isErr) {
         statusBar.textContent = msg;
@@ -3392,28 +3463,15 @@ if (clearAllSessionsBtn) {
         if (!isErr) showStatus._t = setTimeout(() => { statusBar.hidden = true; }, 3000);
     }
 
-    function normalizePascal(obj) {
-        if (!obj || typeof obj !== 'object') return obj;
-        const out = {};
-        for (const [k, v] of Object.entries(obj)) {
-            const key = k.charAt(0).toUpperCase() + k.slice(1);
-            out[key] = v;
-        }
-        return out;
-    }
-
+    // ── Build a server card ───────────────────────────────────────────────
     function buildCard(id, cfg, builtin) {
         const card = document.createElement('div');
         card.className = 'mcp-server-card' + (cfg.Enabled === false ? ' disabled' : '');
 
         const info = document.createElement('div');
         info.className = 'mcp-server-info';
-        const nameEl = document.createElement('div');
-        nameEl.className = 'mcp-server-name';
-        nameEl.textContent = cfg.Name || id;
-        const urlEl = document.createElement('div');
-        urlEl.className = 'mcp-server-url';
-        urlEl.textContent = cfg.Url || cfg.Command || '';
+        const nameEl = document.createElement('div'); nameEl.className = 'mcp-server-name'; nameEl.textContent = cfg.Name || id;
+        const urlEl  = document.createElement('div'); urlEl.className  = 'mcp-server-url';  urlEl.textContent  = cfg.Url || cfg.Command || '';
         info.appendChild(nameEl); info.appendChild(urlEl);
 
         const badge = document.createElement('span');
@@ -3426,32 +3484,37 @@ if (clearAllSessionsBtn) {
         actions.className = 'mcp-server-actions';
 
         if (!builtin) {
+            const isEnabled = cfg.Enabled !== false;
             const toggleBtn = document.createElement('button');
-            toggleBtn.className = 'panel-icon-btn';
-            toggleBtn.title = cfg.Enabled === false ? 'Enable' : 'Disable';
-            toggleBtn.innerHTML = cfg.Enabled === false
-                ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>'
-                : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/></svg>';
+            toggleBtn.className = 'panel-icon-btn'; toggleBtn.title = isEnabled ? 'Disable' : 'Enable';
+            toggleBtn.innerHTML = isEnabled
+                ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/></svg>'
+                : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>';
             toggleBtn.addEventListener('click', () => {
-                mcpConfig.Servers[id] = { ...cfg, Enabled: cfg.Enabled === false };
+                mcpConfig.Servers[id] = Object.assign({}, cfg, { Enabled: !isEnabled });
                 renderList(); void saveConfig();
             });
 
             const editBtn = document.createElement('button');
-            editBtn.className = 'panel-icon-btn';
-            editBtn.title = 'Edit';
+            editBtn.className = 'panel-icon-btn'; editBtn.title = 'Edit';
             editBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
             editBtn.addEventListener('click', () => openForm(id));
 
             const delBtn = document.createElement('button');
-            delBtn.className = 'panel-icon-btn danger';
-            delBtn.title = 'Delete';
+            delBtn.className = 'panel-icon-btn danger'; delBtn.title = 'Delete';
             delBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
             delBtn.addEventListener('click', () => {
                 if (!confirm('Delete "' + (cfg.Name || id) + '"?')) return;
                 delete mcpConfig.Servers[id]; renderList(); void saveConfig();
             });
             actions.append(toggleBtn, editBtn, delBtn);
+        } else {
+            // Builtin: view-only button
+            const viewBtn = document.createElement('button');
+            viewBtn.className = 'panel-icon-btn'; viewBtn.title = 'View (read-only)';
+            viewBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+            viewBtn.addEventListener('click', () => openBuiltinView(id, cfg));
+            actions.appendChild(viewBtn);
         }
 
         card.append(info, badge, actions);
@@ -3461,13 +3524,10 @@ if (clearAllSessionsBtn) {
     function renderList() {
         serverList.innerHTML = '';
         const builtinIds = Object.keys(builtinConfig.Servers || {});
-        const userIds = Object.keys(mcpConfig.Servers || {});
+        const userIds    = Object.keys(mcpConfig.Servers || {});
         if (!builtinIds.length && !userIds.length) {
-            const empty = document.createElement('div');
-            empty.className = 'mcp-server-empty';
-            empty.textContent = 'No MCP servers configured.';
-            serverList.appendChild(empty);
-            return;
+            const empty = document.createElement('div'); empty.className = 'mcp-server-empty';
+            empty.textContent = 'No MCP servers configured.'; serverList.appendChild(empty); return;
         }
         if (builtinIds.length) {
             const lbl = document.createElement('div'); lbl.className = 'mcp-section-label'; lbl.textContent = 'Built-in';
@@ -3481,48 +3541,84 @@ if (clearAllSessionsBtn) {
         }
     }
 
+    // ── Open builtin server (read-only) ──────────────────────────────────
+    function openBuiltinView(id, cfg) {
+        editingId = null;
+        formTitle.textContent = 'Built-in Server (read-only)';
+        formError.hidden = true;
+        fId.value    = id; fId.readOnly = true;
+        fName.value  = cfg.Name || '';
+        fTransport.value = cfg.Transport || 'streamable-http';
+        fUrl.value   = cfg.Url || cfg.Command || '';
+        const authHeader = (cfg.Headers && cfg.Headers['Authorization']) || '';
+        fToken.value = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+        const extra = Object.fromEntries(Object.entries(cfg.Headers || {}).filter(([k]) => k !== 'Authorization'));
+        setHeadersFromConfig(Object.keys(extra).length ? extra : null, true);
+        if (!cfg.Headers && cfg.HasToken) fToken.value = '(hidden)';
+        fPrefix.value = cfg.ToolNamePrefix || '';
+        fStartupTimeout.value = cfg.StartupTimeoutSeconds != null ? cfg.StartupTimeoutSeconds : '';
+        fRequestTimeout.value = cfg.RequestTimeoutSeconds != null ? cfg.RequestTimeoutSeconds : '';
+        fEnabled.checked = cfg.Enabled !== false;
+        setAllFormDisabled(true);
+        saveBtn.hidden = true;
+        cancelBtn.textContent = 'Close';
+        formSection.hidden = false; addBtn.hidden = true;
+    }
+
+    // ── Open add/edit form ────────────────────────────────────────────────
     function openForm(serverId) {
         editingId = serverId || null;
         formTitle.textContent = serverId ? 'Edit Server' : 'Add Server';
         formError.hidden = true;
+        setAllFormDisabled(false);
+        fId.readOnly = !!serverId;
+        saveBtn.hidden = false;
+        cancelBtn.textContent = 'Cancel';
         if (serverId) {
             const cfg = mcpConfig.Servers[serverId] || {};
-            fId.value = serverId; fId.readOnly = true;
-            fName.value = cfg.Name || '';
+            fId.value = serverId; fName.value = cfg.Name || '';
             fTransport.value = cfg.Transport || 'streamable-http';
             fUrl.value = cfg.Url || '';
-            const auth = (cfg.Headers && cfg.Headers['Authorization']) || '';
-            fToken.value = auth.startsWith('Bearer ') ? auth.slice(7) : auth;
+            const authHeader = (cfg.Headers && cfg.Headers['Authorization']) || '';
+            fToken.value = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+            const extra = Object.fromEntries(Object.entries(cfg.Headers || {}).filter(([k]) => k !== 'Authorization'));
+            setHeadersFromConfig(Object.keys(extra).length ? extra : null, false);
             fPrefix.value = cfg.ToolNamePrefix || '';
             fStartupTimeout.value = cfg.StartupTimeoutSeconds != null ? cfg.StartupTimeoutSeconds : '';
             fRequestTimeout.value = cfg.RequestTimeoutSeconds != null ? cfg.RequestTimeoutSeconds : '';
             fEnabled.checked = cfg.Enabled !== false;
         } else {
-            fId.value = 'server-' + Math.random().toString(36).slice(2, 7); fId.readOnly = false;
+            fId.value = 'streaming-' + Math.random().toString(36).slice(2, 8); fId.readOnly = false;
             fName.value = ''; fTransport.value = 'streamable-http'; fUrl.value = ''; fToken.value = '';
-            fPrefix.value = ''; fStartupTimeout.value = ''; fRequestTimeout.value = ''; fEnabled.checked = true;
+            clearHeaderRows();
+            fPrefix.value = 'streaming.'; fStartupTimeout.value = ''; fRequestTimeout.value = '';
+            fEnabled.checked = true;
         }
-        formSection.hidden = false;
-        addBtn.hidden = true;
+        formSection.hidden = false; addBtn.hidden = true;
+        (serverId ? fName : fUrl).focus();
     }
 
     function closeForm() {
-        formSection.hidden = true;
-        addBtn.hidden = false;
-        editingId = null;
+        setAllFormDisabled(false);
+        saveBtn.hidden = false; cancelBtn.textContent = 'Cancel';
+        formSection.hidden = true; addBtn.hidden = false;
+        editingId = null; clearHeaderRows();
     }
 
     function buildServerConfig() {
         const id = fId.value.trim();
         if (!id) return { error: 'Server ID is required.' };
-        if (!/^[\w\-\.]+$/.test(id)) return { error: 'Invalid server ID format.' };
+        if (!/^[\w\-\.]+$/.test(id)) return { error: 'Server ID may only contain letters, digits, hyphens, underscores and dots.' };
         const url = fUrl.value.trim();
         if (!url) return { error: 'URL is required.' };
         try { new URL(url); } catch (_) { return { error: 'URL is not valid.' }; }
         const cfg = { Transport: fTransport.value || 'streamable-http', Url: url, Enabled: fEnabled.checked };
         const name = fName.value.trim(); if (name) cfg.Name = name;
-        const token = fToken.value.trim();
-        if (token) cfg.Headers = { Authorization: 'Bearer ' + token };
+        // Merge bearer token + extra headers
+        const allHeaders = {};
+        const token = fToken.value.trim(); if (token) allHeaders['Authorization'] = 'Bearer ' + token;
+        const extra = getHeadersFromRows(); if (extra) Object.assign(allHeaders, extra);
+        if (Object.keys(allHeaders).length) cfg.Headers = allHeaders;
         const prefix = fPrefix.value.trim(); if (prefix) cfg.ToolNamePrefix = prefix;
         const st = parseInt(fStartupTimeout.value, 10); if (!isNaN(st) && st > 0) cfg.StartupTimeoutSeconds = st;
         const rt = parseInt(fRequestTimeout.value, 10); if (!isNaN(rt) && rt > 0) cfg.RequestTimeoutSeconds = rt;
@@ -3536,12 +3632,15 @@ if (clearAllSessionsBtn) {
             if (resp.ok) {
                 const data = await resp.json();
                 const rawBuiltin = data.builtin || {};
-                builtinConfig = { Servers: {} };
+                builtinConfig = { Enabled: !!(rawBuiltin.enabled ?? rawBuiltin.Enabled), Servers: {} };
                 for (const [id, srv] of Object.entries(rawBuiltin.servers || rawBuiltin.Servers || {})) {
                     builtinConfig.Servers[id] = normalizePascal(srv);
                 }
                 const u = data.user || {};
-                mcpConfig = { Enabled: !!(u.Enabled ?? u.enabled ?? true), Servers: { ...((u.Servers || u.servers || {})) } };
+                mcpConfig = {
+                    Enabled: !!(u.Enabled ?? u.enabled ?? true),
+                    Servers: Object.assign({}, u.Servers || u.servers || {})
+                };
             } else {
                 showStatus('Load failed (' + resp.status + ')', true);
             }
@@ -3555,14 +3654,14 @@ if (clearAllSessionsBtn) {
             const resp = await fetch(getBasePath() + '/admin/workspace/mcp', {
                 method: 'PUT', headers, body: JSON.stringify(mcpConfig)
             });
-            if (resp.ok) showStatus('Saved — hot-reload will apply.', false);
+            if (resp.ok) showStatus('Saved \u2014 hot-reload will apply changes.', false);
             else showStatus('Save failed (' + resp.status + ')', true);
         } catch (e) { showStatus('Save failed: ' + e.message, true); }
     }
 
     openBtn.addEventListener('click', async () => { overlay.hidden = false; closeForm(); statusBar.hidden = true; await loadConfig(); });
-    closeBtn.addEventListener('click', () => { overlay.hidden = true; });
-    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.hidden = true; });
+    closeBtn.addEventListener('click', () => { overlay.hidden = true; closeForm(); });
+    overlay.addEventListener('click', e => { if (e.target === overlay) { overlay.hidden = true; closeForm(); } });
     addBtn.addEventListener('click', () => openForm(null));
     cancelBtn.addEventListener('click', closeForm);
     saveBtn.addEventListener('click', async () => {
@@ -3866,24 +3965,38 @@ if (clearAllSessionsBtn) {
 // WORKSPACE FILES PANEL
 // ============================================================
 (() => {
-    const overlay = document.getElementById('wf-overlay');
-    const openBtn = document.getElementById('wf-panel-btn');
-    const closeBtn = document.getElementById('wf-close-btn');
-    const statusBar = document.getElementById('wf-panel-status');
-    const tabBrowse = document.getElementById('wf-tab-browse');
-    const tabUpload = document.getElementById('wf-tab-upload');
-    const panelBrowse = document.getElementById('wf-panel-browse');
-    const panelUpload = document.getElementById('wf-panel-upload');
-    const pathInput = document.getElementById('wf-path-input');
-    const browseBtn = document.getElementById('wf-browse-btn');
-    const fileList = document.getElementById('wf-file-list');
-    const uploadDropzone = document.getElementById('wf-upload-dropzone');
+    const overlay       = document.getElementById('wf-overlay');
+    const openBtn       = document.getElementById('wf-panel-btn');
+    const closeBtn      = document.getElementById('wf-close-btn');
+    const statusBar     = document.getElementById('wf-panel-status');
+
+    // Tabs
+    const tabBrowse    = document.getElementById('wf-tab-browse');
+    const tabUpload    = document.getElementById('wf-tab-upload');
+    const tabDownload  = document.getElementById('wf-tab-download');
+    const panelBrowse  = document.getElementById('wf-panel-browse');
+    const panelUpload  = document.getElementById('wf-panel-upload');
+    const panelDownload = document.getElementById('wf-panel-download');
+
+    // Browse tab (tree display)
+    const browsePathInput  = document.getElementById('wf-browse-path');
+    const browseDepthInput = document.getElementById('wf-browse-depth');
+    const browseBtn        = document.getElementById('wf-browse-btn');
+    const browseResult     = document.getElementById('wf-browse-result');
+
+    // Download tab
+    const downloadPathInput = document.getElementById('wf-download-path');
+    const downloadBtn       = document.getElementById('wf-download-btn');
+    const downloadResult    = document.getElementById('wf-download-result');
+
+    // Upload tab
+    const uploadDirInput  = document.getElementById('wf-upload-path');
+    const uploadDropzone  = document.getElementById('wf-upload-dropzone');
     const uploadFileInput = document.getElementById('wf-upload-file-input');
     const uploadBrowseBtn = document.getElementById('wf-upload-browse-btn');
-    const uploadFilename = document.getElementById('wf-upload-filename');
-    const uploadPathInput = document.getElementById('wf-upload-path');
-    const uploadBtn = document.getElementById('wf-upload-btn');
-    const uploadResult = document.getElementById('wf-upload-result');
+    const uploadFilename  = document.getElementById('wf-upload-filename');
+    const uploadBtn       = document.getElementById('wf-upload-btn');
+    const uploadResult    = document.getElementById('wf-upload-result');
 
     if (!overlay) return;
 
@@ -3897,77 +4010,156 @@ if (clearAllSessionsBtn) {
     }
 
     function switchWfTab(tab) {
-        tabBrowse.classList.toggle('active', tab === 'browse');
-        tabUpload.classList.toggle('active', tab === 'upload');
-        panelBrowse.hidden = tab !== 'browse';
-        panelUpload.hidden = tab !== 'upload';
+        if (tabBrowse)   tabBrowse.classList.toggle('active',   tab === 'browse');
+        if (tabUpload)   tabUpload.classList.toggle('active',   tab === 'upload');
+        if (tabDownload) tabDownload.classList.toggle('active', tab === 'download');
+        if (panelBrowse)   panelBrowse.hidden   = tab !== 'browse';
+        if (panelUpload)   panelUpload.hidden   = tab !== 'upload';
+        if (panelDownload) panelDownload.hidden = tab !== 'download';
         statusBar.hidden = true;
     }
 
-    function formatBytes(b) {
-        if (b == null) return '';
-        if (b < 1024) return b + ' B';
-        if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
-        return (b / 1024 / 1024).toFixed(1) + ' MB';
+    // ── Tree helpers ──────────────────────────────────────────────────────
+    function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+    function formatSize(bytes) {
+        if (bytes == null || bytes < 0) return '';
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / 1048576).toFixed(1) + ' MB';
     }
 
+    function renderTree(entries, indent) {
+        if (!entries || !entries.length) return '';
+        return entries.map(entry => {
+            const pad  = '\u00a0'.repeat(indent * 4);
+            const icon = entry.isDir
+                ? '<span style="color:#e6a800">\uD83D\uDCC1</span>'
+                : '<span style="color:#888">\uD83D\uDCC4</span>';
+            const size = (!entry.isDir && entry.size != null)
+                ? ' <span style="color:var(--text-muted);font-size:11px">(' + formatSize(entry.size) + ')</span>'
+                : '';
+            const line = `<div style="white-space:nowrap">${pad}${icon} ${escHtml(entry.name)}${size}</div>`;
+            const children = (entry.isDir && entry.children) ? renderTree(entry.children, indent + 1) : '';
+            return line + children;
+        }).join('');
+    }
+
+    function countEntries(entries) {
+        let dirs = 0, files = 0;
+        for (const e of (entries || [])) {
+            if (e.isDir) { dirs++; if (e.children) { const c = countEntries(e.children); dirs += c.dirs; files += c.files; } }
+            else files++;
+        }
+        return { dirs, files };
+    }
+
+    // ── Browse (tree) ─────────────────────────────────────────────────────
     async function doBrowse() {
-        const path = pathInput.value.trim();
-        fileList.innerHTML = '<div class="panel-hint">加载中…</div>';
+        const path  = browsePathInput ? browsePathInput.value.trim() : '';
+        const depth = browseDepthInput ? parseInt(browseDepthInput.value, 10) : 6;
+        if (browseBtn) browseBtn.disabled = true;
+        if (browseResult) browseResult.hidden = true;
         try {
             const headers = await getAuthHeaders();
-            const url = getBasePath() + '/admin/workspace/browse' + (path ? '?path=' + encodeURIComponent(path) : '');
+            const params = new URLSearchParams();
+            if (path) params.set('path', path);
+            if (!isNaN(depth)) params.set('depth', String(depth));
+            const url = getBasePath() + '/admin/workspace/tree' + ([...params].length ? '?' + params : '');
             const resp = await fetch(url, { headers });
-            if (!resp.ok) { fileList.innerHTML = '<div class="panel-hint">加载失败 (' + resp.status + ')</div>'; return; }
-            const data = await resp.json();
-            const files = data.files || data.items || [];
-            fileList.innerHTML = '';
-            if (!files.length) { fileList.innerHTML = '<div class="panel-hint">目录为空</div>'; return; }
-            for (const f of files) {
-                const item = document.createElement('div');
-                item.className = 'wf-file-item';
-                const nameEl = document.createElement('div');
-                nameEl.className = 'wf-file-name';
-                nameEl.textContent = (f.isDirectory ? '📁 ' : '📄 ') + (f.name || f.path || '');
-                const sizeEl = document.createElement('div');
-                sizeEl.className = 'wf-file-size';
-                sizeEl.textContent = f.isDirectory ? '' : formatBytes(f.size);
-                item.appendChild(nameEl); item.appendChild(sizeEl);
-                if (!f.isDirectory && f.path) {
-                    const dlBtn = document.createElement('button');
-                    dlBtn.className = 'panel-icon-btn';
-                    dlBtn.title = '下载';
-                    dlBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
-                    dlBtn.addEventListener('click', async () => {
-                        const dlHeaders = await getAuthHeaders();
-                        const dlResp = await fetch(getBasePath() + '/admin/workspace/download?path=' + encodeURIComponent(f.path), { headers: dlHeaders });
-                        if (!dlResp.ok) { showStatus('下载失败', true); return; }
-                        const blob = await dlResp.blob();
-                        const objUrl = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = objUrl; a.download = f.name || 'file';
-                        document.body.appendChild(a); a.click(); document.body.removeChild(a);
-                        setTimeout(() => URL.revokeObjectURL(objUrl), 30000);
-                    });
-                    item.appendChild(dlBtn);
-                } else if (f.isDirectory) {
-                    nameEl.style.cursor = 'pointer';
-                    nameEl.addEventListener('click', () => { pathInput.value = f.path || f.name; void doBrowse(); });
+            const data = await resp.json().catch(() => null);
+            if (resp.ok && data && data.success !== false) {
+                const rootLabel = data.root || '（工作区根目录）';
+                const treeHtml  = renderTree(data.entries || [], 0);
+                if (browseResult) {
+                    browseResult.innerHTML = '<div style="color:var(--success,#2e7d32);margin-bottom:6px">\uD83D\uDCC2 ' + escHtml(rootLabel) + '</div>'
+                        + (treeHtml || '<div style="opacity:0.5">（空目录）</div>');
+                    browseResult.hidden = false;
                 }
-                fileList.appendChild(item);
+                const cnt = countEntries(data.entries || []);
+                showStatus('✅ ' + cnt.dirs + ' 个目录，' + cnt.files + ' 个文件', false);
+            } else {
+                // Fallback: try /admin/workspace/browse (flat list)
+                const resp2 = await fetch(getBasePath() + '/admin/workspace/browse' + (path ? '?path=' + encodeURIComponent(path) : ''), { headers });
+                if (!resp2.ok) { showStatus('查询失败 (' + resp2.status + ')', true); return; }
+                const data2 = await resp2.json();
+                const files = data2.files || data2.items || [];
+                const treeHtml2 = files.map(f => {
+                    const icon = f.isDirectory ? '\uD83D\uDCC1' : '\uD83D\uDCC4';
+                    const sz   = (!f.isDirectory && f.size != null) ? ' <span style="color:var(--text-muted);font-size:11px">(' + formatSize(f.size) + ')</span>' : '';
+                    return `<div style="white-space:nowrap">${icon} ${escHtml(f.name || f.path || '')}${sz}</div>`;
+                }).join('');
+                if (browseResult) {
+                    browseResult.innerHTML = treeHtml2 || '<div style="opacity:0.5">（空目录）</div>';
+                    browseResult.hidden = false;
+                }
+                showStatus('✅ 共 ' + files.length + ' 项', false);
             }
-        } catch (e) { fileList.innerHTML = '<div class="panel-hint">加载失败: ' + e.message + '</div>'; }
+        } catch (e) {
+            if (browseResult) {
+                browseResult.innerHTML = '<span style="color:var(--danger,#c00)">❌ ' + escHtml(e.message) + '</span>';
+                browseResult.hidden = false;
+            }
+            showStatus('❌ 查询失败：' + e.message, true);
+        } finally {
+            if (browseBtn) browseBtn.disabled = false;
+        }
     }
 
+    if (browseBtn) browseBtn.addEventListener('click', doBrowse);
+    if (browsePathInput) browsePathInput.addEventListener('keydown', e => { if (e.key === 'Enter') void doBrowse(); });
+
+    // ── Download ──────────────────────────────────────────────────────────
+    if (downloadBtn) downloadBtn.addEventListener('click', async () => {
+        const path = downloadPathInput ? downloadPathInput.value.trim() : '';
+        downloadBtn.disabled = true;
+        if (downloadResult) downloadResult.hidden = true;
+        const url = getBasePath() + '/admin/workspace/download' + (path ? '?path=' + encodeURIComponent(path) : '');
+        try {
+            const headers = await getAuthHeaders();
+            const resp = await fetch(url, { headers });
+            if (!resp.ok) {
+                const data = await resp.json().catch(() => null);
+                const msg = (data && data.error) || 'HTTP ' + resp.status;
+                downloadResult.innerHTML = '<strong>❌ 下载失败</strong><br>' + escHtml(msg);
+                downloadResult.className = 'panel-result err'; downloadResult.hidden = false;
+                showStatus('❌ 下载失败：' + msg, true);
+                return;
+            }
+            const cd = resp.headers.get('Content-Disposition') || '';
+            let filename = path ? path.replace(/.*[\\/]/, '') || 'download' : 'workspace.zip';
+            const cdMatch = cd.match(/filename[^;=\n]*=["']?([^"';\n]*)["']?/);
+            if (cdMatch && cdMatch[1].trim()) filename = cdMatch[1].trim();
+            const blob = await resp.blob();
+            const objUrl = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = objUrl; a.download = filename;
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(objUrl), 10000);
+            downloadResult.innerHTML = '✅ 已触发下载：<code>' + escHtml(filename) + '</code>（' + formatSize(blob.size) + '）';
+            downloadResult.className = 'panel-result ok'; downloadResult.hidden = false;
+            showStatus('✅ 下载完成：' + filename, false);
+        } catch (e) {
+            downloadResult.innerHTML = '<strong>❌ 网络错误</strong><br>' + escHtml(e.message);
+            downloadResult.className = 'panel-result err'; downloadResult.hidden = false;
+            showStatus('❌ 网络错误：' + e.message, true);
+        } finally {
+            downloadBtn.disabled = false;
+        }
+    });
+
+    // ── Upload ────────────────────────────────────────────────────────────
     function setUploadFiles(files) {
         uploadFiles = Array.from(files);
-        uploadFilename.textContent = uploadFiles.map(f => f.name).join(', ');
-        uploadFilename.hidden = !uploadFiles.length;
-        uploadBtn.disabled = !uploadFiles.length;
-        uploadResult.hidden = true;
+        if (uploadFilename) {
+            uploadFilename.textContent = uploadFiles.map(f => f.name).join(', ');
+            uploadFilename.hidden = !uploadFiles.length;
+        }
+        if (uploadBtn) uploadBtn.disabled = !uploadFiles.length;
+        if (uploadResult) uploadResult.hidden = true;
     }
 
-    if (uploadBrowseBtn) uploadBrowseBtn.addEventListener('click', () => uploadFileInput.click());
+    if (uploadBrowseBtn) uploadBrowseBtn.addEventListener('click', () => uploadFileInput && uploadFileInput.click());
     if (uploadFileInput) uploadFileInput.addEventListener('change', () => setUploadFiles(uploadFileInput.files || []));
     if (uploadDropzone) {
         uploadDropzone.addEventListener('dragover', e => { e.preventDefault(); uploadDropzone.classList.add('drag-over'); });
@@ -3979,38 +4171,48 @@ if (clearAllSessionsBtn) {
         if (!uploadFiles.length) return;
         uploadBtn.disabled = true; uploadBtn.textContent = '上传中…';
         uploadResult.hidden = true;
-        const destPath = uploadPathInput ? uploadPathInput.value.trim() : '';
-        let successCount = 0;
-        for (const file of uploadFiles) {
-            try {
-                const headers = await getAuthHeaders();
-                const fd = new FormData();
-                fd.append('file', file);
-                if (destPath) fd.append('path', destPath);
-                const resp = await fetch(getBasePath() + '/admin/workspace/upload', { method: 'POST', headers, body: fd });
-                if (resp.ok) successCount++;
-                else showStatus('上传失败: ' + file.name + ' (' + resp.status + ')', true);
-            } catch (e) { showStatus('上传失败: ' + e.message, true); }
+        const dir = uploadDirInput ? uploadDirInput.value.trim() : '';
+        const url = getBasePath() + '/admin/workspace/upload' + (dir ? '?dir=' + encodeURIComponent(dir) : '');
+        try {
+            const headers = await getAuthHeaders();
+            const fd = new FormData();
+            uploadFiles.forEach(f => fd.append('files', f, f.name));
+            const resp = await fetch(url, { method: 'POST', headers, body: fd });
+            const data = await resp.json().catch(() => null);
+            if (resp.ok && data && data.success !== false) {
+                const paths = (data.files || []).map(p => escHtml(p));
+                uploadResult.innerHTML = '<strong>✅ 上传成功</strong>'
+                    + (paths.length ? '<ul style="margin:6px 0 0 0;padding-left:18px">' + paths.map(p => `<li>${p}</li>`).join('') + '</ul>' : '');
+                uploadResult.className = 'panel-result ok'; uploadResult.hidden = false;
+                showStatus('✅ 上传成功，写入 ' + (data.files || uploadFiles).length + ' 个文件', false);
+                setUploadFiles([]);
+                if (uploadFileInput) uploadFileInput.value = '';
+            } else {
+                const msg = (data && data.error) || 'HTTP ' + resp.status;
+                uploadResult.innerHTML = '<strong>❌ 上传失败</strong><br>' + escHtml(msg);
+                uploadResult.className = 'panel-result err'; uploadResult.hidden = false;
+                showStatus('❌ 上传失败：' + msg, true);
+                uploadBtn.disabled = false;
+            }
+        } catch (e) {
+            uploadResult.innerHTML = '<strong>❌ 网络错误</strong><br>' + escHtml(e.message);
+            uploadResult.className = 'panel-result err'; uploadResult.hidden = false;
+            showStatus('❌ 网络错误：' + e.message, true);
+            uploadBtn.disabled = false;
+        } finally {
+            if (uploadBtn) uploadBtn.textContent = '上传';
         }
-        if (successCount > 0) {
-            uploadResult.textContent = `已上传 ${successCount}/${uploadFiles.length} 个文件`;
-            uploadResult.className = 'panel-result ok'; uploadResult.hidden = false;
-            showStatus('上传完成', false);
-        }
-        uploadBtn.disabled = false; uploadBtn.textContent = '上传';
-        setUploadFiles([]);
-        if (panelBrowse && !panelBrowse.hidden) void doBrowse();
     });
 
-    if (tabBrowse) tabBrowse.addEventListener('click', () => switchWfTab('browse'));
-    if (tabUpload) tabUpload.addEventListener('click', () => switchWfTab('upload'));
-    if (browseBtn) browseBtn.addEventListener('click', doBrowse);
-    if (pathInput) pathInput.addEventListener('keydown', e => { if (e.key === 'Enter') void doBrowse(); });
-    openBtn.addEventListener('click', async () => { overlay.hidden = false; switchWfTab('browse'); await doBrowse(); });
+    // ── Panel open/close ──────────────────────────────────────────────────
+    if (tabBrowse)   tabBrowse.addEventListener('click',   () => switchWfTab('browse'));
+    if (tabUpload)   tabUpload.addEventListener('click',   () => switchWfTab('upload'));
+    if (tabDownload) tabDownload.addEventListener('click', () => switchWfTab('download'));
+
+    openBtn.addEventListener('click', () => { overlay.hidden = false; switchWfTab('browse'); void doBrowse(); });
     closeBtn.addEventListener('click', () => { overlay.hidden = true; });
     overlay.addEventListener('click', e => { if (e.target === overlay) overlay.hidden = true; });
 })();
-
 // ============================================================
 // CRON / AUTOMATION PANEL
 // ============================================================
