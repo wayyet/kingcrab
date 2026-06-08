@@ -51,9 +51,9 @@ internal static partial class AdminEndpoints
 
         app.MapGet("/admin/skills", (HttpContext ctx) =>
         {
-            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: false, endpointScope: "admin.skills");
-            if (authResult.Failure is not null)
-                return authResult.Failure;
+            var auth = EndpointHelpers.AuthorizeOperatorRequest(ctx, startup, browserSessions, requireCsrf: false);
+            if (!auth.IsAuthorized)
+                return Results.Unauthorized();
 
             var loadedSkills = LoadCurrentSkillDefinitions(startup, runtime);
             runtime.LoadedSkills = loadedSkills;
@@ -68,9 +68,9 @@ internal static partial class AdminEndpoints
 
         app.MapGet("/admin/skills/cost-estimate", (HttpContext ctx) =>
         {
-            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: false, endpointScope: "admin.skills");
-            if (authResult.Failure is not null)
-                return authResult.Failure;
+            var auth = EndpointHelpers.AuthorizeOperatorRequest(ctx, startup, browserSessions, requireCsrf: false);
+            if (!auth.IsAuthorized)
+                return Results.Unauthorized();
 
             var loadedSkills = LoadCurrentSkillDefinitions(startup, runtime);
 
@@ -114,10 +114,9 @@ internal static partial class AdminEndpoints
 
         app.MapPost("/admin/skills", async (HttpContext ctx) =>
         {
-            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: true, endpointScope: "admin.skills.mutate");
-            if (authResult.Failure is not null)
-                return authResult.Failure;
-            var auth = authResult.Authorization!;
+            var auth = EndpointHelpers.AuthorizeOperatorRequest(ctx, startup, browserSessions, requireCsrf: true);
+            if (!auth.IsAuthorized)
+                return Results.Unauthorized();
             if (!EndpointHelpers.TryConsumeOperatorRateLimit(ctx, operations, auth, "admin.control", out var blockedByPolicyId))
                 return Results.Json(new SkillMutationResponse { Success = false, Error = $"Rate limit exceeded by policy '{blockedByPolicyId}'." }, CoreJsonContext.Default.SkillMutationResponse, statusCode: StatusCodes.Status429TooManyRequests);
 
@@ -145,10 +144,9 @@ internal static partial class AdminEndpoints
 
         app.MapDelete("/admin/skills/{name}", async (HttpContext ctx, string name) =>
         {
-            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: true, endpointScope: "admin.skills.mutate");
-            if (authResult.Failure is not null)
-                return authResult.Failure;
-            var auth = authResult.Authorization!;
+            var auth = EndpointHelpers.AuthorizeOperatorRequest(ctx, startup, browserSessions, requireCsrf: true);
+            if (!auth.IsAuthorized)
+                return Results.Unauthorized();
             if (!EndpointHelpers.TryConsumeOperatorRateLimit(ctx, operations, auth, "admin.control", out var blockedByPolicyId))
                 return Results.Json(new SkillMutationResponse { Success = false, Error = $"Rate limit exceeded by policy '{blockedByPolicyId}'." }, CoreJsonContext.Default.SkillMutationResponse, statusCode: StatusCodes.Status429TooManyRequests);
 
@@ -179,10 +177,9 @@ internal static partial class AdminEndpoints
 
         app.MapPost("/admin/skills/upload", async (HttpContext ctx) =>
         {
-            var authResult = AuthorizeOperator(ctx, startup, browserSessions, operations, requireCsrf: true, endpointScope: "admin.skills.mutate");
-            if (authResult.Failure is not null)
-                return authResult.Failure;
-            var auth = authResult.Authorization!;
+            var auth = EndpointHelpers.AuthorizeOperatorRequest(ctx, startup, browserSessions, requireCsrf: true);
+            if (!auth.IsAuthorized)
+                return Results.Unauthorized();
             if (!EndpointHelpers.TryConsumeOperatorRateLimit(ctx, operations, auth, "admin.control", out var blockedByPolicyId))
                 return Results.Json(new SkillMutationResponse { Success = false, Error = $"Rate limit exceeded by policy '{blockedByPolicyId}'." }, CoreJsonContext.Default.SkillMutationResponse, statusCode: StatusCodes.Status429TooManyRequests);
 

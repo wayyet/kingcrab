@@ -194,6 +194,7 @@ public sealed class SkillHealthSnapshot
 
 public sealed class SkillListResponse
 {
+    [System.Text.Json.Serialization.JsonPropertyName("skills")]
     public IReadOnlyList<SkillHealthSnapshot> Items { get; init; } = [];
 }
 
