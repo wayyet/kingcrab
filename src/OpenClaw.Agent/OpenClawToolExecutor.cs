@@ -377,7 +377,8 @@ public sealed class OpenClawToolExecutor
         var explicitlyConfiguredApproval = _config.Tooling.ApprovalRequiredTools
             .Any(item => string.Equals(NormalizeApprovalToolName(item), normalizedToolName, StringComparison.Ordinal));
         var presetRequiresApproval = preset?.ApprovalRequiredTools.Contains(tool.Name) == true;
-        var defaultActionAwareApproval = ToolActionPolicyResolver.SupportsActionAwareApproval(tool.Name)
+        var defaultActionAwareApproval = _requireToolApproval
+            && ToolActionPolicyResolver.SupportsActionAwareApproval(tool.Name)
             && (approvalDescriptor.IsMutation || approvalDescriptor.RequiresApproval);
         var listedApproval = _requireToolApproval && (_approvalRequiredTools.Contains(normalizedToolName) || presetRequiresApproval);
         var governanceRequiresApproval = governanceDecision.Action == GovernanceAction.RequireApproval;
