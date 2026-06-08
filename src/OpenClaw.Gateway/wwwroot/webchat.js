@@ -3138,10 +3138,20 @@ function appendArtifactCard(env) {
 async function loadSessions() {
     try {
         const headers = await getAuthHeaders();
-        const resp = await fetch(getBasePath() + '/admin/sessions', { headers });
+        const resp = await fetch(getBasePath() + '/admin/sessions?pageSize=60', { headers });
         if (!resp.ok) return;
         const data = await resp.json();
-        allSessions = data.sessions || data.items || [];
+        // API returns { active: [...], persisted: { items: [...] } }
+        const active = data.active || [];
+        const persisted = (data.persisted && data.persisted.items) || data.items || data.sessions || [];
+        // Merge, deduplicate (active entries may repeat in persisted), sort newest first
+        const all = [
+            ...active.map(s => ({ ...s, isActive: true })),
+            ...persisted.map(s => ({ ...s, isActive: !!s.isActive }))
+        ];
+        const seen = new Set();
+        allSessions = all.filter(s => { if (seen.has(s.id)) return false; seen.add(s.id); return true; });
+        allSessions.sort((a, b) => new Date(b.lastActiveAt || b.updatedAt || b.createdAt || 0) - new Date(a.lastActiveAt || a.updatedAt || a.createdAt || 0));
         renderSessionList(allSessions);
     } catch (_) { /* silently fail */ }
 }
@@ -3165,14 +3175,8 @@ function renderSessionList(sessions) {
         return;
     }
 
-    // Sort by updated time, newest first
-    const sorted = [...filtered].sort((a, b) => {
-        const ta = new Date(a.updatedAt || a.createdAt || 0).getTime();
-        const tb = new Date(b.updatedAt || b.createdAt || 0).getTime();
-        return tb - ta;
-    });
-
-    for (const session of sorted) {
+    // Already sorted in loadSessions; preserve order here
+    for (const session of filtered) {
         const item = document.createElement('div');
         item.className = 'session-item' + (session.id === currentSessionId ? ' active' : '');
         item.dataset.sessionId = session.id;
@@ -3182,15 +3186,27 @@ function renderSessionList(sessions) {
 
         const titleEl = document.createElement('div');
         titleEl.className = 'session-item__title';
-        titleEl.textContent = session.title || session.id || 'Session';
-        titleEl.title = titleEl.textContent;
+        // API has no title field; derive a readable label from the id
+        const label = session.title
+            || (session.id === 'main' ? '主会话' : null)
+            || (() => {
+                // "websocket:0HNM53UGROGO0" → show channel + short id
+                const parts = session.id.split(':');
+                if (parts.length === 2) return `[${parts[0]}] ${parts[1].slice(-8)}`;
+                return session.id.length > 20 ? session.id.slice(0, 18) + '…' : session.id;
+            })();
+        titleEl.textContent = (session.isActive ? '● ' : '') + label;
+        titleEl.title = session.id;
 
         const meta = document.createElement('div');
         meta.className = 'session-item__meta';
-        const ts = session.updatedAt || session.createdAt;
+        const ts = session.lastActiveAt || session.updatedAt || session.createdAt;
         if (ts) {
             const d = new Date(ts);
             meta.textContent = d.toLocaleDateString('zh-CN') + ' ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+        }
+        if (session.historyTurns != null) {
+            meta.textContent += (meta.textContent ? ' · ' : '') + session.historyTurns + ' 轮';
         }
 
         body.appendChild(titleEl);
@@ -3210,7 +3226,7 @@ function renderSessionList(sessions) {
         item.appendChild(body);
         item.appendChild(delBtn);
 
-        item.addEventListener('click', () => void switchToSession(session.id, session.title));
+        item.addEventListener('click', () => void switchToSession(session.id, label));
         sessionList.appendChild(item);
     }
 }
@@ -3292,7 +3308,16 @@ function returnToCurrentSession() {
 
 async function startNewChatSession() {
     if (isViewingHistory) returnToCurrentSession();
-    currentSessionId = null;
+    // Generate a fresh client-side session UUID so the server creates a new conversation
+    const uuid = typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : (() => {
+            const b = crypto.getRandomValues(new Uint8Array(16));
+            b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+            const h = Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+            return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
+        })();
+    currentSessionId = `session-${uuid}`;
     chatContainer.innerHTML = '';
     const emptyEl = document.getElementById('empty-state');
     if (emptyEl) chatContainer.appendChild(emptyEl);
