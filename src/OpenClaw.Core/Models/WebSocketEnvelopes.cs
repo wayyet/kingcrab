@@ -105,4 +105,17 @@ public sealed record WsServerEnvelope
 
     /// <summary>Stage gate transition event (type = "skill_stage_gate") emitted after a terminal artifact.</summary>
     public SkillStageGateEvent? StageGate { get; init; }
+
+    // File attachment envelope payloads (type = "file_attachment").
+    /// <summary>Relative URL to download the file (e.g. "/media/{id}").</summary>
+    public string? FileUrl { get; init; }
+
+    /// <summary>Original file name for the attachment.</summary>
+    public string? FileName { get; init; }
+
+    /// <summary>MIME type of the attachment.</summary>
+    public string? MimeType { get; init; }
+
+    /// <summary>File size in bytes.</summary>
+    public long? FileSizeBytes { get; init; }
 }

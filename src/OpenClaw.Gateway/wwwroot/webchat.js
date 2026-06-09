@@ -815,8 +815,12 @@ function preprocessMediaMarkers(raw) {
         }
         const mFileUrl = trimmed.match(/^\[FILE_URL:(.+)\]$/);
         if (mFileUrl) {
-            const url = mFileUrl[1].trim();
-            out.push(`[file](${url})`);
+            const rawVal = mFileUrl[1].trim();
+            // Strip the |filename suffix from the URL (it's metadata, not part of the path).
+            const pipeIdx = rawVal.indexOf('|');
+            const fileUrl = pipeIdx >= 0 ? rawVal.slice(0, pipeIdx) : rawVal;
+            const fileName = pipeIdx >= 0 ? rawVal.slice(pipeIdx + 1) : (fileUrl.split('/').pop() || 'file');
+            out.push(`[\uD83D\uDCCE ${fileName}](${fileUrl})`);
             continue;
         }
         const mAudioUrl = trimmed.match(/^\[AUDIO_URL:(.+)\]$/);
@@ -2471,9 +2475,20 @@ function connect() {
                     const row = createRow('assistant');
                     const a = document.createElement('a');
                     a.className = 'file-attachment-msg';
-                    a.textContent = '📎 ' + (env.filename || env.name || env.url || 'File');
-                    a.href = env.url || '#';
-                    a.setAttribute('data-media-url', env.url || '');
+                    // Support camelCase (server default) and PascalCase fallbacks.
+                    const _faFileName = env.fileName || env.filename || env.FileName || env.text || 'File';
+                    const _faFileUrl  = env.fileUrl  || env.url      || env.FileUrl  || '';
+                    const _faMime     = env.mimeType || env.MimeType || '';
+                    const _faSize     = env.fileSizeBytes ?? env.FileSizeBytes ?? null;
+                    a.textContent = '\uD83D\uDCCE ' + _faFileName;
+                    a.href = _faFileUrl || '#';
+                    a.setAttribute('data-media-url', _faFileUrl);
+                    if (_faSize !== null) {
+                        const _faSizeLabel = _faSize < 1024 ? _faSize + ' B'
+                            : _faSize < 1048576 ? (_faSize / 1024).toFixed(1) + ' KB'
+                            : (_faSize / 1048576).toFixed(1) + ' MB';
+                        a.title = _faFileName + ' · ' + _faSizeLabel + (_faMime ? ' · ' + _faMime : '');
+                    }
                     row.appendChild(a);
                     chatContainer.insertBefore(row, typingRow);
                     scrollToBottom();
@@ -2957,10 +2972,11 @@ handleOidcCallback().catch(() => {}).finally(() => {
 // MEDIA DOWNLOAD — intercept /media/ clicks, send Bearer token
 // ============================================================
 chatContainer.addEventListener('click', async (e) => {
-    const a = e.target.closest('[data-media-url]');
+    // Match both explicit data-media-url elements and plain markdown-rendered /media/ links.
+    const a = e.target.closest('[data-media-url], a[href]');
     if (!a) return;
-    const url = a.getAttribute('data-media-url');
-    if (!url || !url.startsWith('/media/')) return;
+    const url = (a.getAttribute('data-media-url') || a.getAttribute('href') || '').trim();
+    if (!url.startsWith('/media/')) return;
     e.preventDefault();
     try {
         const headers = await getAuthHeaders();
@@ -2972,7 +2988,9 @@ chatContainer.addEventListener('click', async (e) => {
         link.href = objUrl;
         const disp = resp.headers.get('Content-Disposition') || '';
         const match = disp.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-        link.download = match ? match[1].replace(/['"]/g, '') : 'download';
+        const rawName = match ? match[1].replace(/['"]/g, '').trim() : '';
+        // Decode URI-encoded filename (server uses Uri.EscapeDataString); fall back to URL segment.
+        link.download = rawName ? decodeURIComponent(rawName) : (url.split('/').pop() || 'download');
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -3255,7 +3273,13 @@ async function switchToSession(sessionId, title) {
                 const row = createRow('user');
                 const div = document.createElement('div');
                 div.className = 'message user';
-                div.textContent = turn.content || '';
+                // Strip internal transport markers before displaying user message text.
+                const _userText = (turn.content || '')
+                    .replace(/^\[FILE_URL:[^\]]+\]\n?/gm, '')
+                    .replace(/^\[IMAGE_URL:[^\]]+\]\n?/gm, '')
+                    .replace(/^\[FILE_PATH:[^\]]+\]\n?/gm, '')
+                    .trim();
+                div.textContent = _userText;
                 addMessageMeta(div, 'User');
                 row.appendChild(div);
                 chatContainer.insertBefore(row, document.getElementById('typing-row'));
