@@ -600,29 +600,18 @@ internal sealed class DeepSeekChatClient : IChatClient
         {
             using var doc = JsonDocument.Parse(json);
             if (doc.RootElement.ValueKind != JsonValueKind.Object)
-                return new Dictionary<string, object?> { ["value"] = ConvertElement(doc.RootElement) };
+                return new Dictionary<string, object?> { ["value"] = doc.RootElement.Clone() };
+            // Return JsonElement.Clone() values so the downstream source-generated
+            // CoreJsonContext can serialize them — JsonElement has built-in support
+            // whereas converted native types like List<object> do not.
             return doc.RootElement.EnumerateObject()
-                .ToDictionary(p => p.Name, p => ConvertElement(p.Value));
+                .ToDictionary(p => p.Name, p => (object?)p.Value.Clone());
         }
         catch (JsonException)
         {
             return new Dictionary<string, object?> { ["value"] = json };
         }
     }
-
-    private static object? ConvertElement(JsonElement e) =>
-        e.ValueKind switch
-        {
-            JsonValueKind.Object => e.EnumerateObject().ToDictionary(p => p.Name, p => ConvertElement(p.Value)),
-            JsonValueKind.Array => e.EnumerateArray().Select(ConvertElement).ToList(),
-            JsonValueKind.String => e.GetString(),
-            JsonValueKind.Number when e.TryGetInt64(out var l) => l,
-            JsonValueKind.Number when e.TryGetDouble(out var d) => d,
-            JsonValueKind.True => true,
-            JsonValueKind.False => false,
-            JsonValueKind.Null => null,
-            _ => e.GetRawText()
-        };
 
     private static DateTimeOffset? UnixToOffset(long? unix) =>
         unix.HasValue ? DateTimeOffset.FromUnixTimeSeconds(unix.Value) : null;
