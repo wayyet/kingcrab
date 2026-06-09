@@ -70,7 +70,7 @@ RUN apt-get update \
     && ln -sf /usr/bin/pip3 /usr/local/bin/pip
 
 # Install common Python packages
-RUN pip3 install --no-cache-dir \
+RUN pip3 install --no-cache-dir --break-system-packages \
     "websockets>=12.0" \
     websocket-client
 

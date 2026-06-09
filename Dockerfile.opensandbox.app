@@ -35,11 +35,16 @@ COPY src/OpenClaw.Core/OpenClaw.Core.csproj src/OpenClaw.Core/
 COPY src/OpenClaw.Agent/OpenClaw.Agent.csproj src/OpenClaw.Agent/
 COPY src/OpenClaw.Channels/OpenClaw.Channels.csproj src/OpenClaw.Channels/
 COPY src/OpenClaw.PluginKit/OpenClaw.PluginKit.csproj src/OpenClaw.PluginKit/
+COPY src/OpenClaw.Payments.Abstractions/OpenClaw.Payments.Abstractions.csproj src/OpenClaw.Payments.Abstractions/
+COPY src/OpenClaw.Payments.Core/OpenClaw.Payments.Core.csproj src/OpenClaw.Payments.Core/
+COPY src/OpenClaw.Payments.StripeLink/OpenClaw.Payments.StripeLink.csproj src/OpenClaw.Payments.StripeLink/
+COPY src/OpenClaw.Plugins.Payment/OpenClaw.Plugins.Payment.csproj src/OpenClaw.Plugins.Payment/
 COPY src/OpenClawNet.Sandbox.OpenSandbox/OpenClawNet.Sandbox.OpenSandbox.csproj src/OpenClawNet.Sandbox.OpenSandbox/
 COPY src/OpenClaw.Gateway/OpenClaw.Gateway.csproj src/OpenClaw.Gateway/
 COPY Kingcrab.ServiceDefaults/Kingcrab.ServiceDefaults.csproj Kingcrab.ServiceDefaults/
 
-RUN dotnet restore src/OpenClaw.Gateway/OpenClaw.Gateway.csproj
+RUN dotnet restore src/OpenClaw.Gateway/OpenClaw.Gateway.csproj \
+    -p:OpenClawEnableOpenSandbox=${OPENCLAW_ENABLE_OPENSANDBOX}
 
 COPY src/ src/
 COPY Kingcrab.ServiceDefaults/ Kingcrab.ServiceDefaults/
