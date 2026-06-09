@@ -166,6 +166,8 @@ public sealed record ChatTurn
     public required string Content { get; init; }
     public DateTimeOffset Timestamp { get; init; } = DateTimeOffset.UtcNow;
     public List<ToolInvocation>? ToolCalls { get; init; }
+    /// <summary>Preserved DeepSeek reasoning_content — must be passed back to the API on subsequent turns.</summary>
+    public string? ReasoningContent { get; init; }
 }
 
 public sealed record ToolInvocation

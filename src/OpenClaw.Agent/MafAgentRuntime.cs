@@ -288,20 +288,23 @@ public sealed class MafAgentRuntime : IAgentRuntime
                 ct);
 
             var text = ExtractResponseText(response);
+            var reasoning = ExtractReasoningText(response);
             if (toolInvocations.Count > 0)
             {
                 session.History.Add(new ChatTurn
                 {
                     Role = "assistant",
                     Content = "[tool_use]",
-                    ToolCalls = toolInvocations
+                    ToolCalls = toolInvocations,
+                    ReasoningContent = string.IsNullOrEmpty(reasoning) ? null : reasoning
                 });
             }
 
             session.History.Add(new ChatTurn
             {
                 Role = "assistant",
-                Content = text
+                Content = text,
+                ReasoningContent = string.IsNullOrEmpty(reasoning) ? null : reasoning
             });
 
             await _sessionStateStore.SaveAsync(agent, session, mafSession, ct);
@@ -458,6 +461,7 @@ public sealed class MafAgentRuntime : IAgentRuntime
         CancellationToken ct)
     {
         var fullText = new StringBuilder();
+        var reasoningText = new StringBuilder();
         var toolInvocations = new List<ToolInvocation>();
 
         ValueTask WriteStreamEventAsync(AgentStreamEvent evt, CancellationToken token)
@@ -484,6 +488,13 @@ public sealed class MafAgentRuntime : IAgentRuntime
                 new ChatClientAgentRunOptions(CreateChatOptions(session, responseSchema: null)),
                 ct).WithCancellation(ct))
             {
+                if (update.Contents.OfType<TextReasoningContent>().Any())
+                {
+                    foreach (var rc in update.Contents.OfType<TextReasoningContent>())
+                        reasoningText.Append(rc.Text);
+                    continue;
+                }
+
                 if (string.IsNullOrEmpty(update.Text))
                     continue;
 
@@ -497,14 +508,16 @@ public sealed class MafAgentRuntime : IAgentRuntime
                 {
                     Role = "assistant",
                     Content = "[tool_use]",
-                    ToolCalls = toolInvocations
+                    ToolCalls = toolInvocations,
+                    ReasoningContent = string.IsNullOrEmpty(reasoningText.ToString()) ? null : reasoningText.ToString()
                 });
             }
 
             session.History.Add(new ChatTurn
             {
                 Role = "assistant",
-                Content = fullText.ToString()
+                Content = fullText.ToString(),
+                ReasoningContent = string.IsNullOrEmpty(reasoningText.ToString()) ? null : reasoningText.ToString()
             });
 
             await _sessionStateStore.SaveAsync(agent, session, mafSession, ct);
@@ -784,15 +797,25 @@ public sealed class MafAgentRuntime : IAgentRuntime
                 }
                 else
                 {
-                    // Layer 2: for non-vision models, decode any inline data-URI image
-                    // markers to temporary files so the LLM sees a short [IMAGE_PATH:...]
-                    // it can pass to image_analyze, rather than a multi-thousand-token blob.
                     var content = turn.Role == "user"
                         ? DemoteDataUrisToTempFiles(turn.Content)
                         : turn.Content;
-                    messages.Add(new ChatMessage(
-                        turn.Role == "user" ? ChatRole.User : ChatRole.Assistant,
-                        content));
+
+                    if (turn.Role == "assistant" && !string.IsNullOrEmpty(turn.ReasoningContent))
+                    {
+                        var parts = new List<AIContent>
+                        {
+                            new TextReasoningContent(turn.ReasoningContent),
+                            new TextContent(content)
+                        };
+                        messages.Add(new ChatMessage(ChatRole.Assistant, parts));
+                    }
+                    else
+                    {
+                        messages.Add(new ChatMessage(
+                            turn.Role == "user" ? ChatRole.User : ChatRole.Assistant,
+                            content));
+                    }
                 }
             }
             else if (turn.Content == "[tool_use]" && turn.ToolCalls is { Count: > 0 })
@@ -1127,6 +1150,15 @@ public sealed class MafAgentRuntime : IAgentRuntime
             .FirstOrDefault(static text => !string.IsNullOrWhiteSpace(text));
 
         return assistantText ?? string.Empty;
+    }
+
+    private static string ExtractReasoningText(AgentResponse response)
+    {
+        return string.Concat(
+            response.Messages
+                .Where(static m => m.Role == ChatRole.Assistant)
+                .SelectMany(static m => m.Contents.OfType<TextReasoningContent>())
+                .Select(static rc => rc.Text));
     }
 
     private static string Indent(string value, string prefix)
