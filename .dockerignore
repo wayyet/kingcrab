@@ -12,3 +12,8 @@ docs
 *.tmp
 *.log
 docker-compose.yml
+# Runtime data — must never be baked into the image
+src/OpenClaw.Gateway/memory/
+src/OpenClaw.Gateway/*.db
+src/OpenClaw.Gateway/*.db-shm
+src/OpenClaw.Gateway/*.db-wal
