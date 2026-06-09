@@ -125,8 +125,6 @@ internal static partial class RuntimeInitializationExtensions
             new SessionSearchTool(services.SessionSearchStore),
             new ProfileReadTool(services.UserProfileStore),
             new AutomationTool(services.AutomationService, services.Pipeline),
-            new VisionAnalyzeTool(services.GeminiMultimodalService),
-            new TextToSpeechTool(services.TextToSpeechService),
             new CanvasPresentTool(services.CanvasBroker, config),
             new CanvasHideTool(services.CanvasBroker, config),
             new CanvasNavigateTool(services.CanvasBroker, config),
@@ -153,7 +151,6 @@ internal static partial class RuntimeInitializationExtensions
             new GatewayTool(services.RuntimeMetrics, services.SessionManager, config, runtimeState),
 
             new MessageTool(services.Pipeline),
-            new XSearchTool(),
             new MemoryGetTool(services.MemoryStore),
             new ProfileWriteTool(services.UserProfileStore),
             new SessionsYieldTool(services.SessionManager, services.Pipeline, services.MemoryStore),

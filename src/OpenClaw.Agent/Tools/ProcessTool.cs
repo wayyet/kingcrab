@@ -146,25 +146,7 @@ public sealed class ProcessTool : IToolWithContext
         if (processId is null)
             return "Error: process_id is required.";
 
-        // Default to 60 s so a long-running process never blocks the agent turn indefinitely.
-        var timeoutSeconds = GetInt(root, "timeout_seconds") ?? 60;
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
-
-        ExecutionProcessStatus? status;
-        try
-        {
-            status = await _processes.WaitAsync(processId, context.Session.Id, timeoutCts.Token);
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            // Our timeout fired — return current status and let the LLM decide what to do next.
-            status = _processes.GetStatus(processId, context.Session.Id);
-            if (status is null)
-                return $"Error: process '{processId}' was not found.";
-            return $"{status.ProcessId} [{status.State}] still running after {timeoutSeconds}s. Use action=poll or action=log to check progress, or action=wait with a larger timeout_seconds.";
-        }
-
+        var status = await _processes.WaitAsync(processId, context.Session.Id, ct);
         if (status is null)
             return $"Error: process '{processId}' was not found.";
 
