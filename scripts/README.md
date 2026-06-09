@@ -61,7 +61,7 @@
 .\build-opensandbox-app-image.ps1
 
 # 锁定指定基础镜像版本
-.\build-opensandbox-app-image.ps1 -BaseTag opensandbox-base-202604281300
+.\build-opensandbox-app-image.ps1 -BaseTag opensandbox-base-202606091758
 
 # 构建并直接推送（多平台）
 .\build-opensandbox-app-image.ps1 -Platforms linux/amd64,linux/arm64 -Push
@@ -72,6 +72,15 @@
 - 执行前确保基础镜像已推送到镜像仓库，否则拉取会失败
 - 本地 load 模式只支持单平台
 - 代码未变更时 `dotnet publish` 全部命中缓存，构建极快（<1 分钟）
+
+---
+
+### 已发布镜像版本
+
+| 镜像类型 | Tag | 说明 |
+| --- | --- | --- |
+| 基础镜像 | `opensandbox-base-202606091758` | Ubuntu 24.04 + Node.js + Playwright + Python3 + uv + wget/ping/net-tools 等工具 |
+| 应用镜像 | `opensandbox-202606100013` | 含中文 JSON 编码修复（UnsafeRelaxedJsonEscaping）、DeepSeek reasoning 多轮修复 |
 
 ---
 
