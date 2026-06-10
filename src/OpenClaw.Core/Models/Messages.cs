@@ -25,6 +25,8 @@ public sealed record InboundMessage
     public long? Sequence { get; init; }
     public bool IsSystem { get; init; }
     public string? Subject { get; init; }
+    public string? ModelOverride { get; init; }
+    public bool DeleteAfterRun { get; init; }
     public string? ApprovalId { get; init; }
     public bool? Approved { get; init; }
     public DateTimeOffset ReceivedAt { get; init; } = DateTimeOffset.UtcNow;

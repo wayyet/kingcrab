@@ -222,15 +222,11 @@ internal static class CoreServicesExtensions
         services.AddSingleton<IMemoryRetentionCoordinator>(sp => sp.GetRequiredService<MemoryRetentionSweeperService>());
         services.AddHostedService(sp => sp.GetRequiredService<MemoryRetentionSweeperService>());
         services.AddSingleton<MessagePipeline>();
-        services.AddSingleton(sp =>
-            new CronScheduler(
-                sp.GetRequiredService<ICronJobSource>(),
-                sp.GetRequiredService<ILogger<CronScheduler>>(),
-                sp.GetRequiredService<IStartupNoticeSink>(),
-                sp.GetRequiredService<MessagePipeline>().InboundWriter,
-                sp.GetRequiredService<IAutomationRunDispatcher>()));
-        // CronSchedulerStartupService is excluded together with TickerQ
-        // (see docs/migration/exclusion-list.md §1.1). No hosted tick loop is registered.
+        services.AddSingleton(sp => new CronScheduler(
+            sp.GetRequiredService<ICronJobSource>(),
+            sp.GetRequiredService<ILogger<CronScheduler>>(),
+            sp.GetRequiredService<MessagePipeline>().InboundWriter));
+        services.AddHostedService(sp => sp.GetRequiredService<CronScheduler>());
         services.AddSingleton(sp =>
             new McpConfigStore(
                 config.Memory.StoragePath,
