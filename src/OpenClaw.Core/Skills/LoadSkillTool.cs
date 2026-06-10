@@ -1,6 +1,8 @@
 using System.Security;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using OpenClaw.Core.Abstractions;
+using OpenClaw.Core.Models;
 
 namespace OpenClaw.Core.Skills;
 
@@ -65,13 +67,19 @@ public sealed class LoadSkillTool : ITool
         if (body.Length == 0)
             return ValueTask.FromResult($"Skill '{match.Name}' has no instructions body.");
 
-        if (match.Resources.Count == 0)
-            return ValueTask.FromResult(body);
+        var sections = new List<string> { body.TrimEnd() };
 
-        // Re-emit the resource manifest alongside the body so the model knows what it can
-        // still reach for via subsequent reads — without re-loading every other skill's index.
-        var withManifest = body.TrimEnd() + "\n\n" + RenderResourceManifest(match) + "\n";
-        return ValueTask.FromResult(withManifest);
+        if (match.ArtifactContract is { Stages.Count: > 0 } artifactContract)
+            sections.Add(RenderArtifactContract(artifactContract));
+
+        if (match.Resources.Count > 0)
+        {
+            // Re-emit the resource manifest alongside the body so the model knows what it can
+            // still reach for via subsequent reads — without re-loading every other skill's index.
+            sections.Add(RenderResourceManifest(match));
+        }
+
+        return ValueTask.FromResult(string.Join("\n\n", sections) + "\n");
     }
 
     private static bool TryParseSkillName(string argumentsJson, out string? skillName, out string? error)
@@ -161,4 +169,20 @@ public sealed class LoadSkillTool : ITool
         sb.Append("</skill-resources>");
         return sb.ToString();
     }
+
+    private static string RenderArtifactContract(SkillArtifactContract contract)
+    {
+        var json = JsonSerializer.Serialize(contract, LoadSkillToolJsonContext.Default.SkillArtifactContract);
+        return $"<skill-artifact-contract>\n{json}\n</skill-artifact-contract>";
+    }
 }
+
+[JsonSourceGenerationOptions(
+    PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    WriteIndented = true)]
+[JsonSerializable(typeof(SkillArtifactContract))]
+[JsonSerializable(typeof(SkillArtifactStageContract))]
+[JsonSerializable(typeof(SkillArtifactStageGateContract))]
+[JsonSerializable(typeof(SkillArtifactTypeContract))]
+internal partial class LoadSkillToolJsonContext : JsonSerializerContext;
