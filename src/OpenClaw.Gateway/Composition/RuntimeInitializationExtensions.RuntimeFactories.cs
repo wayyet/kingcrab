@@ -117,7 +117,7 @@ internal static partial class RuntimeInitializationExtensions
             new ShellTool(config.Tooling),
             new FileReadTool(config.Tooling),
             new FileWriteTool(config.Tooling),
-            new ProcessTool(services.ProcessService, config.Tooling),
+            //new ProcessTool(services.ProcessService, config.Tooling),
             new MemoryNoteTool(services.MemoryStore),
             new MemorySearchTool((IMemoryNoteSearch)services.MemoryStore),
             new ProjectMemoryTool(services.MemoryStore, projectId),
