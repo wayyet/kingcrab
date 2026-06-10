@@ -107,7 +107,8 @@ public static class LlmClientFactory
                 config.Model,
                 config.ApiKey ?? throw new InvalidOperationException("MODEL_PROVIDER_KEY must be set for the DeepSeek provider."),
                 config.Endpoint ?? "https://api.deepseek.com/v1",
-                new HttpClient()),
+                new HttpClient(),
+                config.EnableThinking),
             "openai" => CreateOpenAiClient(config)
                 .GetChatClient(config.Model)
                 .AsIChatClient(),

@@ -117,6 +117,12 @@ public sealed class LlmProviderConfig
     public int CircuitBreakerCooldownSeconds { get; set; } = 30;
 
     public PromptCachingConfig PromptCaching { get; set; } = new();
+
+    /// <summary>
+    /// Controls thinking mode for DeepSeek models.
+    /// true (default) = enabled; false = disabled.
+    /// </summary>
+    public bool EnableThinking { get; set; } = true;
 }
 
 public sealed class LocalInferenceConfig
