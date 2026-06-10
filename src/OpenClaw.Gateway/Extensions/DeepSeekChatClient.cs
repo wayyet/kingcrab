@@ -233,6 +233,7 @@ internal sealed class DeepSeekChatClient : IChatClient
         bool stream)
     {
         var msgArray = SerializeMessages(messages);
+        PrependInstructions(msgArray, options?.Instructions);
 
         var body = new JsonObject
         {
@@ -416,6 +417,32 @@ internal sealed class DeepSeekChatClient : IChatClient
             array.Add(node);
         }
         return array;
+    }
+
+    private static void PrependInstructions(JsonArray messages, string? instructions)
+    {
+        if (string.IsNullOrWhiteSpace(instructions) || HasSystemMessage(messages))
+            return;
+
+        messages.Insert(0, new JsonObject
+        {
+            ["role"] = "system",
+            ["content"] = instructions
+        });
+    }
+
+    private static bool HasSystemMessage(JsonArray messages)
+    {
+        foreach (var message in messages)
+        {
+            if (message is JsonObject node &&
+                node["role"]?.GetValue<string>().Equals("system", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static string ExtractReasoningText(ChatMessage message)
