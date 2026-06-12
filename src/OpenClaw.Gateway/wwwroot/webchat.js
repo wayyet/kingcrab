@@ -1124,7 +1124,7 @@ function buildLiveWsUrl() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const token = getCurrentToken();
     const query = token ? `?token=${encodeURIComponent(token)}` : '';
-    return `${protocol}//${window.location.host}/ws/live${query}`;
+    return `${protocol}//${window.location.host}${getBasePath()}/ws/live${query}`;
 }
 
 function createAudioBlobFromBase64(base64Data, mimeType) {
@@ -2371,7 +2371,7 @@ function connect() {
     setConnectionState(reconnectAttempts > 0 ? 'reconnecting' : 'connecting');
     appendSystem('Connecting to OpenClaw.NET Gateway...');
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const baseWsUrl = `${protocol}//${window.location.host}/ws`;
+    const baseWsUrl = `${protocol}//${window.location.host}${getBasePath()}/ws`;
     const token = getCurrentToken();
     const wsUrl = token
         ? `${baseWsUrl}?token=${encodeURIComponent(token)}`
