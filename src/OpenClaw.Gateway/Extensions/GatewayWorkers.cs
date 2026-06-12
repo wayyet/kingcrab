@@ -42,7 +42,8 @@ internal static class GatewayWorkers
         ContractGovernanceService? contractGovernance = null,
         GovernanceLedgerService? governanceLedger = null,
         AudioTranscriptionService? audioTranscriptionService = null,
-        MediaCacheStore? mediaCache = null)
+        MediaCacheStore? mediaCache = null,
+        SessionAbortRegistry? abortRegistry = null)
     {
         new GatewaySessionCleanupWorker().Start(lifetime, logger, sessionManager);
 
@@ -73,7 +74,8 @@ internal static class GatewayWorkers
             contractGovernance,
             governanceLedger,
             audioTranscriptionService,
-            mediaCache);
+            mediaCache,
+            abortRegistry);
 
         new GatewayOutboundDeliveryWorker().Start(
             lifetime,

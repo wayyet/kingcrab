@@ -237,6 +237,7 @@ internal static class CoreServicesExtensions
         services.AddSingleton<GatewayRuntimeShutdownCoordinator>();
         services.AddHostedService(sp => sp.GetRequiredService<GatewayRuntimeShutdownCoordinator>());
         services.AddSingleton<ChatCommandProcessor>();
+        services.AddSingleton<SessionAbortRegistry>();
         services.AddSingleton<GatewayLlmExecutionService>();
         services.AddSingleton<PromptCacheWarmService>();
         services.AddHostedService(sp => sp.GetRequiredService<PromptCacheWarmService>());

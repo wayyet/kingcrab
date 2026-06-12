@@ -29,7 +29,10 @@ public sealed class ChatCommandProcessor
         "/compact",
         "/concise",
         "/verbose",
-        "/help"
+        "/help",
+        "/stop",
+        "/cancel",
+        "/abort"
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     private readonly SessionManager _sessionManager;
@@ -197,7 +200,12 @@ public sealed class ChatCommandProcessor
                 return (true, "Usage: /concise on|off|auto");
 
             case "/help":
-                return (true, "Available commands:\n/status - Show session details\n/new (or /reset) - Clear conversation history\n/model <name> - Override the LLM model for this session\n/model reset - Clear model override\n/usage - Show token counts\n/think <level> - Set reasoning effort (off/low/medium/high)\n/compact - Compact conversation history\n/concise on|off|auto - Control concise operational responses\n/verbose on|off - Toggle verbose output\n/help - Show this message");
+                return (true, "Available commands:\n/status - Show session details\n/new (or /reset) - Clear conversation history\n/model <name> - Override the LLM model for this session\n/model reset - Clear model override\n/usage - Show token counts\n/think <level> - Set reasoning effort (off/low/medium/high)\n/compact - Compact conversation history\n/concise on|off|auto - Control concise operational responses\n/verbose on|off - Toggle verbose output\n/stop (or /cancel, /abort) - Stop the current in-progress execution\n/help - Show this message");
+
+            case "/stop":
+            case "/cancel":
+            case "/abort":
+                return (true, "There is no active execution to stop.");
 
             default:
                 if (_dynamicCommands.TryGetValue(command, out var dynamicHandler))

@@ -36,6 +36,8 @@ public sealed class SessionAbortRegistry
     /// </summary>
     public void Unregister(string sessionId)
     {
+        if (sessionId is null)
+            return;
         if (_active.TryRemove(sessionId, out var cts))
             cts.Dispose();
     }
