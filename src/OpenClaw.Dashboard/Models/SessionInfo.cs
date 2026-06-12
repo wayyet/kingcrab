@@ -14,11 +14,24 @@ public record SessionDetail(
     string? SenderId,
     DateTime? LastActive,
     Dictionary<string, object>? Metadata,
-    List<SessionMessage>? Messages
+    List<SessionMessage>? Messages,
+    List<ProviderTurnUsageEntry>? ProviderTurns
 );
 
 public record SessionMessage(
     string Role,
     string? Content,
     DateTime? Timestamp
+);
+
+public record ProviderTurnUsageEntry(
+    DateTimeOffset TimestampUtc,
+    string SessionId,
+    string ChannelId,
+    string ProviderId,
+    string ModelId,
+    long InputTokens,
+    long OutputTokens,
+    long CacheReadTokens,
+    long CacheWriteTokens
 );

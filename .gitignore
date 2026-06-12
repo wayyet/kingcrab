@@ -364,3 +364,6 @@ FodyWeavers.xsd
 
 src/OpenClaw.Gateway/memory
 .gstack/
+.playwright-cli/
+.playwright-mcp/
+docs/debug connection.txt
