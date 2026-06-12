@@ -141,6 +141,7 @@ let ws = null;
 let liveWs = null;
 let activeResponseDiv = null;
 let activeRawContent = "";
+let isAwaitingResponse = false;
 let reconnectAttempts = 0;
 let reconnectTimer = null;
 let streamRenderTimer = null;
@@ -897,6 +898,7 @@ function scheduleActiveResponseRender(finalRender = false) {
 
 function resetActiveResponse() {
     typingRow.style.display = 'none';
+    setStopMode(false);
     if (streamRenderTimer) {
         clearTimeout(streamRenderTimer);
         streamRenderTimer = null;
@@ -1124,7 +1126,7 @@ function buildLiveWsUrl() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const token = getCurrentToken();
     const query = token ? `?token=${encodeURIComponent(token)}` : '';
-    return `${protocol}//${window.location.host}/ws/live${query}`;
+    return `${protocol}//${window.location.host}${getBasePath()}/ws/live${query}`;
 }
 
 function createAudioBlobFromBase64(base64Data, mimeType) {
@@ -2371,7 +2373,7 @@ function connect() {
     setConnectionState(reconnectAttempts > 0 ? 'reconnecting' : 'connecting');
     appendSystem('Connecting to OpenClaw.NET Gateway...');
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const baseWsUrl = `${protocol}//${window.location.host}/ws`;
+    const baseWsUrl = `${protocol}//${window.location.host}${getBasePath()}/ws`;
     const token = getCurrentToken();
     const wsUrl = token
         ? `${baseWsUrl}?token=${encodeURIComponent(token)}`
@@ -2417,11 +2419,13 @@ function connect() {
             switch (env.type) {
                 case 'typing_start':
                     typingRow.style.display = 'flex';
+                    setStopMode(true);
                     scrollToBottom();
                     break;
 
                 case 'typing_stop':
                     typingRow.style.display = 'none';
+                    setStopMode(false);
                     scheduleActiveResponseRender(true);
                     activeResponseDiv = null;
                     activeRawContent = "";
@@ -2446,6 +2450,7 @@ function connect() {
 
                 case 'assistant_done':
                     typingRow.style.display = 'none';
+                    setStopMode(false);
                     scheduleActiveResponseRender(true);
                     activeResponseDiv = null;
                     activeRawContent = "";
@@ -2453,6 +2458,8 @@ function connect() {
                     break;
 
                 case 'error':
+                    setStopMode(false);
+                    typingRow.style.display = 'none';
                     appendSystem(env.text ?? env.content ?? 'An unknown error occurred.', true);
                     break;
 
@@ -2584,6 +2591,24 @@ function updateAttachmentSummary() {
     attachmentList.textContent = files.map(file => file.name).join(', ');
 }
 
+function setStopMode(active) {
+    isAwaitingResponse = active;
+    if (active) {
+        sendButton.classList.add('stop-mode');
+        sendButton.disabled = false;
+        sendButton.title = 'Stop generation';
+        messageInput.disabled = true;
+    } else {
+        sendButton.classList.remove('stop-mode');
+        sendButton.title = 'Send message';
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            messageInput.disabled = false;
+            sendButton.disabled = false;
+            messageInput.focus();
+        }
+    }
+}
+
 async function sendMessage() {
     const text = messageInput.value.trim();
     const imageFiles = Array.from(imageInput.files || []);
@@ -2699,7 +2724,25 @@ messageInput.addEventListener('keydown', (e) => {
     }
 });
 
-sendButton.addEventListener('click', () => void sendMessage());
+sendButton.addEventListener('click', () => {
+    if (isAwaitingResponse) {
+        // Stop mode: send /stop command to abort in-flight execution
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            const stopMsg = { type: 'user_message', text: '/stop' };
+            if (currentSessionId) stopMsg.sessionId = currentSessionId;
+            ws.send(JSON.stringify(stopMsg));
+        }
+        setStopMode(false);
+        typingRow.style.display = 'none';
+        if (activeResponseDiv) {
+            scheduleActiveResponseRender(true);
+            activeResponseDiv = null;
+            activeRawContent = '';
+        }
+    } else {
+        void sendMessage();
+    }
+});
 attachButton.addEventListener('click', () => imageInput.click());
 imageInput.addEventListener('change', () => {
     attachButton.classList.toggle('has-files', (imageInput.files || []).length > 0);

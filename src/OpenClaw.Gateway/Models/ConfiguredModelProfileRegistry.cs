@@ -300,6 +300,7 @@ internal sealed class ConfiguredModelProfileRegistry : IModelProfileRegistry, ID
             RetryCount = config.Llm.RetryCount,
             CircuitBreakerThreshold = config.Llm.CircuitBreakerThreshold,
             CircuitBreakerCooldownSeconds = config.Llm.CircuitBreakerCooldownSeconds,
+            EnableThinking = config.Llm.EnableThinking,
             PromptCaching = ClonePromptCaching(profile.PromptCaching)
         };
 

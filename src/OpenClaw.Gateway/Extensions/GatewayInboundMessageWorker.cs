@@ -44,7 +44,8 @@ internal sealed class GatewayInboundMessageWorker
         ContractGovernanceService? contractGovernance,
         GovernanceLedgerService? governanceLedger,
         AudioTranscriptionService? audioTranscriptionService = null,
-        MediaCacheStore? mediaCache = null)
+        MediaCacheStore? mediaCache = null,
+        SessionAbortRegistry? abortRegistry = null)
     {
         _ = isNonLoopbackBind;
         _ = sessionLocks;
@@ -315,6 +316,26 @@ internal sealed class GatewayInboundMessageWorker
                             if (session is null)
                                 throw new InvalidOperationException("Session manager returned null session.");
 
+                            // Abort intercept: handle /stop, /cancel, /abort BEFORE acquiring the session lock
+                            // so the abort does not wait for the in-flight execution to release the lock.
+                            if (!msg.IsSystem && abortRegistry is not null && IsAbortCommand(msg.Text))
+                            {
+                                if (abortRegistry.TryAbort(session.Id))
+                                {
+                                    await pipeline.OutboundWriter.WriteAsync(new OutboundMessage
+                                    {
+                                        ChannelId = msg.ChannelId,
+                                        RecipientId = conversationRecipientId,
+                                        AccountId = msg.AccountId,
+                                        Text = "Stopped.",
+                                        ReplyToMessageId = msg.MessageId
+                                    }, processingCt);
+                                    continue;
+                                }
+                                // No active execution — fall through to the command processor below
+                                // (which will return "There is no active execution to stop.").
+                            }
+
                             if (resolvedRoute is not null)
                             {
                                 session.ModelOverride = string.IsNullOrWhiteSpace(resolvedRoute.ModelOverride)
@@ -575,6 +596,10 @@ internal sealed class GatewayInboundMessageWorker
                                     }, ct);
                                 });
 
+                            // Register session cancellation source so /stop can abort in-flight execution.
+                            var abortCts = abortRegistry?.Register(session.Id, processingCt);
+                            var executionCt = abortCts?.Token ?? processingCt;
+
                             if (useStreaming)
                             {
                                 await wsChannel.SendStreamEventAsync(msg.SenderId, "typing_start", "", msg.MessageId, processingCt);
@@ -589,7 +614,7 @@ internal sealed class GatewayInboundMessageWorker
                                 try
                                 {
                                     await foreach (var evt in agentRuntime.RunStreamingAsync(
-                                        session, messageText, processingCt, approvalCallback: approvalCallback))
+                                        session, messageText, executionCt, approvalCallback: approvalCallback))
                                     {
                                         if (string.Equals(evt.EnvelopeType, "assistant_done", StringComparison.Ordinal))
                                         {
@@ -729,7 +754,7 @@ internal sealed class GatewayInboundMessageWorker
                                 string responseText;
                                 try
                                 {
-                                    responseText = await agentRuntime.RunAsync(session, messageText, processingCt, approvalCallback: approvalCallback);
+                                    responseText = await agentRuntime.RunAsync(session, messageText, executionCt, approvalCallback: approvalCallback);
                                 }
                                 finally
                                 {
@@ -944,6 +969,9 @@ internal sealed class GatewayInboundMessageWorker
                         }
                         finally
                         {
+                            if (session is not null)
+                                abortRegistry?.Unregister(session.Id);
+
                             if (bridgedAdapter is not null && bridgedTypingStarted)
                             {
                                 try
@@ -974,6 +1002,15 @@ internal sealed class GatewayInboundMessageWorker
             return null;
 
         return CancellationTokenSource.CreateLinkedTokenSource(requestCancellation, appStopping);
+    }
+
+    private static bool IsAbortCommand(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        var t = text.Trim();
+        return string.Equals(t, "/stop", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(t, "/cancel", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(t, "/abort", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? ResolveOperationalResponseMode(Session session, AutomationDefinition? automation)

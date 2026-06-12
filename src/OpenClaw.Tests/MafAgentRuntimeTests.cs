@@ -108,7 +108,7 @@ public class MafAgentRuntimeTests
     }
 
     [Fact]
-    public void GetSystemPrompt_WithProjectionRoute_AppendsProjectionPatch()
+    public void GetSystemPrompt_WithProjectionRoute_UsesIndexOnlyProgressiveDisclosure()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), $"openclaw-runtime-projection-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDir);
@@ -166,13 +166,11 @@ public class MafAgentRuntimeTests
 
             var prompt = MafTestRuntimeFactory.GetSystemPrompt(runtime, new Session { Id = "s1", SenderId = "u1", ChannelId = "c1" }, "Please add prompt policy and review guidance.");
 
-            Assert.Contains("## Skill: software-developer", prompt);
-            Assert.Contains("[Projection Route]", prompt);
-            Assert.Contains("Selected topic: task-execution", prompt);
-            Assert.Contains("Do not invert source precedence.", prompt);
-            Assert.Contains("Prompt constraint: Do not use unmapped terms or invent terminology beyond this projection.", prompt);
-            Assert.Contains("Delivery artifacts:", prompt);
-            Assert.Contains("TaskExecutionPromptPolicy.md (prompt_fragment) -> artifacts/TaskExecutionPromptPolicy.md [planned]", prompt);
+            Assert.Contains("<available-skills>", prompt);
+            Assert.Contains("<name>software-developer</name>", prompt);
+            Assert.DoesNotContain("Base skill instructions.", prompt);
+            Assert.DoesNotContain("[Projection Route]", prompt);
+            Assert.DoesNotContain("TaskExecutionPromptPolicy.md", prompt);
         }
         finally
         {
@@ -299,7 +297,9 @@ public class MafAgentRuntimeTests
 
             var prompt = MafTestRuntimeFactory.GetSystemPrompt(runtime, new Session { Id = "s1", SenderId = "u1", ChannelId = "c1" }, "Please add review guidance and prompt policy.");
 
-            Assert.Contains("producer_two_term", prompt);
+            Assert.Contains("<available-skills>", prompt);
+            Assert.Contains("<name>software-developer</name>", prompt);
+            Assert.DoesNotContain("producer_two_term", prompt);
             Assert.DoesNotContain("generic_review", prompt);
         }
         finally

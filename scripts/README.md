@@ -80,6 +80,8 @@
 | 镜像类型 | Tag | 说明 |
 | --- | --- | --- |
 | 基础镜像 | `opensandbox-base-202606091758` | Ubuntu 24.04 + Node.js + Playwright + Python3 + uv + wget/ping/net-tools 等工具 |
+| 应用镜像 | `opensandbox-202606110027` | LoadSkillTool artifact contract JSON 渲染（AOT source-gen context） |
+| 应用镜像 | `opensandbox-202606101409` | 定时任务后台执行修复（CronScheduler 改为 BackgroundService，切换 Cronos 引擎） |
 | 应用镜像 | `opensandbox-202606100013` | 含中文 JSON 编码修复（UnsafeRelaxedJsonEscaping）、DeepSeek reasoning 多轮修复 |
 
 ---

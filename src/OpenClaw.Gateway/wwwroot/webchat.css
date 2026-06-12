@@ -1090,6 +1090,18 @@ select.input:focus {
     height: 18px;
 }
 
+/* Stop/abort mode */
+#send-button.stop-mode {
+    background: var(--danger, #ef4444);
+}
+#send-button.stop-mode:hover:not(:disabled) {
+    background: var(--danger-hover, #dc2626);
+}
+#send-button .icon-send { display: inline-flex; }
+#send-button .icon-stop { display: none; }
+#send-button.stop-mode .icon-send { display: none; }
+#send-button.stop-mode .icon-stop { display: inline-flex; }
+
 #attachment-summary {
     display: flex;
     align-items: center;

@@ -147,6 +147,7 @@ internal static class GatewayBootstrapExtensions
     {
         var openClawSection = configuration.GetSection("OpenClaw");
         var config = openClawSection.Get<GatewayConfig>() ?? new GatewayConfig();
+        ApplyConfiguredLlmOverrides(openClawSection, config);
         ApplyConfiguredToolingOverrides(openClawSection, config);
         HydratePluginEntryConfigJson(config, configuration);
         var pluginAdminSettingsPath = PluginAdminSettingsService.GetSettingsPath(config);
@@ -363,6 +364,15 @@ internal static class GatewayBootstrapExtensions
         var allowedWriteRoots = ReadStringArray(toolingSection, "AllowedWriteRoots");
         if (allowedWriteRoots is not null)
             config.Tooling.AllowedWriteRoots = allowedWriteRoots;
+    }
+
+    private static void ApplyConfiguredLlmOverrides(IConfiguration section, GatewayConfig config)
+    {
+        var llmSection = section.GetSection("Llm");
+
+        var enableThinkingRaw = llmSection["EnableThinking"];
+        if (bool.TryParse(enableThinkingRaw, out var enableThinking))
+            config.Llm.EnableThinking = enableThinking;
     }
 
     private static string[]? ReadStringArray(IConfiguration section, string key)

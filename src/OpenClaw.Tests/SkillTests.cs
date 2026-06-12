@@ -1124,7 +1124,8 @@ public class SkillPromptBuilderTests
 public class LoadSkillToolTests
 {
     private static SkillDefinition Skill(string name, string body = "Body.", bool disableModel = false,
-        IReadOnlyList<SkillResource>? resources = null) =>
+        IReadOnlyList<SkillResource>? resources = null,
+        SkillArtifactContract? artifactContract = null) =>
         new()
         {
             Name = name,
@@ -1132,7 +1133,8 @@ public class LoadSkillToolTests
             Instructions = body,
             Location = $"/skills/{name}",
             DisableModelInvocation = disableModel,
-            Resources = resources ?? []
+            Resources = resources ?? [],
+            ArtifactContract = artifactContract
         };
 
     [Fact]
@@ -1221,6 +1223,94 @@ public class LoadSkillToolTests
         Assert.Contains("<skill-instructions>", result);
         Assert.Contains("<skill-resources>", result);
         Assert.Contains("path=\"references/guide.md\"", result);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AppendsArtifactContract_WhenPresent()
+    {
+        var contract = new SkillArtifactContract
+        {
+            SchemaVersion = 2,
+            Stages =
+            [
+                new SkillArtifactStageContract
+                {
+                    Name = "design",
+                    Label = "Design",
+                    Artifacts =
+                    [
+                        new SkillArtifactTypeContract
+                        {
+                            Type = "requirements",
+                            Label = "Requirements",
+                            Display = "table",
+                            Terminal = true
+                        }
+                    ]
+                },
+                new SkillArtifactStageContract
+                {
+                    Name = "implementation",
+                    Gate = new SkillArtifactStageGateContract { RequiresStage = "design" },
+                    Artifacts =
+                    [
+                        new SkillArtifactTypeContract
+                        {
+                            Type = "patch",
+                            Terminal = false
+                        }
+                    ]
+                }
+            ]
+        };
+        var tool = new LoadSkillTool([Skill("rich", artifactContract: contract)]);
+
+        var result = await tool.ExecuteAsync("""{"skill":"rich"}""", default);
+
+        Assert.Contains("<skill-artifact-contract>", result);
+        Assert.Contains("\"schema_version\": 2", result);
+        Assert.Contains("\"name\": \"design\"", result);
+        Assert.Contains("\"label\": \"Design\"", result);
+        Assert.Contains("\"type\": \"requirements\"", result);
+        Assert.Contains("\"terminal\": true", result);
+        Assert.Contains("\"requires_stage\": \"design\"", result);
+        Assert.Contains("\"type\": \"patch\"", result);
+        Assert.Contains("\"terminal\": false", result);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AppendsArtifactContract_BeforeResourceManifest()
+    {
+        var resources = new List<SkillResource>
+        {
+            new()
+            {
+                Name = "guide.md",
+                RelativePath = "references/guide.md",
+                AbsolutePath = "/skills/rich/references/guide.md",
+                Kind = SkillResourceKind.Reference
+            }
+        };
+        var contract = new SkillArtifactContract
+        {
+            Stages =
+            [
+                new SkillArtifactStageContract
+                {
+                    Name = "design",
+                    Artifacts = [new SkillArtifactTypeContract { Type = "requirements" }]
+                }
+            ]
+        };
+        var tool = new LoadSkillTool([Skill("rich", resources: resources, artifactContract: contract)]);
+
+        var result = await tool.ExecuteAsync("""{"skill":"rich"}""", default);
+
+        var artifactIndex = result.IndexOf("<skill-artifact-contract", StringComparison.Ordinal);
+        var resourcesIndex = result.IndexOf("<skill-resources>", StringComparison.Ordinal);
+
+        Assert.True(artifactIndex >= 0);
+        Assert.True(resourcesIndex > artifactIndex);
     }
 
     [Fact]

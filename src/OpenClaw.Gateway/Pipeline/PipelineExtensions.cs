@@ -6,6 +6,7 @@ using Microsoft.Extensions.FileProviders;
 using OpenClaw.Channels;
 using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Middleware;
+using OpenClaw.Core.Pipeline;
 using OpenClaw.Gateway;
 using OpenClaw.Gateway.Bootstrap;
 using OpenClaw.Gateway.Composition;
@@ -138,7 +139,11 @@ internal static class PipelineExtensions
     private static void StartWorkers(WebApplication app, GatewayStartupContext startup, GatewayAppRuntime runtime)
     {
         var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Gateway");
-        var workerCount = Math.Max(1, Math.Min(Environment.ProcessorCount, 4));
+        // Minimum 2 workers so one can process /stop (or /cancel, /abort) while another
+        // is blocked on an LLM call. In 500 MB containers with 1 CPU, 2 async workers
+        // add negligible memory (stack-not-committed until blocked) while keeping the
+        // abort path responsive. Upper bound 4 workers to cap concurrent LLM pressure.
+        var workerCount = Math.Max(2, Math.Min(Environment.ProcessorCount, 4));
 
         GatewayWorkers.Start(
             app.Lifetime,
@@ -167,7 +172,8 @@ internal static class PipelineExtensions
             app.Services.GetService<ContractGovernanceService>(),
             FeatureFallbackServices.ResolveGovernanceLedgerService(startup, app.Services),
             app.Services.GetService<AudioTranscriptionService>(),
-            app.Services.GetService<MediaCacheStore>());
+            app.Services.GetService<MediaCacheStore>(),
+            runtime.AbortRegistry);
     }
 
     private static void StartChannels(WebApplication app, GatewayAppRuntime runtime)

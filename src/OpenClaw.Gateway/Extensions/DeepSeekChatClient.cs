@@ -32,12 +32,8 @@ internal sealed class DeepSeekChatClient : IChatClient
     private readonly string _apiKey;
     private readonly string _endpoint;
     private readonly HttpClient _httpClient;
+    private readonly bool _enableThinking;
 
-    /// <summary>
-    /// When <c>true</c> (default), the request body will include
-    /// <c>"thinking": {"type": "enabled"}</c> to activate DeepSeek's thinking mode.
-    /// Detection is automatic based on the model name.
-    /// </summary>
     private static bool SupportsThinking(string model)
         => model.Contains("reasoner", StringComparison.OrdinalIgnoreCase)
         || model.Contains("thinking", StringComparison.OrdinalIgnoreCase)
@@ -45,12 +41,13 @@ internal sealed class DeepSeekChatClient : IChatClient
         || string.Equals(model, "deepseek-v4-pro", StringComparison.OrdinalIgnoreCase)
         || string.Equals(model, "deepseek-v4-flash", StringComparison.OrdinalIgnoreCase);
 
-    public DeepSeekChatClient(string model, string apiKey, string? endpoint, HttpClient httpClient)
+    public DeepSeekChatClient(string model, string apiKey, string? endpoint, HttpClient httpClient, bool enableThinking = true)
     {
         _model = model;
         _apiKey = apiKey;
         _endpoint = string.IsNullOrWhiteSpace(endpoint) ? DefaultEndpoint : endpoint.TrimEnd('/');
         _httpClient = httpClient;
+        _enableThinking = enableThinking;
     }
 
     // -------------------------------------------------------------------------
@@ -236,6 +233,7 @@ internal sealed class DeepSeekChatClient : IChatClient
         bool stream)
     {
         var msgArray = SerializeMessages(messages);
+        PrependInstructions(msgArray, options?.Instructions);
 
         var body = new JsonObject
         {
@@ -244,13 +242,14 @@ internal sealed class DeepSeekChatClient : IChatClient
             ["messages"] = msgArray
         };
 
-        // Auto-enable thinking for models that support it.
+        // Always send the thinking block explicitly for models that support it.
+        // DeepSeek API defaults to enabled, so "disabled" must be sent to actually turn it off.
         var effectiveModel = (string?)body["model"] ?? _model;
         if (SupportsThinking(effectiveModel))
         {
             body["thinking"] = new JsonObject
             {
-                ["type"] = "enabled"
+                ["type"] = _enableThinking ? "enabled" : "disabled"
             };
         }
 
@@ -418,6 +417,32 @@ internal sealed class DeepSeekChatClient : IChatClient
             array.Add(node);
         }
         return array;
+    }
+
+    private static void PrependInstructions(JsonArray messages, string? instructions)
+    {
+        if (string.IsNullOrWhiteSpace(instructions) || HasSystemMessage(messages))
+            return;
+
+        messages.Insert(0, new JsonObject
+        {
+            ["role"] = "system",
+            ["content"] = instructions
+        });
+    }
+
+    private static bool HasSystemMessage(JsonArray messages)
+    {
+        foreach (var message in messages)
+        {
+            if (message is JsonObject node &&
+                node["role"]?.GetValue<string>().Equals("system", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static string ExtractReasoningText(ChatMessage message)

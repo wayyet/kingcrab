@@ -117,6 +117,12 @@ public sealed class LlmProviderConfig
     public int CircuitBreakerCooldownSeconds { get; set; } = 30;
 
     public PromptCachingConfig PromptCaching { get; set; } = new();
+
+    /// <summary>
+    /// Controls thinking mode for DeepSeek models.
+    /// true (default) = enabled; false = disabled.
+    /// </summary>
+    public bool EnableThinking { get; set; } = true;
 }
 
 public sealed class LocalInferenceConfig
@@ -870,6 +876,15 @@ public sealed class CronJobConfig
 
     /// <summary>IANA timezone ID (e.g. "America/New_York"). Null defaults to UTC.</summary>
     public string? Timezone { get; set; }
+
+    /// <summary>Override the LLM model for this job. Null uses the session/profile default.</summary>
+    public string? ModelId { get; set; }
+
+    /// <summary>One-shot: run at this specific UTC time instead of the cron expression.</summary>
+    public DateTimeOffset? RunAt { get; set; }
+
+    /// <summary>Delete this job after it runs (used with RunAt one-shot jobs).</summary>
+    public bool DeleteAfterRun { get; set; }
 }
 
 public sealed class WebhooksConfig

@@ -96,7 +96,8 @@ internal static partial class RuntimeInitializationExtensions
             NativeDynamicPluginHost = pluginComposition.NativeDynamicPluginHost,
             WhatsAppWorkerHost = channelComposition.WhatsAppWorkerHost,
             RegisteredToolNames = tools.Select(t => t.Name).ToFrozenSet(StringComparer.Ordinal),
-            ChannelAuthEvents = WireChannelAuthEvents(channelComposition.ChannelAdapters)
+            ChannelAuthEvents = WireChannelAuthEvents(channelComposition.ChannelAdapters),
+            AbortRegistry = services.AbortRegistry,
         };
     }
 
@@ -117,7 +118,7 @@ internal static partial class RuntimeInitializationExtensions
             new ShellTool(config.Tooling),
             new FileReadTool(config.Tooling),
             new FileWriteTool(config.Tooling),
-            new ProcessTool(services.ProcessService, config.Tooling),
+            //new ProcessTool(services.ProcessService, config.Tooling),
             new MemoryNoteTool(services.MemoryStore),
             new MemorySearchTool((IMemoryNoteSearch)services.MemoryStore),
             new ProjectMemoryTool(services.MemoryStore, projectId),

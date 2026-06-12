@@ -459,10 +459,9 @@ internal static partial class AdminEndpoints
             if (session is null)
                 return Results.Json(new OperationStatusResponse { Success = false, Message = $"No active session found with id '{id}'." }, CoreJsonContext.Default.OperationStatusResponse, statusCode: StatusCodes.Status404NotFound);
 
-            // Cancel any in-flight execution by cancelling the session's pipeline worker token
-            // SessionAbortRegistry is not wired in this project; use SessionManager to remove the active entry
-            runtime.SessionManager.RemoveActive(id);
-            RecordOperatorAudit(ctx, operations, auth, "session_abort", id, $"Aborted session '{id}'.", true, before: null, after: null);
+            // Cancel any in-flight execution via the session abort registry.
+            var aborted = runtime.AbortRegistry.TryAbort(id);
+            RecordOperatorAudit(ctx, operations, auth, "session_abort", id, $"Aborted session '{id}' (execution was{(aborted ? "" : " not")} active).", true, before: null, after: null);
             return Results.Json(new OperationStatusResponse { Success = true, Message = $"Session '{id}' abort signalled." }, CoreJsonContext.Default.OperationStatusResponse);
         });
 
