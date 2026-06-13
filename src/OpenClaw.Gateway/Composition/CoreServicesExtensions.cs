@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using OpenClaw.Channels;
 using OpenClaw.Agent;
 using OpenClaw.Agent.Execution;
+using OpenClaw.Agent.Integrations;
 using OpenClaw.Agent.Memory;
 using OpenClaw.Agent.Plugins;
 using OpenClaw.Core.Abstractions;
@@ -117,6 +118,17 @@ internal static class CoreServicesExtensions
         });
         AddFeatureStores(services, config);
         services.AddSingleton<ProviderUsageTracker>();
+        services.AddSingleton(config.TokenUsageKafka);
+        if (config.TokenUsageKafka.Enabled)
+        {
+            services.AddSingleton<KafkaTokenUsagePublisher>();
+            services.AddSingleton<ITokenUsageEventSink>(sp => sp.GetRequiredService<KafkaTokenUsagePublisher>());
+            services.AddHostedService(sp => sp.GetRequiredService<KafkaTokenUsagePublisher>());
+        }
+        else
+        {
+            services.AddSingleton<ITokenUsageEventSink>(NullTokenUsageEventSink.Instance);
+        }
         services.AddSingleton<ToolUsageTracker>();
         services.AddSingleton<ProviderSmokeRegistry>();
         services.AddSingleton<StartupNoticeCollector>();

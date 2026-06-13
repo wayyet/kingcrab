@@ -10,7 +10,19 @@
       "Bash(curl -s http://localhost:18789/api)",
       "Bash(curl -s http://localhost:18789/swagger)",
       "Bash(curl -s http://localhost:18789/webchat.html)",
-      "WebFetch(domain:open.dingtalk.com)"
+      "WebFetch(domain:open.dingtalk.com)",
+      "Bash(dotnet test *)",
+      "Bash(git stash *)",
+      "Bash(docker --version)",
+      "Bash(docker compose *)",
+      "Bash(docker network *)",
+      "Bash(netstat -ano)",
+      "Bash(echo \"exit=$?\")",
+      "PowerShell(Get-NetTCPConnection -LocalPort 18789 -State Listen -ErrorAction SilentlyContinue)",
+      "PowerShell($env:OpenClaw__TokenUsageKafka__Enabled = 'true'; $env:OpenClaw__TokenUsageKafka__BootstrapServers = 'localhost:9092'; $env:OpenClaw__TokenUsageKafka__AgentId = 'emp-it-001'; dotnet run --project src/OpenClaw.Gateway --no-build)",
+      "Bash(sleep 15 && tail -40 \"/c/Users/wayye/AppData/Local/Temp/claude/c--Users-wayye-Documents-ai4c-Projects-kingcrab/a7d556ae-94a1-4fc1-8e3a-3ef035b981ba/tasks/blukdhevc.output\" 2>&1)",
+      "Read(//c/Users/wayye/AppData/Local/Temp/claude/c--Users-wayye-Documents-ai4c-Projects-kingcrab/a7d556ae-94a1-4fc1-8e3a-3ef035b981ba/tasks/**)",
+      "Bash(grep -rn \"ws://\\\\|WebSocketClient\\\\|SendAsync.*Text\" src/OpenClaw.Tests/GatewayRuntimeLifecycleTests.cs)"
     ]
   }
 }

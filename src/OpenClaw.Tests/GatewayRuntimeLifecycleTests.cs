@@ -358,6 +358,7 @@ public sealed class GatewayRuntimeLifecycleTests
             ApprovalAuditStore = approvalAuditStore,
             RuntimeMetrics = runtimeMetrics,
             ProviderUsage = providerUsage,
+            AbortRegistry = new SessionAbortRegistry(),
             PaymentRuntime = new PaymentRuntimeService(
                 [new MockPaymentProvider()],
                 new InMemoryPaymentSecretVault(),

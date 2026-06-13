@@ -108,7 +108,9 @@ public sealed class MafAgentRuntime : IAgentRuntime
             context.RuntimeMetrics,
             context.ProviderUsage,
             telemetry,
-            logger);
+            logger,
+            usageSink: context.Services.GetService(typeof(ITokenUsageEventSink)) as ITokenUsageEventSink,
+            fixedAgentId: context.Config.TokenUsageKafka.AgentId);
         _mafTools = context.Tools
             .Select(tool => (AITool)new MafToolAdapter(tool, _toolExecutor))
             .ToArray();

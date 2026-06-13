@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1060" height="1560" viewBox="0 0 1060 1560" font-family="'Microsoft YaHei', 'PingFang SC', 'Segoe UI', sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/>
+    </marker>
+    <marker id="arrowNew" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#fb923c"/>
+    </marker>
+  </defs>
+
+  <!-- 背景 -->
+  <rect width="1060" height="1560" fill="#0f172a"/>
+
+  <!-- 标题 -->
+  <text x="530" y="48" text-anchor="middle" fill="#f1f5f9" font-size="26" font-weight="bold">Session Token 用量 Kafka 推送与 Doris 汇聚统计 — 调用堆栈层次图</text>
+  <text x="530" y="76" text-anchor="middle" fill="#94a3b8" font-size="14">OpenClaw.NET (kingcrab) · 2026-06-11 · 自上而下 = 调用方向 / 数据流向</text>
+
+  <!-- 图例 -->
+  <rect x="280" y="92" width="18" height="18" rx="3" fill="#0d3321" stroke="#4ade80" stroke-width="2"/>
+  <text x="304" y="106" fill="#dcfce7" font-size="13">现有模块（直接复用）</text>
+  <rect x="460" y="92" width="18" height="18" rx="3" fill="#431407" stroke="#fb923c" stroke-width="2"/>
+  <text x="484" y="106" fill="#ffedd5" font-size="13">新增模块</text>
+  <rect x="580" y="92" width="18" height="18" rx="3" fill="#1e1b4b" stroke="#818cf8" stroke-width="2"/>
+  <text x="604" y="106" fill="#e0e7ff" font-size="13">现有模块（+1 处小修改）</text>
+
+  <!-- ═══ L0 用户层 ═══ -->
+  <text x="40" y="152" fill="#64748b" font-size="13" font-weight="bold">L0 入口</text>
+  <rect x="130" y="130" width="800" height="56" rx="10" fill="#0d2b45" stroke="#38bdf8" stroke-width="2"/>
+  <text x="530" y="153" text-anchor="middle" fill="#e0f2fe" font-size="16" font-weight="bold">用户 / 渠道（WebSocket · Teams · WhatsApp …）</text>
+  <text x="530" y="174" text-anchor="middle" fill="#7dd3fc" font-size="12.5">每条 Session 绑定一个数字员工 ID（默认取 Session.SenderId）</text>
+
+  <line x1="530" y1="186" x2="530" y2="216" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- ═══ L1 Agent 循环 ═══ -->
+  <text x="40" y="252" fill="#64748b" font-size="13" font-weight="bold">L1 Agent</text>
+  <rect x="130" y="220" width="800" height="56" rx="10" fill="#0d3321" stroke="#4ade80" stroke-width="2"/>
+  <text x="530" y="243" text-anchor="middle" fill="#dcfce7" font-size="16" font-weight="bold">MafAgentRuntime（Agent 循环 / 工具循环）</text>
+  <text x="530" y="264" text-anchor="middle" fill="#86efac" font-size="12.5">src/OpenClaw.Agent/MafAgentRuntime.cs — 现有，不改</text>
+
+  <line x1="530" y1="276" x2="530" y2="306" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- ═══ L2 记账中枢 ═══ -->
+  <text x="40" y="356" fill="#64748b" font-size="13" font-weight="bold">L2 记账中枢</text>
+  <rect x="130" y="310" width="800" height="92" rx="10" fill="#1e1b4b" stroke="#818cf8" stroke-width="2.5"/>
+  <text x="530" y="336" text-anchor="middle" fill="#e0e7ff" font-size="16" font-weight="bold">MafExecutionServiceChatClient.RecordUsage() — 唯一接入点</text>
+  <text x="530" y="358" text-anchor="middle" fill="#a5b4fc" font-size="12.5">流式 / 非流式两条路径在此汇合，四项指标已是现成局部变量</text>
+  <text x="530" y="378" text-anchor="middle" fill="#a5b4fc" font-size="12.5">INPUT · OUTPUT · CACHE READ · TOTAL（= INPUT + OUTPUT）</text>
+  <text x="530" y="396" text-anchor="middle" fill="#fbbf24" font-size="12.5">★ 本方案唯一修改的现有文件：方法末尾追加 sink.Publish(事件)</text>
+
+  <!-- L2 分叉：左现有，右新增 -->
+  <line x1="330" y1="402" x2="330" y2="438" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="730" y1="402" x2="730" y2="438" stroke="#fb923c" stroke-width="2" marker-end="url(#arrowNew)"/>
+  <text x="250" y="426" fill="#94a3b8" font-size="12">现有记账（不变）</text>
+  <text x="760" y="426" fill="#fb923c" font-size="12">新增旁路（+1 行）</text>
+
+  <!-- ═══ L3 左：现有四本账 ═══ -->
+  <text x="40" y="486" fill="#64748b" font-size="13" font-weight="bold">L3 落账</text>
+  <rect x="130" y="442" width="400" height="170" rx="10" fill="#0d3321" stroke="#4ade80" stroke-width="2"/>
+  <text x="330" y="468" text-anchor="middle" fill="#dcfce7" font-size="15" font-weight="bold">现有四本账（完全不动）</text>
+  <text x="330" y="494" text-anchor="middle" fill="#86efac" font-size="12.5">TurnContext.RecordLlmCall() — 回合级</text>
+  <text x="330" y="516" text-anchor="middle" fill="#86efac" font-size="12.5">Session.AddTokenUsage / AddCacheUsage — 会话级</text>
+  <text x="330" y="538" text-anchor="middle" fill="#86efac" font-size="12.5">ProviderUsageTracker.RecordTurn — 每轮明细 + Provider 级</text>
+  <text x="330" y="560" text-anchor="middle" fill="#86efac" font-size="12.5">RuntimeMetrics — 进程全局级（/health）</text>
+  <text x="330" y="592" text-anchor="middle" fill="#4ade80" font-size="12">↳ /usage、session_status、管理 API 照常工作</text>
+
+  <!-- ═══ L3 右：新增 Sink ═══ -->
+  <rect x="560" y="442" width="370" height="170" rx="10" fill="#431407" stroke="#fb923c" stroke-width="2"/>
+  <text x="745" y="468" text-anchor="middle" fill="#ffedd5" font-size="15" font-weight="bold">ITokenUsageEventSink.Publish(事件)　[新增]</text>
+  <text x="745" y="494" text-anchor="middle" fill="#fdba74" font-size="12.5">SessionTokenUsageEvent（增量口径）</text>
+  <text x="745" y="516" text-anchor="middle" fill="#fdba74" font-size="12.5">agent_id · session_id · provider/model</text>
+  <text x="745" y="538" text-anchor="middle" fill="#fdba74" font-size="12.5">input / output / cache_read / total_tokens</text>
+  <text x="745" y="560" text-anchor="middle" fill="#fdba74" font-size="12.5">+ session_total_* 累计快照（对账用）</text>
+  <text x="745" y="592" text-anchor="middle" fill="#fb923c" font-size="12">Enabled=false 时注入 NullSink，零开销</text>
+
+  <line x1="745" y1="612" x2="745" y2="644" stroke="#fb923c" stroke-width="2" marker-end="url(#arrowNew)"/>
+  <text x="775" y="634" fill="#fb923c" font-size="12">TryWrite（微秒级，永不阻塞）</text>
+
+  <!-- ═══ L4 发布器 ═══ -->
+  <text x="40" y="700" fill="#64748b" font-size="13" font-weight="bold">L4 发布器</text>
+  <rect x="290" y="648" width="640" height="118" rx="10" fill="#431407" stroke="#fb923c" stroke-width="2"/>
+  <text x="610" y="676" text-anchor="middle" fill="#ffedd5" font-size="15" font-weight="bold">KafkaTokenUsagePublisher : BackgroundService　[新增]</text>
+  <text x="610" y="700" text-anchor="middle" fill="#fdba74" font-size="12.5">① 有界 Channel 队列（容量 4096，满则 DropOldest + 告警）</text>
+  <text x="610" y="722" text-anchor="middle" fill="#fdba74" font-size="12.5">② ProduceAsync：key = agent_id · acks=all · 幂等 · LZ4 压缩</text>
+  <text x="610" y="744" text-anchor="middle" fill="#fdba74" font-size="12.5">③ 失败指数退避重启（1s → 30s，模式复用 MqttEventBridge）</text>
+
+  <line x1="610" y1="766" x2="610" y2="798" stroke="#fb923c" stroke-width="2" marker-end="url(#arrowNew)"/>
+  <text x="640" y="788" fill="#fb923c" font-size="12">异步网络 IO（与对话主流程完全解耦）</text>
+
+  <!-- ═══ L5 Kafka ═══ -->
+  <text x="40" y="852" fill="#64748b" font-size="13" font-weight="bold">L5 中间件</text>
+  <rect x="290" y="802" width="640" height="100" rx="10" fill="#431407" stroke="#fb923c" stroke-width="2.5"/>
+  <text x="610" y="830" text-anchor="middle" fill="#ffedd5" font-size="15" font-weight="bold">Kafka 集群 — Topic: session-token-metrics</text>
+  <text x="610" y="854" text-anchor="middle" fill="#fdba74" font-size="12.5">6 分区 × 3 副本 · min.insync.replicas=2 · 保留 72h</text>
+  <text x="610" y="876" text-anchor="middle" fill="#fdba74" font-size="12.5">按 agent_id 分区 → 同一数字员工的事件保序、同分区</text>
+
+  <line x1="610" y1="902" x2="610" y2="934" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="640" y="924" fill="#94a3b8" font-size="12">Doris 内置 Kafka 消费（无需自写消费者）</text>
+
+  <!-- ═══ L6 Routine Load ═══ -->
+  <text x="40" y="986" fill="#64748b" font-size="13" font-weight="bold">L6 摄入</text>
+  <rect x="290" y="938" width="640" height="92" rx="10" fill="#2e1065" stroke="#c084fc" stroke-width="2"/>
+  <text x="610" y="966" text-anchor="middle" fill="#f3e8ff" font-size="15" font-weight="bold">Doris Routine Load: load_session_token_events</text>
+  <text x="610" y="990" text-anchor="middle" fill="#d8b4fe" font-size="12.5">JSON 解析（jsonpaths）· 每 10s 一批 · 并发 3 · At-Least-Once</text>
+  <text x="610" y="1012" text-anchor="middle" fill="#d8b4fe" font-size="12.5">consumer group: doris-token-loader（监控 lag）</text>
+
+  <line x1="610" y1="1030" x2="610" y2="1062" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- ═══ L7 明细表 ═══ -->
+  <text x="40" y="1114" fill="#64748b" font-size="13" font-weight="bold">L7 明细</text>
+  <rect x="290" y="1066" width="640" height="92" rx="10" fill="#2e1065" stroke="#c084fc" stroke-width="2"/>
+  <text x="610" y="1094" text-anchor="middle" fill="#f3e8ff" font-size="15" font-weight="bold">明细表 token_metrics.session_token_events</text>
+  <text x="610" y="1118" text-anchor="middle" fill="#d8b4fe" font-size="12.5">Duplicate 模型 · 按天动态分区（保留 90 天）· HASH(agent_id) 分桶</text>
+  <text x="610" y="1140" text-anchor="middle" fill="#d8b4fe" font-size="12.5">event_id 保留，可按需切换 Unique 模型精确去重</text>
+
+  <line x1="610" y1="1158" x2="610" y2="1190" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="640" y="1182" fill="#94a3b8" font-size="12">异步物化视图，每 5 分钟刷新</text>
+
+  <!-- ═══ L8 汇聚 ═══ -->
+  <text x="40" y="1244" fill="#64748b" font-size="13" font-weight="bold">L8 汇聚</text>
+  <rect x="290" y="1194" width="640" height="100" rx="10" fill="#2e1065" stroke="#c084fc" stroke-width="2.5"/>
+  <text x="610" y="1222" text-anchor="middle" fill="#f3e8ff" font-size="15" font-weight="bold">汇聚视图 agent_token_usage_daily — GROUP BY agent_id, 日期</text>
+  <text x="610" y="1246" text-anchor="middle" fill="#d8b4fe" font-size="12.5">SUM(input) · SUM(output) · SUM(cache_read) · SUM(total) · COUNT(调用)</text>
+  <text x="610" y="1268" text-anchor="middle" fill="#d8b4fe" font-size="12.5">按数字员工 ID 汇聚统计的最终落点</text>
+
+  <line x1="610" y1="1294" x2="610" y2="1326" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- ═══ L9 报表 ═══ -->
+  <text x="40" y="1382" fill="#64748b" font-size="13" font-weight="bold">L9 消费</text>
+  <rect x="290" y="1330" width="640" height="100" rx="10" fill="#1c1917" stroke="#fbbf24" stroke-width="2.5"/>
+  <text x="610" y="1358" text-anchor="middle" fill="#fef3c7" font-size="15" font-weight="bold">报表 / 看板 / 费用核算</text>
+  <text x="610" y="1382" text-anchor="middle" fill="#fde68a" font-size="12.5">各数字员工 Token 排行与占比 · 日/周/月趋势</text>
+  <text x="610" y="1404" text-anchor="middle" fill="#fde68a" font-size="12.5">缓存命中率 = cache_read / (input + cache_read) · 成本折算基础数据</text>
+
+  <!-- 底部注脚 -->
+  <text x="530" y="1470" text-anchor="middle" fill="#64748b" font-size="12.5">.NET 侧改动：新增 TokenUsageEvents.cs + KafkaTokenUsagePublisher.cs + TokenUsageKafkaConfig；</text>
+  <text x="530" y="1492" text-anchor="middle" fill="#64748b" font-size="12.5">修改 MafExecutionServiceChatClient.RecordUsage()（+1 处 Publish）与 CoreServicesExtensions（DI 注册）。</text>
+  <text x="530" y="1522" text-anchor="middle" fill="#475569" font-size="12">配套文档：Session-Token用量Kafka推送与Doris汇聚统计-设计文档.md / -分析总结.md</text>
+</svg>

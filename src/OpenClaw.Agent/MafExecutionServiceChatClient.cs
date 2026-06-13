@@ -13,6 +13,8 @@ internal sealed class MafExecutionServiceChatClient : IChatClient
     private readonly RuntimeMetrics _metrics;
     private readonly ProviderUsageTracker _providerUsage;
     private readonly MafTelemetryAdapter _telemetry;
+    private readonly ITokenUsageEventSink _usageSink;
+    private readonly string? _fixedAgentId;
     private readonly ILogger? _logger;
 
     public MafExecutionServiceChatClient(
@@ -20,12 +22,16 @@ internal sealed class MafExecutionServiceChatClient : IChatClient
         RuntimeMetrics metrics,
         ProviderUsageTracker providerUsage,
         MafTelemetryAdapter telemetry,
-        ILogger? logger = null)
+        ILogger? logger = null,
+        ITokenUsageEventSink? usageSink = null,
+        string? fixedAgentId = null)
     {
         _llmExecutionService = llmExecutionService;
         _metrics = metrics;
         _providerUsage = providerUsage;
         _telemetry = telemetry;
+        _usageSink = usageSink ?? NullTokenUsageEventSink.Instance;
+        _fixedAgentId = string.IsNullOrWhiteSpace(fixedAgentId) ? null : fixedAgentId;
         _logger = logger;
     }
 
@@ -175,6 +181,27 @@ internal sealed class MafExecutionServiceChatClient : IChatClient
                 messages,
                 resolvedInputTokens,
                 executionContext.SkillPromptLength));
+
+        if (_usageSink is not NullTokenUsageEventSink)
+        {
+            var session = executionContext.Session;
+            _usageSink.Publish(new SessionTokenUsageEvent
+            {
+                AgentId = _fixedAgentId ?? session.SenderId,
+                SessionId = session.Id,
+                ChannelId = session.ChannelId,
+                ProviderId = providerId,
+                ModelId = modelId,
+                InputTokens = resolvedInputTokens,
+                OutputTokens = resolvedOutputTokens,
+                CacheReadTokens = cacheUsage.CacheReadTokens,
+                TotalTokens = resolvedInputTokens + resolvedOutputTokens,
+                SessionTotalInputTokens = session.TotalInputTokens,
+                SessionTotalOutputTokens = session.TotalOutputTokens,
+                SessionTotalCacheReadTokens = session.TotalCacheReadTokens,
+                SessionTotalTokens = session.GetTotalTokens()
+            });
+        }
 
         _logger?.LogDebug(
             "[{CorrelationId}] MAF chat client completed provider={ProviderId} model={ModelId} input={InputTokens} output={OutputTokens}",

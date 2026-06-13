@@ -1,4 +1,17 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(docker exec *)",
+      "PowerShell(dotnet build src/OpenClaw.Gateway/OpenClaw.Gateway.csproj -c Debug --nologo -v q)",
+      "PowerShell(docker exec kafka-doris-fe mysql -h127.0.0.1 -P9030 -uroot --batch -e \"SHOW ROUTINE LOAD FOR token_metrics.load_session_token_events\\\\G\" 2>&1 | Select-Object -First 10; \"exit=$LASTEXITCODE\")",
+      "PowerShell(docker exec kafka-doris-fe mysql -h 127.0.0.1 -P 9030 -uroot --batch -e \"SHOW ROUTINE LOAD FOR token_metrics.load_session_token_events\\\\G\" 2>&1 | Select-Object -First 8; \"exit=$LASTEXITCODE\")",
+      "Edit(/.claude/skills/itest-services/**)",
+      "PowerShell(pwsh -NoProfile -File scripts/itest-services.ps1 -Action status)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\wayye\\Documents\\ai4c_Projects\\setting_Install\\kafka-doris-deploy"
+    ]
+  },
   "enabledPlugins": {
     "andrej-karpathy-skills@karpathy-skills": true
   }

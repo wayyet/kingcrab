@@ -7589,6 +7589,7 @@ public sealed class GatewayAdminEndpointTests
             ApprovalAuditStore = approvalAuditStore,
             RuntimeMetrics = runtimeMetrics,
             ProviderUsage = providerUsage,
+            AbortRegistry = new SessionAbortRegistry(),
             PaymentRuntime = new PaymentRuntimeService(
                 [new MockPaymentProvider()],
                 new InMemoryPaymentSecretVault(),

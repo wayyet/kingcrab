@@ -46,6 +46,7 @@ public sealed class GatewayConfig
     public GmailPubSubConfig GmailPubSub { get; set; } = new();
     public MdnsConfig Mdns { get; set; } = new();
     public DiagnosticsConfig Diagnostics { get; set; } = new();
+    public TokenUsageKafkaConfig TokenUsageKafka { get; set; } = new();
     public string UsageFooter { get; set; } = "off"; // "off", "tokens", "full"
 
     public int MaxConcurrentSessions { get; set; } = 64;
@@ -83,6 +84,38 @@ public sealed class TokenCostRateConfig
 {
     public decimal InputUsdPer1K { get; set; }
     public decimal OutputUsdPer1K { get; set; }
+}
+
+/// <summary>
+/// Kafka push of per-call token usage events (consumed downstream by Doris Routine Load).
+/// Disabled by default; when disabled a no-op sink is injected and the hot path pays nothing.
+/// </summary>
+public sealed class TokenUsageKafkaConfig
+{
+    public bool Enabled { get; set; } = false;
+
+    /// <summary>Kafka bootstrap servers, comma-separated for multiple brokers.</summary>
+    public string BootstrapServers { get; set; } = "localhost:9092";
+
+    public string Topic { get; set; } = "session-token-metrics";
+
+    public string ClientId { get; set; } = "openclaw-token-usage";
+
+    /// <summary>
+    /// Fixed digital-employee id for all events from this gateway instance.
+    /// Null/empty = use each session's SenderId (one websocket identity = one digital employee).
+    /// </summary>
+    public string? AgentId { get; set; }
+
+    /// <summary>In-memory queue capacity; oldest events are dropped when full to protect the chat flow.</summary>
+    public int QueueCapacity { get; set; } = 4096;
+
+    public int LingerMs { get; set; } = 100;
+
+    /// <summary>SASL secret refs resolved via SecretResolver (env:VAR / file:path); never plaintext in config.</summary>
+    public string? SaslUsernameRef { get; set; }
+    public string? SaslPasswordRef { get; set; }
+    public string SecurityProtocol { get; set; } = "plaintext"; // plaintext | sasl_ssl
 }
 
 public sealed class LlmProviderConfig
