@@ -82,4 +82,5 @@ public sealed class NullTokenUsageEventSink : ITokenUsageEventSink
 }
 
 [JsonSerializable(typeof(SessionTokenUsageEvent))]
+[JsonSerializable(typeof(SessionTokenUsageEvent[]))]
 public sealed partial class TokenUsageJsonContext : JsonSerializerContext;

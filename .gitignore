@@ -368,3 +368,5 @@ src/OpenClaw.Gateway/memory
 .playwright-cli/
 .playwright-mcp/
 docs/debug connection.txt
+.claude/settings.json
+.claude/

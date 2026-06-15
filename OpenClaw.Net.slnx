@@ -26,6 +26,7 @@
     <Project Path="src/OpenClaw.SkillKit/OpenClaw.SkillKit.csproj" />
     <Project Path="src/OpenClaw.SkillKit.Abstractions/OpenClaw.SkillKit.Abstractions.csproj" />
     <Project Path="src/OpenClaw.Testing/OpenClaw.Testing.csproj" />
+    <Project Path="src/OpenClaw.TokenCollector/OpenClaw.TokenCollector.csproj" />
     <Project Path="src/OpenClaw.Tui/OpenClaw.Tui.csproj" />
     <Project Path="src/OpenClawNet.Sandbox.OpenSandbox/OpenClawNet.Sandbox.OpenSandbox.csproj" />
   </Folder>

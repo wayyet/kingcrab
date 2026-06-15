@@ -3,17 +3,17 @@ using System.Threading.Channels;
 using Confluent.Kafka;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using OpenClaw.Core.Models;
 using OpenClaw.Core.Observability;
 using OpenClaw.Core.Security;
 
-namespace OpenClaw.Agent.Integrations;
+namespace OpenClaw.TokenCollector;
 
 /// <summary>
 /// Publishes <see cref="SessionTokenUsageEvent"/>s to Kafka, keyed by agent_id so events for
 /// one digital employee stay ordered within a partition. Publish only enqueues into a bounded
 /// in-memory channel (oldest dropped when full); all network IO happens on this background
-/// service, so a Kafka outage can never stall the chat hot path.
+/// service. Moved out of the gateway/sandbox: this is the only process that holds the Kafka
+/// producer and its SASL credentials.
 /// </summary>
 public sealed class KafkaTokenUsagePublisher : BackgroundService, ITokenUsageEventSink
 {
@@ -36,7 +36,7 @@ public sealed class KafkaTokenUsagePublisher : BackgroundService, ITokenUsageEve
             OnEventDropped);
     }
 
-    /// <summary>Called on the LLM hot path; enqueue only, never blocks.</summary>
+    /// <summary>Called on the ingest path; enqueue only, never blocks.</summary>
     public void Publish(SessionTokenUsageEvent evt)
     {
         if (!_config.Enabled)

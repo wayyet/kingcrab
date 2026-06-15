@@ -127,6 +127,19 @@ OpenSandbox 负责“隔离、TTL、资源、网络策略、卷挂载、生命�
 2. 只允许模型供应商域名
 3. 只允许你确实需要的插件依赖域名
 4. 如果不需要源码拉取，就不要放开 `github.com`
+5. Token 用量推送只放行**采集器一个端点**，绝不放行内网 Kafka 集群
+
+### Token 用量推送：用沙箱外采集器，不要直连 Kafka
+
+网关在沙箱里只跑一个 HTTP 瘦客户端（`HttpTokenUsageSink`），把 Token 用量事件批量 POST 给一个**沙箱外的长命采集器**（`OpenClaw.TokenCollector`）；由采集器持有 Kafka 生产者、密钥和到内网 broker 的连接。这样沙箱镜像里不再编入 `Confluent.Kafka`、不注入 `KAFKA_SASL_*`，出网白名单也从“整个 Kafka 集群”收敛到“采集器一个地址”。
+
+- `networkPolicy`：只在白名单里放行采集器端点（如 `http://token-collector:8088`），**不要**放行内网 Kafka broker。
+- 通过 `env` 注入（而不是写进镜像）：
+  - `OpenClaw__TokenUsage__Sink=http`
+  - `OpenClaw__TokenUsage__Http__CollectorUrl=http://<采集器地址>:8088/ingest/token-usage`
+  - `OpenClaw__TokenUsage__Http__AuthTokenRef=env:TOKEN_COLLECTOR_TOKEN`
+  - `TOKEN_COLLECTOR_TOKEN=<与采集器共享的 Bearer 密钥>`
+- **不再向沙箱注入** `KAFKA_SASL_USER` / `KAFKA_SASL_PASS` 等 broker 凭据——它们只属于采集器。
 
 7. 用非 root 用户运行
 

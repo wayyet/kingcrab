@@ -65,6 +65,31 @@ Doris Routine Load（Doris 内置 Kafka 消费，At-Least-Once）
 聚合表 agent_token_usage_agg（Aggregate 模型，按 agent_id + 日期 SUM）→ 报表/看板
 ```
 
+### 3.1 采集器拆分（把 Kafka 推送移出短命沙箱）
+
+> 架构演进：上面 §3 是“网关进程直连 Kafka”的初版。当网关跑在**真·短命沙箱**（TTL 到点 SIGKILL、跑不可信代码、默认锁网络）里时，直连 Kafka 有三个硬伤：纯内存队列在 TTL 硬杀时丢在途事件；出网白名单要为内网 broker 凿洞；`KAFKA_SASL_*` 经 env 注入到能跑 shell 的容器（confused deputy）。
+>
+> 因此把链路拆成「沙箱内 HTTP 瘦客户端 + 沙箱外长命采集器」，切口 [ITokenUsageEventSink](../src/OpenClaw.Core/Observability/TokenUsageEvents.cs) 保持不变（只换一个 sink 实现）：
+
+```
+[沙箱内 Gateway]                              [沙箱外 / 平台侧，长命]
+RecordUsage()
+  │ Publish(SessionTokenUsageEvent)   非阻塞/有界/可降级（不变）
+  ▼
+ITokenUsageEventSink   ←—— 切口，保留不动
+  │
+  └─ HttpTokenUsageSink（新，仅放行采集器一个地址）
+        │  批量 HTTP POST + Bearer
+        ▼
+   OpenClaw.TokenCollector（新项目，独立镜像）
+        │  POST /ingest/token-usage → ITokenUsageEventSink.Publish()
+        │  KafkaTokenUsagePublisher（从 Agent 搬来，持有 producer + 密钥 + 有界缓冲）
+        ▼
+   Kafka session-token-metrics ──▶ Doris Routine Load（完全不变）
+```
+
+关键收益：沙箱镜像不再编入 `Confluent.Kafka`、不再注入 Kafka 密钥；出网白名单从“整个 Kafka 集群”收敛到“采集器一个端点”；采集器是长命进程，TTL 不再丢在途数据。Doris 侧（建表 / Routine Load / 物化视图）、Kafka topic 与消息 JSON 契约**完全不变**——采集器只是把同样的消息搬到同一个 topic。下文 §4–§7 的契约与 Doris 设计对“网关直连”和“采集器中转”两种形态同样适用。
+
 ## 4. 数据契约（Kafka 消息体）
 
 Topic：`session-token-metrics`；Key：`agent_id`（字符串）；Value：UTF-8 JSON，单条事件 ≈ 400 字节。
@@ -625,6 +650,21 @@ sequenceDiagram
 | 6 | DI 注册 | `src/OpenClaw.Gateway/Composition/CoreServicesExtensions.cs` | 修改（约 +10 行） |
 | 7 | Kafka topic 创建 | 运维脚本 | 新增 |
 | 8 | Doris 建表 + Routine Load + 物化视图 | Doris SQL（见 §7） | 新增 |
+
+### 11.1 采集器拆分增量清单（§3.1 架构演进）
+
+| # | 改动 | 文件 | 类型 |
+|---|---|---|---|
+| 9  | `TokenUsageJsonContext` 增加 `SessionTokenUsageEvent[]` 批量类型 | `src/OpenClaw.Core/Observability/TokenUsageEvents.cs` | 修改 |
+| 10 | `TokenUsageKafkaConfig` → 拆为网关侧 `TokenUsageConfig` + `TokenUsageHttpConfig`；`GatewayConfig.TokenUsageKafka` → `TokenUsage` | `src/OpenClaw.Core/Models/GatewayConfig.cs` | 修改 |
+| 11 | 网关侧新 sink（批量 HTTP POST + Bearer + 有界队列 + 退避） | `src/OpenClaw.Agent/Integrations/HttpTokenUsageSink.cs` | 新增 |
+| 12 | DI 改为按 `TokenUsage.Sink == "http"` 注册 `HttpTokenUsageSink` | `src/OpenClaw.Gateway/Composition/CoreServicesExtensions.cs` | 修改 |
+| 13 | Agent 去 `Confluent.Kafka` 依赖；`KafkaTokenUsagePublisher` 移出 | `src/OpenClaw.Agent/OpenClaw.Agent.csproj` | 修改 |
+| 14 | 沙箱外采集器（minimal API ingest + 迁入的 Kafka 发布器 + 配置 + Dockerfile） | `src/OpenClaw.TokenCollector/` | 新增 |
+| 15 | 采集器加入解决方案；网关 `appsettings.json` 段 `TokenUsageKafka` → `TokenUsage` | `OpenClaw.Net.slnx` / `src/OpenClaw.Gateway/appsettings.json` | 修改 |
+| 16 | 部署编排：`token-collector` 服务 + 镜像构建脚本 | `../setting_Install/kafka-doris-deploy/docker-compose.yml` / `scripts/build-token-collector-image.ps1` | 新增 |
+
+> 后续增强（本次不做）：采集器磁盘/WAL 持久缓冲（进程崩溃也不丢在途事件）、采集器横向扩展与 consumer lag 监控。
 
 ## 12. 配图
 

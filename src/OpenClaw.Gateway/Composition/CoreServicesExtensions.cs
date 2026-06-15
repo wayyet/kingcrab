@@ -118,12 +118,12 @@ internal static class CoreServicesExtensions
         });
         AddFeatureStores(services, config);
         services.AddSingleton<ProviderUsageTracker>();
-        services.AddSingleton(config.TokenUsageKafka);
-        if (config.TokenUsageKafka.Enabled)
+        services.AddSingleton(config.TokenUsage);
+        if (string.Equals(config.TokenUsage.Sink, "http", StringComparison.OrdinalIgnoreCase))
         {
-            services.AddSingleton<KafkaTokenUsagePublisher>();
-            services.AddSingleton<ITokenUsageEventSink>(sp => sp.GetRequiredService<KafkaTokenUsagePublisher>());
-            services.AddHostedService(sp => sp.GetRequiredService<KafkaTokenUsagePublisher>());
+            services.AddSingleton<HttpTokenUsageSink>();
+            services.AddSingleton<ITokenUsageEventSink>(sp => sp.GetRequiredService<HttpTokenUsageSink>());
+            services.AddHostedService(sp => sp.GetRequiredService<HttpTokenUsageSink>());
         }
         else
         {

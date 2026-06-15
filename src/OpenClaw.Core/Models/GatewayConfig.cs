@@ -46,7 +46,7 @@ public sealed class GatewayConfig
     public GmailPubSubConfig GmailPubSub { get; set; } = new();
     public MdnsConfig Mdns { get; set; } = new();
     public DiagnosticsConfig Diagnostics { get; set; } = new();
-    public TokenUsageKafkaConfig TokenUsageKafka { get; set; } = new();
+    public TokenUsageConfig TokenUsage { get; set; } = new();
     public string UsageFooter { get; set; } = "off"; // "off", "tokens", "full"
 
     public int MaxConcurrentSessions { get; set; } = 64;
@@ -87,19 +87,15 @@ public sealed class TokenCostRateConfig
 }
 
 /// <summary>
-/// Kafka push of per-call token usage events (consumed downstream by Doris Routine Load).
-/// Disabled by default; when disabled a no-op sink is injected and the hot path pays nothing.
+/// Gateway-side token usage export. The gateway never talks to Kafka directly: it only batches
+/// events over HTTP to an out-of-sandbox collector (OpenClaw.TokenCollector), which owns the
+/// Kafka producer and credentials. This keeps the short-lived sandbox image free of the Kafka
+/// client, its SASL secrets, and a network hole to the internal broker cluster.
 /// </summary>
-public sealed class TokenUsageKafkaConfig
+public sealed class TokenUsageConfig
 {
-    public bool Enabled { get; set; } = false;
-
-    /// <summary>Kafka bootstrap servers, comma-separated for multiple brokers.</summary>
-    public string BootstrapServers { get; set; } = "localhost:9092";
-
-    public string Topic { get; set; } = "session-token-metrics";
-
-    public string ClientId { get; set; } = "openclaw-token-usage";
+    /// <summary>Sink selection: "none" (no-op, hot path pays nothing) or "http" (batch POST to collector).</summary>
+    public string Sink { get; set; } = "none";
 
     /// <summary>
     /// Fixed digital-employee id for all events from this gateway instance.
@@ -107,15 +103,29 @@ public sealed class TokenUsageKafkaConfig
     /// </summary>
     public string? AgentId { get; set; }
 
+    public TokenUsageHttpConfig Http { get; set; } = new();
+}
+
+/// <summary>HTTP thin-client settings for shipping token usage events to the collector.</summary>
+public sealed class TokenUsageHttpConfig
+{
+    /// <summary>Collector ingest endpoint. The sandbox network policy only needs to allow this one address.</summary>
+    public string CollectorUrl { get; set; } = "http://localhost:8088/ingest/token-usage";
+
+    /// <summary>Bearer token ref resolved via SecretResolver (env:VAR / raw:literal); never plaintext in config.</summary>
+    public string? AuthTokenRef { get; set; }
+
     /// <summary>In-memory queue capacity; oldest events are dropped when full to protect the chat flow.</summary>
     public int QueueCapacity { get; set; } = 4096;
 
-    public int LingerMs { get; set; } = 100;
+    /// <summary>Max events batched into a single POST.</summary>
+    public int BatchSize { get; set; } = 64;
 
-    /// <summary>SASL secret refs resolved via SecretResolver (env:VAR / file:path); never plaintext in config.</summary>
-    public string? SaslUsernameRef { get; set; }
-    public string? SaslPasswordRef { get; set; }
-    public string SecurityProtocol { get; set; } = "plaintext"; // plaintext | sasl_ssl
+    /// <summary>Max time a partial batch waits before being flushed.</summary>
+    public int FlushIntervalMs { get; set; } = 1000;
+
+    /// <summary>Per-request HTTP timeout.</summary>
+    public int TimeoutSeconds { get; set; } = 10;
 }
 
 public sealed class LlmProviderConfig
