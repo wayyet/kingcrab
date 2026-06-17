@@ -1186,6 +1186,8 @@ public sealed class SqliteMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemory
                 HistoryTurns = session.History.Count,
                 TotalInputTokens = session.TotalInputTokens,
                 TotalOutputTokens = session.TotalOutputTokens,
+                TotalCacheReadTokens = session.TotalCacheReadTokens,
+                TotalCacheWriteTokens = session.TotalCacheWriteTokens,
                 IsActive = false
             });
         }

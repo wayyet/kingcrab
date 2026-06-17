@@ -1136,6 +1136,8 @@ public sealed class FileMemoryStore : IMemoryStore, IMemoryNoteSearch, IMemoryNo
                     HistoryTurns = session.History.Count,
                     TotalInputTokens = session.TotalInputTokens,
                     TotalOutputTokens = session.TotalOutputTokens,
+                    TotalCacheReadTokens = session.TotalCacheReadTokens,
+                    TotalCacheWriteTokens = session.TotalCacheWriteTokens,
                     IsActive = false
                 });
             }
