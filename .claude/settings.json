@@ -1,5 +1,10 @@
 {
   "enabledPlugins": {
     "andrej-karpathy-skills@karpathy-skills": true
+  },
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c \"with open\\('e:/gitee/kingcrab/src/OpenClaw.Dashboard/Layout/MainLayout.razor','rb'\\) as f: d=f.read\\(\\); lines=d.split\\(b'\\\\n'\\); print\\(repr\\(lines[106]\\)\\); print\\(repr\\(lines[107]\\)\\); print\\(repr\\(lines[108]\\)\\)\")"
+    ]
   }
 }

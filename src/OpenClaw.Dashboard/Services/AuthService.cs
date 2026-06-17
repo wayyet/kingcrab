@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using Microsoft.JSInterop;
 using OpenClaw.Dashboard.Models;
 
 namespace OpenClaw.Dashboard.Services;
@@ -6,6 +7,7 @@ namespace OpenClaw.Dashboard.Services;
 public class AuthService
 {
     private readonly ApiService _api;
+    private readonly IJSRuntime _js;
 
     public AuthState? CurrentAuth { get; private set; }
 
@@ -13,11 +15,13 @@ public class AuthService
 
     public event Action? OnAuthStateChanged;
 
-    public AuthService(ApiService api)
+    public AuthService(ApiService api, IJSRuntime js)
     {
         _api = api;
+        _js = js;
     }
 
+    /// <summary>Check if the server already knows us (via cookie or existing session).</summary>
     public async Task SyncAuth()
     {
         try
@@ -28,6 +32,70 @@ public class AuthService
         catch
         {
             SetAuth(null);
+        }
+    }
+
+    /// <summary>
+    /// Try to authenticate using an OIDC/Keycloak token obtained from the browser.
+    /// Call this after the JS callback has stored a token.
+    /// </summary>
+    public async Task<bool> LoginWithOidc()
+    {
+        try
+        {
+            // Get the OIDC access token from JS
+            var token = await _js.InvokeAsync<string?>("DashboardAuth.getAccessToken").ConfigureAwait(false);
+            if (string.IsNullOrEmpty(token))
+            {
+                // Maybe the token expired — try refreshing
+                token = await _js.InvokeAsync<string?>("DashboardAuth.refreshToken").ConfigureAwait(false);
+            }
+
+            if (string.IsNullOrEmpty(token))
+            {
+                return false;
+            }
+
+            // Set the Bearer token in ApiService so the request uses it
+            _api.SetBearerToken(token);
+
+            // Try to authenticate with the server using this token
+            var success = await PostLoginAsync(new { mode = "oidc_jwt", token }).ConfigureAwait(false);
+            if (success)
+            {
+                return true;
+            }
+
+            // If server rejected the token, clear it locally
+            _api.SetBearerToken(null);
+            await _js.InvokeVoidAsync("DashboardAuth.clearLocalToken").ConfigureAwait(false);
+            return false;
+        }
+        catch
+        {
+            _api.SetBearerToken(null);
+            return false;
+        }
+    }
+
+    /// <summary>Initiate OIDC login — redirects the browser to the Keycloak login page.</summary>
+    public async Task InitiateOidcLogin()
+    {
+        await _js.InvokeVoidAsync("DashboardAuth.login").ConfigureAwait(false);
+    }
+
+    /// <summary>Check if the page was loaded after an OIDC callback.</summary>
+    public async Task<bool> CheckOidcCallback()
+    {
+        try
+        {
+            var handled = await _js.InvokeAsync<bool>("DashboardAuth.wasCallbackHandled")
+                .ConfigureAwait(false);
+            return handled;
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -84,6 +152,22 @@ public class AuthService
 
     public async Task Logout()
     {
+        // If OIDC, redirect to the Keycloak logout endpoint
+        if (IsAuthenticated && CurrentAuth?.AuthMode == "oidc_jwt")
+        {
+            try
+            {
+                await _js.InvokeVoidAsync("DashboardAuth.logout").ConfigureAwait(false);
+                // logout() redirects the browser — we won't normally reach here,
+                // but if the Keycloak session endpoint is unreachable, fall through
+                return;
+            }
+            catch
+            {
+                // Fall through to normal logout
+            }
+        }
+
         try
         {
             using var _ = await _api.DeleteAsync("auth/session").ConfigureAwait(false);
@@ -91,6 +175,17 @@ public class AuthService
         catch
         {
             // swallow — we still clear local state
+        }
+
+        _api.SetBearerToken(null);
+
+        try
+        {
+            await _js.InvokeVoidAsync("DashboardAuth.clearLocalToken").ConfigureAwait(false);
+        }
+        catch
+        {
+            // ignore
         }
 
         SetAuth(null);

@@ -69,6 +69,10 @@
     "loginWithToken": "Account Token",
     "loginWithBootstrap": "Bootstrap",
     "loginFailed": "Login failed. Please check your credentials.",
+    "loginWithOidc": "Keycloak / OIDC",
+    "oidcInfo": "Sign in with Keycloak / OIDC SSO. You will be redirected to the identity provider to authenticate.",
+    "oidcAuthority": "Authority URL",
+    "oidcClientId": "Client ID",
     "loggedInAs": "Logged in as {0}",
     "role": "Role",
     "notAuthenticated": "Not authenticated"

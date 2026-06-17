@@ -69,6 +69,10 @@
     "loginWithToken": "账户令牌",
     "loginWithBootstrap": "引导登录",
     "loginFailed": "登录失败，请检查您的凭据。",
+    "loginWithOidc": "Keycloak / OIDC",
+    "oidcInfo": "使用 Keycloak / OIDC SSO 登录。您将被重定向到身份提供者进行认证。",
+    "oidcAuthority": "认证服务器地址",
+    "oidcClientId": "客户端 ID",
     "loggedInAs": "已登录为 {0}",
     "role": "角色",
     "notAuthenticated": "未认证"

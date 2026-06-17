@@ -1,6 +1,7 @@
 @implements IDisposable
 @inject LocalizationService L
 @inject AuthService Auth
+@inject IJSRuntime JS
 
 <MudDialog>
     <TitleContent>
@@ -38,6 +39,22 @@
                               InputType="InputType.Password"
                               Class="mt-4" />
             </MudTabPanel>
+
+            <MudTabPanel Text="@L["auth.loginWithOidc"]">
+                <div class="mt-4 oidc-login-panel">
+                    <MudAlert Severity="Severity.Info" Class="mb-4" Variant="Variant.Outlined">
+                        @L["auth.oidcInfo"]
+                    </MudAlert>
+                    <MudTextField @bind-Value="_oidcAuthority"
+                                  Label="@L["auth.oidcAuthority"]"
+                                  Variant="Variant.Outlined"
+                                  Class="mt-4" />
+                    <MudTextField @bind-Value="_oidcClientId"
+                                  Label="@L["auth.oidcClientId"]"
+                                  Variant="Variant.Outlined"
+                                  Class="mt-2" />
+                </div>
+            </MudTabPanel>
         </MudTabs>
 
         @if (!string.IsNullOrEmpty(_error))
@@ -68,12 +85,33 @@
     private string _password = string.Empty;
     private string _token = string.Empty;
     private string _bootstrapToken = string.Empty;
+    private string _oidcAuthority = "https://passport.ai4c.cn/realms/ai4c-saas";
+    private string _oidcClientId = "ncrew-client";
     private string? _error;
     private bool _loading;
 
     protected override void OnInitialized()
     {
         L.OnLanguageChanged += HandleStateChanged;
+        _ = LoadOidcDefaultsAsync();
+    }
+
+    private async Task LoadOidcDefaultsAsync()
+    {
+        try
+        {
+            var config = await JS.InvokeAsync<OidcConfigDto?>("DashboardAuth.getConfig")
+                .ConfigureAwait(false);
+            if (config != null)
+            {
+                _oidcAuthority = config.authority ?? _oidcAuthority;
+                _oidcClientId = config.clientId ?? _oidcClientId;
+            }
+        }
+        catch
+        {
+            // use defaults
+        }
     }
 
     private async Task HandleLogin()
@@ -86,6 +124,7 @@
             0 => await Auth.LoginWithCredentials(_username, _password),
             1 => await Auth.LoginWithToken(_token),
             2 => await Auth.LoginWithBootstrap(_bootstrapToken),
+            3 => await HandleOidcLogin(),
             _ => false
         };
 
@@ -101,6 +140,26 @@
         }
     }
 
+    private async Task<bool> HandleOidcLogin()
+    {
+        try
+        {
+            var authority = string.IsNullOrWhiteSpace(_oidcAuthority)
+                ? "https://passport.ai4c.cn/realms/ai4c-saas"
+                : _oidcAuthority;
+            var clientId = string.IsNullOrWhiteSpace(_oidcClientId)
+                ? "ncrew-client"
+                : _oidcClientId;
+
+            await JS.InvokeVoidAsync("DashboardAuth.saveConfig", authority, clientId);
+        }
+        catch { /* ignore */ }
+
+        // Initiate the OIDC login redirect (browser will redirect to Keycloak)
+        await Auth.InitiateOidcLogin();
+        return false;
+    }
+
     private void Cancel() => MudDialog.Cancel();
 
     private void HandleStateChanged() => InvokeAsync(StateHasChanged);
@@ -109,4 +168,9 @@
     {
         L.OnLanguageChanged -= HandleStateChanged;
     }
+
+    /// <summary>
+    /// DTO matching the config object returned by DashboardAuth.getConfig()
+    /// </summary>
+    private sealed record OidcConfigDto(string? authority, string? clientId);
 }

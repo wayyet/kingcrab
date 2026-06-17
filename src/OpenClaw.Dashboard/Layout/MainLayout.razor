@@ -110,7 +110,16 @@
         L.OnLanguageChanged += HandleLanguageChanged;
 
         Auth.OnAuthStateChanged += HandleAuthChanged;
+
+        // Always sync first to pick up any existing server session
         await Auth.SyncAuth();
+
+        // If not authenticated, try OIDC token (from callback or existing session)
+        if (!Auth.IsAuthenticated)
+        {
+            await Auth.LoginWithOidc();
+        }
+
         _initialized = true;
     }
 
