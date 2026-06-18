@@ -17,8 +17,6 @@ using OpenClaw.Gateway.Extensions;
 using OpenClaw.Gateway.Models;
 using OpenClaw.Gateway.Tools;
 using OpenClaw.Plugins.Payment;
-using OpenClaw.TokenHubSink.Models;
-using OpenClaw.TokenHubSink.Observability;
 
 namespace OpenClaw.Gateway.Composition;
 
@@ -330,9 +328,7 @@ internal static partial class RuntimeInitializationExtensions
             IsContractTokenBudgetExceeded = contractGovernance.IsTokenBudgetExceeded,
             IsContractRuntimeBudgetExceeded = contractGovernance.IsRuntimeBudgetExceeded,
             RecordContractTurnUsage = contractGovernance.RecordTurnUsage,
-            AppendContractSnapshot = (session, status) => contractGovernance.AppendSnapshot(session, status),
-            TokenUsageEventSink = services.GetService<ITokenUsageEventSink>(),
-            TokenUsageAgentId = services.GetService<TokenUsageConfig>()?.AgentId
+            AppendContractSnapshot = (session, status) => contractGovernance.AppendSnapshot(session, status)
         });
     }
 

@@ -4,7 +4,6 @@ using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Models;
 using OpenClaw.Core.Observability;
 using OpenClaw.Core.Skills;
-using OpenClaw.TokenHubSink.Observability;
 
 namespace OpenClaw.Agent;
 
@@ -37,16 +36,6 @@ public sealed class AgentRuntimeFactoryContext
     public Func<Session, bool>? IsContractRuntimeBudgetExceeded { get; init; }
     public Action<Session, string, string, long, long>? RecordContractTurnUsage { get; init; }
     public Action<Session, string>? AppendContractSnapshot { get; init; }
-
-    /// <summary>
-    /// Optional TokenHub thin-client sink. When set (HTTP sink), the runtime publishes one
-    /// incremental <see cref="SessionTokenUsageEvent"/> per LLM call on the usage write path.
-    /// Null or the no-op sink disables publishing at zero hot-path cost.
-    /// </summary>
-    public ITokenUsageEventSink? TokenUsageEventSink { get; init; }
-
-    /// <summary>Fixed digital-employee id for token usage events; null/empty falls back to Session.SenderId.</summary>
-    public string? TokenUsageAgentId { get; init; }
 }
 
 public interface IAgentRuntimeFactory

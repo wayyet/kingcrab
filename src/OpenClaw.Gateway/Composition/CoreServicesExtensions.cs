@@ -30,7 +30,6 @@ using OpenClaw.PluginKit;
 using OpenClaw.Payments.Abstractions;
 using OpenClaw.Payments.Core;
 using OpenClaw.Payments.StripeLink;
-using OpenClaw.TokenHubSink;
 
 namespace OpenClaw.Gateway.Composition;
 
@@ -128,10 +127,6 @@ internal static class CoreServicesExtensions
                 sp.GetRequiredService<TurnTokenUsageAuditLog>()
             ],
             sp.GetRequiredService<ILogger<CompositeTurnTokenUsageObserver>>()));
-        // TokenHub bypass sink (in-sandbox HTTP thin client): "http" wires the batching HTTP client +
-        // its hosted background service and exposes it as ITokenUsageEventSink so the agent runtime can
-        // publish one incremental usage event per LLM call; anything else binds the no-op sink.
-        services.AddTokenHubSink(startup.TokenUsage);
         services.AddSingleton<ToolUsageTracker>();
         services.AddSingleton<ProviderSmokeRegistry>();
         services.AddSingleton<StartupNoticeCollector>();
