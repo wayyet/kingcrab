@@ -11,6 +11,7 @@ public class ApiService
     private readonly JsonSerializerOptions _jsonOptions;
     private string? _csrfToken;
     private string? _apiKey;
+    private string? _bearerToken;
 
     public ApiService(HttpClient http)
     {
@@ -36,6 +37,10 @@ public class ApiService
     }
 
     public void SetApiKey(string? apiKey) => _apiKey = apiKey;
+
+    public void SetBearerToken(string? token) => _bearerToken = token;
+
+    public string? GetBearerToken() => _bearerToken;
 
     public void SetCsrfToken(string? token) => _csrfToken = token;
 
@@ -115,6 +120,11 @@ public class ApiService
         if (!string.IsNullOrEmpty(_apiKey))
         {
             request.Headers.TryAddWithoutValidation("X-Api-Key", _apiKey);
+        }
+
+        if (!string.IsNullOrEmpty(_bearerToken))
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
         }
 
         if (isMutation && !string.IsNullOrEmpty(_csrfToken))

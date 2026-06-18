@@ -10,7 +10,8 @@
       "Bash(curl -s http://localhost:18789/api)",
       "Bash(curl -s http://localhost:18789/swagger)",
       "Bash(curl -s http://localhost:18789/webchat.html)",
-      "WebFetch(domain:open.dingtalk.com)"
+      "WebFetch(domain:open.dingtalk.com)",
+      "Bash(python3 -c ' *)"
     ]
   }
 }
