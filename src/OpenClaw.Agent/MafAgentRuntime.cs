@@ -40,6 +40,8 @@ public sealed class MafAgentRuntime : IAgentRuntime
     private readonly MemoryRecallConfig? _recall;
     private readonly bool _requireToolApproval;
     private readonly ITurnTokenUsageObserver? _turnTokenUsageObserver;
+    private readonly OpenClaw.TokenHubSink.Observability.ITokenUsageEventSink? _tokenUsageEventSink;
+    private readonly string? _tokenUsageAgentId;
     private readonly Action<Session, string, string, long, long>? _recordContractTurnUsage;
     private readonly Func<Session, bool>? _isContractTokenBudgetExceeded;
     private readonly Func<Session, bool>? _isContractRuntimeBudgetExceeded;
@@ -98,6 +100,8 @@ public sealed class MafAgentRuntime : IAgentRuntime
         _recall = context.Config.Memory.Recall;
         _requireToolApproval = context.RequireToolApproval;
         _turnTokenUsageObserver = context.TurnTokenUsageObserver;
+        _tokenUsageEventSink = context.TokenUsageEventSink;
+        _tokenUsageAgentId = context.TokenUsageAgentId;
         _recordContractTurnUsage = context.RecordContractTurnUsage;
         _isContractTokenBudgetExceeded = context.IsContractTokenBudgetExceeded;
         _isContractRuntimeBudgetExceeded = context.IsContractRuntimeBudgetExceeded;
@@ -281,6 +285,8 @@ public sealed class MafAgentRuntime : IAgentRuntime
                 ToolInvocations = toolInvocations,
                 TurnTokenUsageObserver = _turnTokenUsageObserver,
                 RecordContractTurnUsage = _recordContractTurnUsage,
+                TokenUsageEventSink = _tokenUsageEventSink,
+                TokenUsageAgentId = _tokenUsageAgentId,
                 ApprovalCallback = approvalCallback
             });
 
@@ -482,6 +488,8 @@ public sealed class MafAgentRuntime : IAgentRuntime
                 ToolInvocations = toolInvocations,
                 TurnTokenUsageObserver = _turnTokenUsageObserver,
                 RecordContractTurnUsage = _recordContractTurnUsage,
+                TokenUsageEventSink = _tokenUsageEventSink,
+                TokenUsageAgentId = _tokenUsageAgentId,
                 ApprovalCallback = approvalCallback,
                 StreamEventWriter = WriteStreamEventAsync
             });

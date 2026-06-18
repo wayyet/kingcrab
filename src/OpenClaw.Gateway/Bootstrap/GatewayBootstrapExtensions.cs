@@ -10,6 +10,7 @@ using OpenClaw.Core.Security;
 using OpenClaw.Core.Validation;
 using OpenClaw.Gateway;
 using OpenClaw.Gateway.Extensions;
+using OpenClaw.TokenHubSink.Models;
 
 namespace OpenClaw.Gateway.Bootstrap;
 
@@ -122,6 +123,11 @@ internal static class GatewayBootstrapExtensions
 
         GatewaySecurityExtensions.EnforcePublicBindHardening(config, isNonLoopbackBind);
 
+        // TokenHub thin-client config lives under OpenClaw:TokenUsage (e.g. OpenClaw__TokenUsage__Sink=http).
+        // Bound separately from GatewayConfig so the foundational OpenClaw.Core stays decoupled from the sink.
+        var tokenUsageConfig = builder.Configuration.GetSection("OpenClaw:TokenUsage").Get<TokenUsageConfig>()
+            ?? new TokenUsageConfig();
+
         return new BootstrapResult
         {
             ShouldExit = false,
@@ -132,7 +138,8 @@ internal static class GatewayBootstrapExtensions
                 RuntimeState = runtimeState,
                 IsNonLoopbackBind = isNonLoopbackBind,
                 ConfigSources = configSources,
-                WorkspacePath = Environment.GetEnvironmentVariable("OPENCLAW_WORKSPACE")
+                WorkspacePath = Environment.GetEnvironmentVariable("OPENCLAW_WORKSPACE"),
+                TokenUsage = tokenUsageConfig
             }
         };
     }

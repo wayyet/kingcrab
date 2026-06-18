@@ -1,6 +1,7 @@
 using OpenClaw.Core.Abstractions;
 using OpenClaw.Core.Models;
 using OpenClaw.Core.Observability;
+using OpenClaw.TokenHubSink.Observability;
 
 namespace OpenClaw.Agent;
 
@@ -16,6 +17,12 @@ internal sealed class MafExecutionContext
     public Action<Session, string, string, long, long>? RecordContractTurnUsage { get; init; }
     public ToolApprovalCallback? ApprovalCallback { get; init; }
     public Func<AgentStreamEvent, CancellationToken, ValueTask>? StreamEventWriter { get; init; }
+
+    /// <summary>TokenHub thin-client sink for per-call usage events; null/no-op disables publishing.</summary>
+    public ITokenUsageEventSink? TokenUsageEventSink { get; init; }
+
+    /// <summary>Fixed digital-employee id for usage events; null/empty falls back to Session.SenderId.</summary>
+    public string? TokenUsageAgentId { get; init; }
 }
 
 internal static class MafExecutionContextScope

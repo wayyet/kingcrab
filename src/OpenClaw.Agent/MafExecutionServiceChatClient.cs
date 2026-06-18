@@ -1,6 +1,7 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using OpenClaw.Core.Observability;
+using OpenClaw.TokenHubSink.Observability;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -162,6 +163,13 @@ internal sealed class MafExecutionServiceChatClient : IChatClient
         _metrics.AddPromptCacheWrites(cacheUsage.CacheWriteTokens);
         _providerUsage.AddTokens(providerId, modelId, resolvedInputTokens, resolvedOutputTokens);
         _providerUsage.AddCacheTokens(providerId, modelId, cacheUsage.CacheReadTokens, cacheUsage.CacheWriteTokens);
+
+        // TokenHub bypass: enqueue one incremental usage event for the out-of-sandbox collector.
+        // Runs after the Session running totals above are updated so the snapshot fields are current.
+        PublishTokenUsageEvent(
+            executionContext, providerId, modelId,
+            resolvedInputTokens, resolvedOutputTokens, cacheUsage.CacheReadTokens);
+
         var record = new OpenClaw.Core.Models.TurnTokenUsageRecord
         {
             SessionId = executionContext.Session.Id,
@@ -203,5 +211,31 @@ internal sealed class MafExecutionServiceChatClient : IChatClient
             modelId,
             resolvedInputTokens,
             resolvedOutputTokens);
+    }
+
+    /// <summary>
+    /// Best-effort, non-blocking push of one incremental token-usage event to the TokenHub thin client.
+    /// No sink (or the no-op sink) short-circuits before allocating, so the disabled path costs nothing.
+    /// The sink's Publish only enqueues into a bounded in-memory channel — it never blocks the chat hot path.
+    /// </summary>
+    private static void PublishTokenUsageEvent(
+        MafExecutionContext executionContext,
+        string providerId,
+        string modelId,
+        long inputTokens,
+        long outputTokens,
+        long cacheReadTokens)
+    {
+        if (executionContext.TokenUsageEventSink is not { } sink || sink is NullTokenUsageEventSink)
+            return;
+
+        sink.Publish(TokenUsageEventMapper.Create(
+            executionContext.Session,
+            executionContext.TokenUsageAgentId,
+            providerId,
+            modelId,
+            inputTokens,
+            outputTokens,
+            cacheReadTokens));
     }
 }
