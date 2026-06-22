@@ -69,7 +69,9 @@ public sealed class MafAgentRuntimeFactory : IAgentRuntimeFactory
             IsContractTokenBudgetExceeded = context.IsContractTokenBudgetExceeded,
             IsContractRuntimeBudgetExceeded = context.IsContractRuntimeBudgetExceeded,
             RecordContractTurnUsage = context.RecordContractTurnUsage,
-            AppendContractSnapshot = context.AppendContractSnapshot
+            AppendContractSnapshot = context.AppendContractSnapshot,
+            TokenUsageEventSink = context.TokenUsageEventSink,
+            TokenUsageAgentId = context.TokenUsageAgentId
         });
 
     private static GatewayConfig CreateDelegatedConfig(
@@ -161,7 +163,9 @@ public sealed class MafAgentRuntimeFactory : IAgentRuntimeFactory
             IsContractTokenBudgetExceeded = context.IsContractTokenBudgetExceeded,
             IsContractRuntimeBudgetExceeded = context.IsContractRuntimeBudgetExceeded,
             RecordContractTurnUsage = context.RecordContractTurnUsage,
-            AppendContractSnapshot = context.AppendContractSnapshot
+            AppendContractSnapshot = context.AppendContractSnapshot,
+            TokenUsageEventSink = context.TokenUsageEventSink,
+            TokenUsageAgentId = context.TokenUsageAgentId
         });
     }
 }

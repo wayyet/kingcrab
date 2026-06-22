@@ -6,6 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <NoWarn>NU1902</NoWarn>
+    <!-- GHSA-2m69-gcr7-jv3q: SQLitePCLRaw.lib.e_sqlite3 2.1.11 高危审计，暂不阻断本地编译；待升级到 3.50.3 后移除 -->
+    <WarningsNotAsErrors>NU1903</WarningsNotAsErrors>
     <InvariantGlobalization>true</InvariantGlobalization>
     <!-- NativeAOT perf: trim aggressively -->
     <TrimMode>link</TrimMode>

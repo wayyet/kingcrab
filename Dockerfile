@@ -15,6 +15,7 @@ COPY Directory.Build.props ./
 # Copy csproj files individually for restore caching
 COPY src/OpenClaw.Core/OpenClaw.Core.csproj        src/OpenClaw.Core/
 COPY src/OpenClaw.Agent/OpenClaw.Agent.csproj       src/OpenClaw.Agent/
+COPY src/OpenClaw.TokenHubSink/OpenClaw.TokenHubSink.csproj src/OpenClaw.TokenHubSink/
 COPY src/OpenClaw.Channels/OpenClaw.Channels.csproj src/OpenClaw.Channels/
 COPY src/OpenClaw.Gateway/OpenClaw.Gateway.csproj   src/OpenClaw.Gateway/
 
