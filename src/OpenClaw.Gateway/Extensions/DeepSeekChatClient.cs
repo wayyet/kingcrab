@@ -607,10 +607,27 @@ internal sealed class DeepSeekChatClient : IChatClient
             InputTokenCount = usage.PromptTokens,
             OutputTokenCount = usage.CompletionTokens,
             TotalTokenCount = usage.TotalTokens,
+            CachedInputTokenCount = ResolveCachedInputTokens(usage),
             AdditionalCounts = usage.CompletionTokensDetails?.ReasoningTokens is int rt
                 ? new AdditionalPropertiesDictionary<long> { ["reasoning_tokens"] = rt }
                 : null
         };
+    }
+
+    /// <summary>
+    /// Resolves cache-read tokens across the two usage shapes this client can see:
+    /// DeepSeek's native top-level <c>prompt_cache_hit_tokens</c>, and the OpenAI-standard
+    /// <c>prompt_tokens_details.cached_tokens</c> that OpenAI-compatible aggregators
+    /// (e.g. new-api/one-api proxies serving non-DeepSeek models) emit instead.
+    /// Returns null only when neither field is present, so a genuine 0 is preserved.
+    /// </summary>
+    private static long? ResolveCachedInputTokens(UsageDto usage)
+    {
+        var native = usage.PromptCacheHitTokens;
+        var standard = usage.PromptTokensDetails?.CachedTokens;
+        if (native is null && standard is null)
+            return null;
+        return Math.Max(native ?? 0, standard ?? 0);
     }
 
     private static string SerializeToolResult(object? result) =>
@@ -750,7 +767,14 @@ internal sealed class DeepSeekChatClient : IChatClient
         [JsonPropertyName("prompt_tokens")] public int? PromptTokens { get; init; }
         [JsonPropertyName("completion_tokens")] public int? CompletionTokens { get; init; }
         [JsonPropertyName("total_tokens")] public int? TotalTokens { get; init; }
+        [JsonPropertyName("prompt_cache_hit_tokens")] public int? PromptCacheHitTokens { get; init; }
+        [JsonPropertyName("prompt_tokens_details")] public PromptTokensDetailsDto? PromptTokensDetails { get; init; }
         [JsonPropertyName("completion_tokens_details")] public CompletionTokensDetailsDto? CompletionTokensDetails { get; init; }
+    }
+
+    private sealed class PromptTokensDetailsDto
+    {
+        [JsonPropertyName("cached_tokens")] public int? CachedTokens { get; init; }
     }
 
     private sealed class CompletionTokensDetailsDto
