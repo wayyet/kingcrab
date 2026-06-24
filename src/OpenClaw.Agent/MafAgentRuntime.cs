@@ -184,6 +184,11 @@ public sealed class MafAgentRuntime : IAgentRuntime
         return Task.CompletedTask;
     }
 
+    private static string ResolveCorrelationId(string? correlationId)
+       => !string.IsNullOrWhiteSpace(correlationId)
+           ? correlationId
+           : Activity.Current?.TraceId.ToString() ?? Guid.NewGuid().ToString("N")[..16];
+
     public Task<IReadOnlyList<string>> ReloadSkillsAsync(CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
@@ -216,9 +221,10 @@ public sealed class MafAgentRuntime : IAgentRuntime
         string? correlationId = null)
     {
         using var activity = _telemetry.StartRunActivity("Agent.Maf.RunAsync", session, _runtimeState);
+        var resolvedCorrelationId = ResolveCorrelationId(correlationId);
         var turnCtx = new TurnContext
         {
-            CorrelationId = correlationId ?? (Activity.Current?.TraceId.ToString() ?? Guid.NewGuid().ToString("N")[..16]),
+            CorrelationId = resolvedCorrelationId,
             SessionId = session.Id,
             ChannelId = session.ChannelId
         };
@@ -362,9 +368,10 @@ public sealed class MafAgentRuntime : IAgentRuntime
             throw new NotSupportedException("MAF streaming is disabled for this experiment runtime.");
 
         using var activity = _telemetry.StartRunActivity("Agent.Maf.RunStreamingAsync", session, _runtimeState);
+        var resolvedCorrelationId = ResolveCorrelationId(correlationId);
         var turnCtx = new TurnContext
         {
-            CorrelationId = correlationId ?? (Activity.Current?.TraceId.ToString() ?? Guid.NewGuid().ToString("N")[..16]),
+            CorrelationId = resolvedCorrelationId,
             SessionId = session.Id,
             ChannelId = session.ChannelId
         };
