@@ -7628,7 +7628,8 @@ public sealed class GatewayAdminEndpointTests
             PluginHost = null,
             NativeDynamicPluginHost = null,
             RegisteredToolNames = System.Collections.Frozen.FrozenSet<string>.Empty,
-            ChannelAuthEvents = new ChannelAuthEventStore()
+            ChannelAuthEvents = new ChannelAuthEventStore(),
+            AbortRegistry = new OpenClaw.Core.Pipeline.SessionAbortRegistry()
         };
     }
 
