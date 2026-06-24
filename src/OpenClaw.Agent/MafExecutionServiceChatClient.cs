@@ -172,6 +172,7 @@ internal sealed class MafExecutionServiceChatClient : IChatClient
 
         var record = new OpenClaw.Core.Models.TurnTokenUsageRecord
         {
+            CorrelationId = executionContext.TurnContext.CorrelationId,
             SessionId = executionContext.Session.Id,
             ChannelId = executionContext.Session.ChannelId,
             ProviderId = providerId,

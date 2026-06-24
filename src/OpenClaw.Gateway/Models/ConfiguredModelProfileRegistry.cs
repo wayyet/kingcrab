@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using OpenClaw.Core.Abstractions;
@@ -7,6 +6,8 @@ using OpenClaw.Core.Security;
 using OpenClaw.Core.Setup;
 using OpenClaw.Core.Validation;
 using OpenClaw.Gateway.Extensions;
+using System.Collections.Concurrent;
+using static Org.BouncyCastle.Math.EC.ECCurve;
 
 namespace OpenClaw.Gateway.Models;
 
@@ -76,6 +77,7 @@ internal sealed class ConfiguredModelProfileRegistry : IModelProfileRegistry, ID
                 ProviderGateway = ResolveProviderGateway(item.Profile),
                 AuthMode = item.Profile.AuthMode,
                 SendRequestMetadata = item.Profile.SendRequestMetadata,
+                CorrelationIdHeader = item.Profile.CorrelationIdHeader,
                 Tags = item.Profile.Tags,
                 Capabilities = item.Profile.Capabilities,
                 PromptCaching = item.Profile.PromptCaching,
@@ -168,6 +170,7 @@ internal sealed class ConfiguredModelProfileRegistry : IModelProfileRegistry, ID
             ApiKey = config.Llm.ApiKey,
             AuthMode = config.Llm.AuthMode,
             SendRequestMetadata = config.Llm.SendRequestMetadata,
+            CorrelationIdHeader = config.Llm.CorrelationIdHeader ?? "X-OpenClaw-Correlation-Id",
             FallbackModels = config.Llm.FallbackModels,
             Capabilities = GuessCapabilities(config.Llm.Provider),
             PromptCaching = ClonePromptCaching(config.Llm.PromptCaching)
@@ -233,6 +236,7 @@ internal sealed class ConfiguredModelProfileRegistry : IModelProfileRegistry, ID
             ApiKey = ResolveSecretValue(model.ApiKey),
             AuthMode = Normalize(model.AuthMode) ?? Normalize(config.Llm.AuthMode) ?? "bearer",
             SendRequestMetadata = model.SendRequestMetadata ?? config.Llm.SendRequestMetadata,
+            CorrelationIdHeader = config.Llm.CorrelationIdHeader ?? "X-OpenClaw-Correlation-Id",
             Tags = MergeTags(model),
             FallbackProfileIds = NormalizeDistinct(model.FallbackProfileIds),
             FallbackModels = NormalizeDistinct(model.FallbackModels),
