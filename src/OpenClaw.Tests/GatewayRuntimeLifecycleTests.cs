@@ -395,7 +395,8 @@ public sealed class GatewayRuntimeLifecycleTests
             NativeDynamicPluginHost = null,
             WhatsAppWorkerHost = null,
             RegisteredToolNames = FrozenSet<string>.Empty,
-            ChannelAuthEvents = new ChannelAuthEventStore()
+            ChannelAuthEvents = new ChannelAuthEventStore(),
+            AbortRegistry = new OpenClaw.Core.Pipeline.SessionAbortRegistry()
         };
     }
 

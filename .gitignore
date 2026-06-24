@@ -367,3 +367,5 @@ src/OpenClaw.Gateway/memory
 docs/per-turn 分支推送冲突与代码回滚处理总结.md
 src/OpenClaw.Tests/
 docs/OpenClaw会话页与Kingcrab重启技能-服务冲突分析.md
+docs/分析和审查 HttpTokenUsageSink 代码-kingcrab.md
+docs/PublishTokenUsageEvent与TurnTokenUsageRecord双通道设计.md

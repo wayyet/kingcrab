@@ -164,12 +164,8 @@ internal sealed class MafExecutionServiceChatClient : IChatClient
         _providerUsage.AddTokens(providerId, modelId, resolvedInputTokens, resolvedOutputTokens);
         _providerUsage.AddCacheTokens(providerId, modelId, cacheUsage.CacheReadTokens, cacheUsage.CacheWriteTokens);
 
-        // TokenHub bypass: enqueue one incremental usage event for the out-of-sandbox collector.
-        // Runs after the Session running totals above are updated so the snapshot fields are current.
-        PublishTokenUsageEvent(
-            executionContext, providerId, modelId,
-            resolvedInputTokens, resolvedOutputTokens, cacheUsage.CacheReadTokens);
-
+        // record is the single source of truth for this turn's three output paths
+        // (built first so each path below reads its fields from it).
         var record = new OpenClaw.Core.Models.TurnTokenUsageRecord
         {
             CorrelationId = executionContext.TurnContext.CorrelationId,
@@ -187,6 +183,16 @@ internal sealed class MafExecutionServiceChatClient : IChatClient
                 executionContext.SkillPromptLength),
             IsEstimated = inputTokens is null || outputTokens is null
         };
+
+        // Path 3 — TokenHub bypass: enqueue one incremental usage event for the out-of-sandbox collector.
+        // Sourced from record but only the 5 whitelisted fields cross the channel; record-only fields
+        // (CacheWriteTokens / IsEstimated / EstimatedInputTokensByComponent) never leak into it.
+        // After the Session running totals above so the snapshot fields are current; before the Observer
+        // return below so this path always fires even when an observer is configured.
+        PublishTokenUsageEvent(
+            executionContext,
+            record.ProviderId, record.ModelId,
+            record.InputTokens, record.OutputTokens, record.CacheReadTokens);
 
         if (executionContext.TurnTokenUsageObserver is not null)
         {
