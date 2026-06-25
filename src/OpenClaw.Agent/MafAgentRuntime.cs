@@ -180,6 +180,11 @@ public sealed class MafAgentRuntime : IAgentRuntime
         return Task.CompletedTask;
     }
 
+    private static string ResolveCorrelationId(string? correlationId)
+       => !string.IsNullOrWhiteSpace(correlationId)
+           ? correlationId
+           : Activity.Current?.TraceId.ToString() ?? Guid.NewGuid().ToString("N")[..16];
+
     public Task<IReadOnlyList<string>> ReloadSkillsAsync(CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
@@ -208,11 +213,14 @@ public sealed class MafAgentRuntime : IAgentRuntime
         CancellationToken ct,
         ToolApprovalCallback? approvalCallback = null,
         System.Text.Json.JsonElement? responseSchema = null,
-        bool isSystemEvent = false)
+        bool isSystemEvent = false,
+        string? correlationId = null)
     {
         using var activity = _telemetry.StartRunActivity("Agent.Maf.RunAsync", session, _runtimeState);
+        var resolvedCorrelationId = ResolveCorrelationId(correlationId);
         var turnCtx = new TurnContext
         {
+            CorrelationId = resolvedCorrelationId,
             SessionId = session.Id,
             ChannelId = session.ChannelId
         };
@@ -347,14 +355,17 @@ public sealed class MafAgentRuntime : IAgentRuntime
         string userMessage,
         [EnumeratorCancellation] CancellationToken ct,
         ToolApprovalCallback? approvalCallback = null,
-        bool isSystemEvent = false)
+        bool isSystemEvent = false,
+        string? correlationId = null)
     {
         if (!_options.EnableStreaming)
             throw new NotSupportedException("MAF streaming is disabled for this experiment runtime.");
 
         using var activity = _telemetry.StartRunActivity("Agent.Maf.RunStreamingAsync", session, _runtimeState);
+        var resolvedCorrelationId = ResolveCorrelationId(correlationId);
         var turnCtx = new TurnContext
         {
+            CorrelationId = resolvedCorrelationId,
             SessionId = session.Id,
             ChannelId = session.ChannelId
         };
@@ -1134,6 +1145,7 @@ public sealed class MafAgentRuntime : IAgentRuntime
         _providerUsage.AddCacheTokens(execution.ProviderId, execution.ModelId, cacheUsage.CacheReadTokens, cacheUsage.CacheWriteTokens);
         var record = new TurnTokenUsageRecord
         {
+            CorrelationId = turnContext.CorrelationId,
             SessionId = session.Id,
             ChannelId = session.ChannelId,
             ProviderId = execution.ProviderId,

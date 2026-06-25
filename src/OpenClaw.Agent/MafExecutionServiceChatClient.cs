@@ -168,6 +168,7 @@ internal sealed class MafExecutionServiceChatClient : IChatClient
         // TokenHub bypass as one of its members — reads everything it needs straight from the record.
         var record = new OpenClaw.Core.Models.TurnTokenUsageRecord
         {
+            CorrelationId = executionContext.TurnContext.CorrelationId,
             SessionId = executionContext.Session.Id,
             ChannelId = executionContext.Session.ChannelId,
             ProviderId = providerId,

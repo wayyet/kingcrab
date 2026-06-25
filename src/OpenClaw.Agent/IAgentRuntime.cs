@@ -28,7 +28,8 @@ public interface IAgentRuntime
         CancellationToken ct,
         ToolApprovalCallback? approvalCallback = null,
         JsonElement? responseSchema = null,
-        bool isSystemEvent = false);
+        bool isSystemEvent = false,
+        string? correlationId = null);
 
     Task<IReadOnlyList<string>> ReloadSkillsAsync(CancellationToken ct = default);
 
@@ -46,5 +47,6 @@ public interface IAgentRuntime
         string userMessage,
         CancellationToken ct,
         ToolApprovalCallback? approvalCallback = null,
-        bool isSystemEvent = false);
+        bool isSystemEvent = false,
+        string? correlationId = null);
 }
