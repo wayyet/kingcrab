@@ -17,8 +17,6 @@ using OpenClaw.Gateway.Extensions;
 using OpenClaw.Gateway.Models;
 using OpenClaw.Gateway.Tools;
 using OpenClaw.Plugins.Payment;
-using OpenClaw.TokenHubSink.Models;
-using OpenClaw.TokenHubSink.Observability;
 
 namespace OpenClaw.Gateway.Composition;
 
@@ -331,8 +329,10 @@ internal static partial class RuntimeInitializationExtensions
             IsContractRuntimeBudgetExceeded = contractGovernance.IsRuntimeBudgetExceeded,
             RecordContractTurnUsage = contractGovernance.RecordTurnUsage,
             AppendContractSnapshot = (session, status) => contractGovernance.AppendSnapshot(session, status),
-            TokenUsageEventSink = services.GetService<ITokenUsageEventSink>(),
-            TokenUsageAgentId = services.GetService<TokenUsageConfig>()?.AgentId
+            // The composite observer (provider accounting + audit log + TokenHub bypass) is the single
+            // dispatch point for per-turn usage; without this line the runtime observer stays null and
+            // both the audit log and TokenHub reporting are silently disabled.
+            TurnTokenUsageObserver = services.GetService<ITurnTokenUsageObserver>()
         });
     }
 

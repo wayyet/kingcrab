@@ -1,7 +1,6 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using OpenClaw.Core.Observability;
-using OpenClaw.TokenHubSink.Observability;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -164,8 +163,9 @@ internal sealed class MafExecutionServiceChatClient : IChatClient
         _providerUsage.AddTokens(providerId, modelId, resolvedInputTokens, resolvedOutputTokens);
         _providerUsage.AddCacheTokens(providerId, modelId, cacheUsage.CacheReadTokens, cacheUsage.CacheWriteTokens);
 
-        // record is the single source of truth for this turn's three output paths
-        // (built first so each path below reads its fields from it).
+        // record is the single source of truth for this turn (built after the Session running totals
+        // above so its session_total_* snapshot is current). The observer chain — which now owns the
+        // TokenHub bypass as one of its members — reads everything it needs straight from the record.
         var record = new OpenClaw.Core.Models.TurnTokenUsageRecord
         {
             SessionId = executionContext.Session.Id,
@@ -180,18 +180,13 @@ internal sealed class MafExecutionServiceChatClient : IChatClient
                 messages,
                 resolvedInputTokens,
                 executionContext.SkillPromptLength),
-            IsEstimated = inputTokens is null || outputTokens is null
+            IsEstimated = inputTokens is null || outputTokens is null,
+            SenderId = executionContext.Session.SenderId,
+            SessionTotalInputTokens = executionContext.Session.TotalInputTokens,
+            SessionTotalOutputTokens = executionContext.Session.TotalOutputTokens,
+            SessionTotalCacheReadTokens = executionContext.Session.TotalCacheReadTokens,
+            SessionTotalTokens = executionContext.Session.GetTotalTokens()
         };
-
-        // Path 3 — TokenHub bypass: enqueue one incremental usage event for the out-of-sandbox collector.
-        // Sourced from record but only the 5 whitelisted fields cross the channel; record-only fields
-        // (CacheWriteTokens / IsEstimated / EstimatedInputTokensByComponent) never leak into it.
-        // After the Session running totals above so the snapshot fields are current; before the Observer
-        // return below so this path always fires even when an observer is configured.
-        PublishTokenUsageEvent(
-            executionContext,
-            record.ProviderId, record.ModelId,
-            record.InputTokens, record.OutputTokens, record.CacheReadTokens);
 
         if (executionContext.TurnTokenUsageObserver is not null)
         {
@@ -217,31 +212,5 @@ internal sealed class MafExecutionServiceChatClient : IChatClient
             modelId,
             resolvedInputTokens,
             resolvedOutputTokens);
-    }
-
-    /// <summary>
-    /// Best-effort, non-blocking push of one incremental token-usage event to the TokenHub thin client.
-    /// No sink (or the no-op sink) short-circuits before allocating, so the disabled path costs nothing.
-    /// The sink's Publish only enqueues into a bounded in-memory channel — it never blocks the chat hot path.
-    /// </summary>
-    private static void PublishTokenUsageEvent(
-        MafExecutionContext executionContext,
-        string providerId,
-        string modelId,
-        long inputTokens,
-        long outputTokens,
-        long cacheReadTokens)
-    {
-        if (executionContext.TokenUsageEventSink is not { } sink || sink is NullTokenUsageEventSink)
-            return;
-
-        sink.Publish(TokenUsageEventMapper.Create(
-            executionContext.Session,
-            executionContext.TokenUsageAgentId,
-            providerId,
-            modelId,
-            inputTokens,
-            outputTokens,
-            cacheReadTokens));
     }
 }

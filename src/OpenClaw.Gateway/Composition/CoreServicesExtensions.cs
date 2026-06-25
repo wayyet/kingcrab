@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using OpenClaw.Channels;
 using OpenClaw.Agent;
 using OpenClaw.Agent.Execution;
+using OpenClaw.Agent.Observability;
 using OpenClaw.Agent.Memory;
 using OpenClaw.Agent.Plugins;
 using OpenClaw.Core.Abstractions;
@@ -31,6 +32,7 @@ using OpenClaw.Payments.Abstractions;
 using OpenClaw.Payments.Core;
 using OpenClaw.Payments.StripeLink;
 using OpenClaw.TokenHubSink;
+using OpenClaw.TokenHubSink.Observability;
 
 namespace OpenClaw.Gateway.Composition;
 
@@ -125,7 +127,13 @@ internal static class CoreServicesExtensions
         services.AddSingleton<ITurnTokenUsageObserver>(sp =>
             new CompositeTurnTokenUsageObserver([
                 new ProviderUsageTurnTokenUsageObserver(sp.GetRequiredService<ProviderUsageTracker>()),
-                sp.GetRequiredService<TurnTokenUsageAuditLog>()
+                sp.GetRequiredService<TurnTokenUsageAuditLog>(),
+                // TokenHub bypass as a chain member: the no-op sink (the "none" default) short-circuits to
+                // zero cost, so this is safe to register unconditionally. Resolved lazily so it picks up the
+                // ITokenUsageEventSink that AddTokenHubSink registers just below.
+                new TokenHubSinkTurnTokenUsageObserver(
+                    sp.GetService<ITokenUsageEventSink>() ?? NullTokenUsageEventSink.Instance,
+                    startup.TokenUsage.AgentId)
             ],
             sp.GetRequiredService<ILogger<CompositeTurnTokenUsageObserver>>()));
         // TokenHub bypass sink (in-sandbox HTTP thin client): "http" wires the batching HTTP client +
