@@ -11,7 +11,8 @@
       "Bash(curl -s http://localhost:18789/swagger)",
       "Bash(curl -s http://localhost:18789/webchat.html)",
       "WebFetch(domain:open.dingtalk.com)",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(grep -E '^#{1,3} ' \"e:/Documents/CODES/ai4c_Projects/kingcrab/docs/kingcrab智能体可靠性六大机制分析.md\")"
     ]
   }
 }
