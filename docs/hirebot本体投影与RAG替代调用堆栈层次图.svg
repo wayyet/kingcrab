@@ -1,0 +1,133 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="1080" viewBox="0 0 1240 1080" font-family="'Microsoft YaHei','微软雅黑',sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#555"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1240" height="1080" fill="#FFFFFF"/>
+
+  <!-- 标题 -->
+  <text x="40" y="42" font-size="24" font-weight="bold" fill="#1a1a1a">hirebot 本体投影模块 与 RAG 替代方案 调用堆栈层次对比图</text>
+  <text x="40" y="68" font-size="13.5" fill="#555">左 = 现状（提示词两段式 ETL 流水线）　右 = RAG 替代方案（假想架构）　|　红框 = 替换后仍省不掉的环节　橙框 = 新增基础设施 / 必须保留的机制</text>
+
+  <!-- ══════════ 左栏：现状 ══════════ -->
+  <rect x="40" y="92" width="570" height="832" rx="10" fill="#F5F9FF" stroke="#2F6FBF" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="54" y="116" font-size="14" font-weight="bold" fill="#2F6FBF">现状：提示词两段式 ETL 流水线（零新增基础设施 · 契约先行）</text>
+
+  <!-- L1 用户/前端 -->
+  <rect x="70" y="132" width="510" height="48" rx="8" fill="#EEEEEE" stroke="#888" stroke-width="1.5"/>
+  <text x="325" y="161" font-size="13.5" text-anchor="middle" fill="#222">用户 / 前端（上传资料 · 各阶段确认收口）</text>
+  <line x1="325" y1="180" x2="325" y2="194" stroke="#555" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- L2 主技能 -->
+  <rect x="70" y="196" width="510" height="62" rx="8" fill="#E8F1FC" stroke="#2F6FBF" stroke-width="1.5"/>
+  <text x="325" y="220" font-size="14" font-weight="bold" text-anchor="middle" fill="#123">employment-coach-conversation（主技能）</text>
+  <text x="325" y="242" font-size="12" text-anchor="middle" fill="#333">阶段门（isTerminal artifact 收口）· internal downstream trigger 派发</text>
+  <line x1="325" y1="258" x2="325" y2="272" stroke="#555" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- L3 MafAgentRuntime -->
+  <rect x="70" y="274" width="510" height="62" rx="8" fill="#E8F1FC" stroke="#2F6FBF" stroke-width="1.5"/>
+  <text x="325" y="298" font-size="14" font-weight="bold" text-anchor="middle" fill="#123">MafAgentRuntime（kingcrab OpenClaw.Agent）</text>
+  <text x="325" y="320" font-size="12" text-anchor="middle" fill="#333">ReAct 单智能体循环 · 逐条执行 SKILL.md 规约（概率保障）</text>
+  <line x1="325" y1="336" x2="325" y2="350" stroke="#555" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- L4 抽取技能 -->
+  <rect x="70" y="352" width="510" height="82" rx="8" fill="#E8F1FC" stroke="#2F6FBF" stroke-width="1.5"/>
+  <text x="325" y="374" font-size="14" font-weight="bold" text-anchor="middle" fill="#123">① ontology-slice-extraction（约 370 行规约）</text>
+  <text x="325" y="395" font-size="12" text-anchor="middle" fill="#333">资料 → 切片：最小语义闭包（concepts / relations / constraints / sources）</text>
+  <text x="325" y="415" font-size="12" text-anchor="middle" fill="#333">反造假 · 落盘验证 · 有界自愈 · 失败也收口（blocked + diagnostic 枚举）</text>
+  <line x1="325" y1="434" x2="325" y2="448" stroke="#555" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- L5 投影技能 -->
+  <rect x="70" y="450" width="510" height="82" rx="8" fill="#E8F1FC" stroke="#2F6FBF" stroke-width="1.5"/>
+  <text x="325" y="472" font-size="14" font-weight="bold" text-anchor="middle" fill="#123">② ontology-projection（约 330 行规约）</text>
+  <text x="325" y="493" font-size="12" text-anchor="middle" fill="#333">切片 × skill → 按技能裁剪投影 · 宁投不弃 · skill_slug 不可变 · 禁 stub</text>
+  <text x="325" y="513" font-size="12" text-anchor="middle" fill="#333">business_rules 合并进 constraint_mappings · 缺口选项式精确提问</text>
+  <line x1="325" y1="532" x2="325" y2="546" stroke="#555" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- L6 沙箱工具层 -->
+  <rect x="70" y="548" width="510" height="62" rx="8" fill="#E8F1FC" stroke="#2F6FBF" stroke-width="1.5"/>
+  <text x="325" y="572" font-size="14" font-weight="bold" text-anchor="middle" fill="#123">沙箱工具层 + 确定性校验脚本</text>
+  <text x="325" y="594" font-size="12" text-anchor="middle" fill="#333">read_file / write_file / emit_artifact · validate-slice.py · validate-projection.py</text>
+  <line x1="325" y1="610" x2="325" y2="624" stroke="#555" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- L7 文件系统 -->
+  <rect x="70" y="626" width="510" height="82" rx="8" fill="#DCE8F5" stroke="#2F6FBF" stroke-width="1.5"/>
+  <text x="325" y="648" font-size="14" font-weight="bold" text-anchor="middle" fill="#123">文件系统工作区（人工可评审的固化中间产物）</text>
+  <text x="325" y="669" font-size="12" text-anchor="middle" fill="#333">uploads/ → ontology/*.slice.json + *.slice.md（JSON Schema 校验）</text>
+  <text x="325" y="689" font-size="12" text-anchor="middle" fill="#333">→ ontology/projections/&lt;skill_slug&gt;/*.projection.json（per-skill 数据契约）</text>
+  <line x1="325" y1="708" x2="325" y2="722" stroke="#555" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- L8 skill-generation -->
+  <rect x="70" y="724" width="510" height="62" rx="8" fill="#E8F1FC" stroke="#2F6FBF" stroke-width="1.5"/>
+  <text x="325" y="748" font-size="14" font-weight="bold" text-anchor="middle" fill="#123">skill-generation（下游消费）</text>
+  <text x="325" y="770" font-size="12" text-anchor="middle" fill="#333">直接按结构化契约字段消费 · 一次提炼、多技能多次复用</text>
+
+  <!-- L9 特性注释 -->
+  <rect x="70" y="802" width="510" height="104" rx="8" fill="#F0F6FF" stroke="#2F6FBF" stroke-width="1" stroke-dasharray="3 3"/>
+  <text x="325" y="826" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#2F6FBF">特性小结</text>
+  <text x="325" y="847" font-size="12" text-anchor="middle" fill="#333">✅ 强契约 · 断言级溯源（source_ids）· 引用闭包 · 双格式评审 · 失败显式化</text>
+  <text x="325" y="867" font-size="12" text-anchor="middle" fill="#333">❌ token 成本高（约 700 行规约进上下文）· 不变量靠模型自觉</text>
+  <text x="325" y="887" font-size="12" text-anchor="middle" fill="#333">❌ 规约膨胀螺旋 · 编排路径难单测</text>
+
+  <!-- ══════════ 右栏：RAG 替代方案 ══════════ -->
+  <rect x="630" y="92" width="570" height="832" rx="10" fill="#F3FBF6" stroke="#2E9E5B" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="644" y="116" font-size="14" font-weight="bold" fill="#2E9E5B">RAG 替代方案（假想架构 · 用时现检索，无固化契约）</text>
+
+  <!-- R1 用户/前端 -->
+  <rect x="660" y="132" width="510" height="48" rx="8" fill="#EEEEEE" stroke="#888" stroke-width="1.5"/>
+  <text x="915" y="161" font-size="13.5" text-anchor="middle" fill="#222">用户 / 前端（上传资料 · 各阶段确认收口）</text>
+  <line x1="915" y1="180" x2="915" y2="194" stroke="#555" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- R2 主技能（保留） -->
+  <rect x="660" y="196" width="510" height="62" rx="8" fill="#FFF6E8" stroke="#E8862E" stroke-width="2"/>
+  <text x="915" y="220" font-size="14" font-weight="bold" text-anchor="middle" fill="#123">employment-coach-conversation（主技能）〔必须保留〕</text>
+  <text x="915" y="242" font-size="12" text-anchor="middle" fill="#B5651D">阶段门 · business_rules 缺口选项式提问 —— RAG 不覆盖这类交互编排</text>
+  <line x1="915" y1="258" x2="915" y2="272" stroke="#555" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- R3 摄取管道 -->
+  <rect x="660" y="274" width="510" height="82" rx="8" fill="#E8F6EE" stroke="#2E9E5B" stroke-width="1.5"/>
+  <text x="915" y="296" font-size="14" font-weight="bold" text-anchor="middle" fill="#123">摄取管道 Ingestion〔新增代码〕</text>
+  <text x="915" y="317" font-size="12" text-anchor="middle" fill="#333">文档解析（Word/MD → 文本）→ 分块 chunking → 嵌入 embedding</text>
+  <text x="915" y="337" font-size="12" text-anchor="middle" fill="#B02A2A">⚠️ 表格规则（CIP 矩阵/交期口径）与跨块关系易被分块切碎</text>
+  <line x1="915" y1="356" x2="915" y2="370" stroke="#555" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- R4 向量库 -->
+  <rect x="660" y="372" width="510" height="62" rx="8" fill="#FFF6E8" stroke="#E8862E" stroke-width="2"/>
+  <text x="915" y="396" font-size="14" font-weight="bold" text-anchor="middle" fill="#123">向量库（per-workspace 索引）〔新增基础设施〕</text>
+  <text x="915" y="418" font-size="12" text-anchor="middle" fill="#B5651D">pgvector / Qdrant / 内存索引 + 嵌入服务依赖 + 索引生命周期运维</text>
+  <line x1="915" y1="434" x2="915" y2="448" stroke="#555" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- R5 检索层 -->
+  <rect x="660" y="450" width="510" height="82" rx="8" fill="#E8F6EE" stroke="#2E9E5B" stroke-width="1.5"/>
+  <text x="915" y="472" font-size="14" font-weight="bold" text-anchor="middle" fill="#123">检索层 Retriever〔新增代码〕</text>
+  <text x="915" y="493" font-size="12" text-anchor="middle" fill="#333">skill 的 triggers + description 构造查询 → top-k + 相似度阈值 + 可选重排</text>
+  <text x="915" y="513" font-size="12" text-anchor="middle" fill="#B02A2A">⚠️ top-k 永远有返回：召回失败静默，需另行设计空结果协议</text>
+  <line x1="915" y1="532" x2="915" y2="546" stroke="#555" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- R6 LLM 结构化层（红框） -->
+  <rect x="660" y="548" width="510" height="82" rx="8" fill="#FDECEC" stroke="#D64545" stroke-width="2.5"/>
+  <text x="915" y="570" font-size="14" font-weight="bold" text-anchor="middle" fill="#B02A2A">LLM 结构化层〔替换后仍省不掉〕</text>
+  <text x="915" y="591" font-size="12" text-anchor="middle" fill="#333">检索命中块 → structured output + JSON Schema 校验（下游只吃强结构契约）</text>
+  <text x="915" y="611" font-size="12" text-anchor="middle" fill="#B02A2A">⚠️ 抽取工作搬到消费端：每个技能、每次生成都要重做一遍</text>
+  <line x1="915" y1="630" x2="915" y2="644" stroke="#555" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- R7 skill-generation -->
+  <rect x="660" y="646" width="510" height="62" rx="8" fill="#E8F6EE" stroke="#2E9E5B" stroke-width="1.5"/>
+  <text x="915" y="670" font-size="14" font-weight="bold" text-anchor="middle" fill="#123">skill-generation（下游消费）</text>
+  <text x="915" y="692" font-size="12" text-anchor="middle" fill="#333">消费即时结构化结果 · 无固化契约 · 结果随嵌入模型 / 索引 / k 值漂移</text>
+
+  <!-- R8 特性注释 -->
+  <rect x="660" y="802" width="510" height="104" rx="8" fill="#F2FBF5" stroke="#2E9E5B" stroke-width="1" stroke-dasharray="3 3"/>
+  <text x="915" y="826" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#2E9E5B">特性小结</text>
+  <text x="915" y="847" font-size="12" text-anchor="middle" fill="#333">✅ 检索环节代码化（便宜 · 确定 · 可单测）· 资料增量入索引 · 大语料可扩展</text>
+  <text x="915" y="867" font-size="12" text-anchor="middle" fill="#333">❌ 闭包 / 断言级溯源丢失 · 不可人工评审 · 召回失败静默</text>
+  <text x="915" y="887" font-size="12" text-anchor="middle" fill="#333">❌ 新增嵌入服务 + 向量库运维 · 检索质量长尾调优（标注集 / 阈值 / 分块）</text>
+
+  <!-- ══════════ 底部结论 ══════════ -->
+  <rect x="40" y="944" width="1160" height="104" rx="10" fill="#F3E8FC" stroke="#8A4FBF" stroke-width="2"/>
+  <text x="620" y="972" font-size="14.5" font-weight="bold" text-anchor="middle" fill="#6A2F9F">结论：RAG 可替代「信息选择」职能，无法替代「结构化契约生产」职能 —— 复杂度只是从提示词侧搬到基础设施侧，总量更高</text>
+  <text x="620" y="998" font-size="12.5" text-anchor="middle" fill="#444">推荐混合方案：保留两段式契约流水线　+　投影段「逐 skill 语义匹配」改用 embedding 相似度（省 token · 可单测 · 可复现）</text>
+  <text x="620" y="1022" font-size="12.5" text-anchor="middle" fill="#444">仅当上传资料超出上下文窗口时，才在抽取段内部引入 RAG 作预筛选漏斗；编排 / 容错的硬化优先走 MAF 代码化路线</text>
+</svg>

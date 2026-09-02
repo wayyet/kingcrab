@@ -1,0 +1,143 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="1060" viewBox="0 0 1320 1060" font-family="'Microsoft YaHei','PingFang SC',sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#546e7a"/>
+    </marker>
+    <marker id="arrowSide" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8e24aa"/>
+    </marker>
+  </defs>
+
+  <!-- 背景与标题 -->
+  <rect x="0" y="0" width="1320" height="1060" fill="#fafafa"/>
+  <text x="660" y="42" text-anchor="middle" font-size="26" font-weight="bold" fill="#263238">kingcrab（OpenClaw.NET）调用堆栈层次图 —— 六大可靠性机制挂载点</text>
+  <text x="660" y="68" text-anchor="middle" font-size="14" fill="#78909c">#1 幻觉级联防护　#2 上下文窗口　#3 上下文压缩　#4 会话记忆　#5 学习闭环　#6 无声失败防护</text>
+
+  <!-- ===== L1 渠道层 ===== -->
+  <rect x="60" y="95" width="820" height="90" rx="10" fill="#e3f2fd" stroke="#1976d2" stroke-width="2"/>
+  <text x="80" y="122" font-size="17" font-weight="bold" fill="#0d47a1">L1 渠道接入层　OpenClaw.Channels</text>
+  <text x="80" y="148" font-size="13" fill="#37474f">WhatsApp (BaileysWorker) ｜ 飞书 (FeishuMessageDedup) ｜ Teams ｜ WebSocket / HTTP API</text>
+  <text x="80" y="170" font-size="12" fill="#607d8b">职责：收发消息、去重、连接限流（MaxConnectionsPerIp / MessagesPerMinute）</text>
+
+  <!-- ===== L2 网关管道层 ===== -->
+  <rect x="60" y="215" width="820" height="130" rx="10" fill="#e8f5e9" stroke="#388e3c" stroke-width="2"/>
+  <text x="80" y="242" font-size="17" font-weight="bold" fill="#1b5e20">L2 网关管道层　OpenClaw.Gateway</text>
+  <text x="80" y="268" font-size="13" fill="#37474f">ChatCommandProcessor（命令/消息分发） → GatewayLlmExecutionService（LLM 执行 + 重试 + 超时 + 降级模型）</text>
+  <rect x="80" y="284" width="360" height="44" rx="6" fill="#ffffff" stroke="#66bb6a"/>
+  <text x="98" y="302" font-size="12.5" font-weight="bold" fill="#2e7d32">SessionManager（OpenClaw.Core.Sessions）#4</text>
+  <text x="98" y="320" font-size="11.5" fill="#546e7a">PersistAsync / QueueBestEffortPersist 后台落盘</text>
+  <rect x="460" y="284" width="400" height="44" rx="6" fill="#ffffff" stroke="#66bb6a"/>
+  <text x="478" y="302" font-size="12.5" font-weight="bold" fill="#2e7d32">AdminSettingsService #2</text>
+  <text x="478" y="320" font-size="11.5" fill="#546e7a">运行期热改 MaxTokens / MaxHistoryTurns / Compaction 并留审计</text>
+
+  <!-- ===== L3 智能体运行时层 ===== -->
+  <rect x="60" y="375" width="820" height="200" rx="10" fill="#fff3e0" stroke="#ef6c00" stroke-width="2"/>
+  <text x="80" y="402" font-size="17" font-weight="bold" fill="#e65100">L3 智能体运行时层　OpenClaw.Agent</text>
+  <rect x="80" y="418" width="470" height="140" rx="6" fill="#ffffff" stroke="#ffb74d"/>
+  <text x="98" y="440" font-size="13.5" font-weight="bold" fill="#e65100">MafAgentRuntime（回合执行核心）</text>
+  <text x="98" y="462" font-size="12" fill="#37474f">├ BuildMessages：只取最近 MaxHistoryTurns=20 轮　#2</text>
+  <text x="98" y="482" font-size="12" fill="#37474f">├ 记忆召回注入（失败→跳过并记日志）　#4</text>
+  <text x="98" y="502" font-size="12" fill="#37474f">├ CompactHistoryAsync：&gt;30 轮 → LLM 摘要　#3</text>
+  <text x="98" y="522" font-size="12" fill="#37474f">│　　保留最近 6 轮原文；摘要失败 → 回退纯截断</text>
+  <text x="98" y="542" font-size="12" fill="#37474f">└ SessionTokenBudget 预算检查　#6</text>
+  <rect x="570" y="418" width="290" height="140" rx="6" fill="#ffffff" stroke="#ffb74d"/>
+  <text x="588" y="440" font-size="13.5" font-weight="bold" fill="#e65100">ContractScopeHook　#6</text>
+  <text x="588" y="462" font-size="12" fill="#37474f">工具执行前钩子（fail-closed）：</text>
+  <text x="588" y="482" font-size="12" fill="#37474f">├ MaxToolCalls 硬上限 → 拒绝</text>
+  <text x="588" y="502" font-size="12" fill="#37474f">├ 作用域内 shell/exec 默认拒绝</text>
+  <text x="588" y="522" font-size="12" fill="#37474f">└ 路径白名单，解析失败即拒绝</text>
+
+  <!-- ===== L4 核心层 ===== -->
+  <rect x="60" y="605" width="820" height="130" rx="10" fill="#ede7f6" stroke="#5e35b1" stroke-width="2"/>
+  <text x="80" y="632" font-size="17" font-weight="bold" fill="#4527a0">L4 核心层　OpenClaw.Core</text>
+  <rect x="80" y="648" width="380" height="70" rx="6" fill="#ffffff" stroke="#9575cd"/>
+  <text x="98" y="670" font-size="12.5" font-weight="bold" fill="#4527a0">ContextBudgetPlanner　#1 #3</text>
+  <text x="98" y="690" font-size="11.5" fill="#546e7a">记忆注入预算 6000 tokens / 24000 字符</text>
+  <text x="98" y="708" font-size="11.5" fill="#546e7a">Trust: untrusted_reference_data + [truncated] 显式标记</text>
+  <rect x="480" y="648" width="380" height="70" rx="6" fill="#ffffff" stroke="#9575cd"/>
+  <text x="498" y="670" font-size="12.5" font-weight="bold" fill="#4527a0">GatewayConfig + ConfigValidator　#2 #3</text>
+  <text x="498" y="690" font-size="11.5" fill="#546e7a">appsettings.json "OpenClaw" 段；启动时强校验：</text>
+  <text x="498" y="708" font-size="11.5" fill="#546e7a">CompactionThreshold &gt; MaxHistoryTurns 等约束</text>
+
+  <!-- ===== L5 存储层 ===== -->
+  <rect x="60" y="765" width="820" height="120" rx="10" fill="#fce4ec" stroke="#c2185b" stroke-width="2"/>
+  <text x="80" y="792" font-size="17" font-weight="bold" fill="#880e4f">L5 持久化存储层　#4</text>
+  <rect x="80" y="806" width="245" height="62" rx="6" fill="#ffffff" stroke="#f48fb1"/>
+  <text x="96" y="828" font-size="12.5" font-weight="bold" fill="#880e4f">SqliteMemoryStore（实配）</text>
+  <text x="96" y="848" font-size="11.5" fill="#546e7a">./memory/openclaw.db</text>
+  <text x="96" y="864" font-size="11.5" fill="#546e7a">FTS 全文 + 可选向量检索</text>
+  <rect x="345" y="806" width="245" height="62" rx="6" fill="#ffffff" stroke="#f48fb1"/>
+  <text x="361" y="828" font-size="12.5" font-weight="bold" fill="#880e4f">FileMemoryStore</text>
+  <text x="361" y="848" font-size="11.5" fill="#546e7a">./memory JSON + LRU 缓存</text>
+  <text x="361" y="864" font-size="11.5" fill="#546e7a">base64url 文件名防路径穿越</text>
+  <rect x="610" y="806" width="250" height="62" rx="6" fill="#ffffff" stroke="#f48fb1"/>
+  <text x="626" y="828" font-size="12.5" font-weight="bold" fill="#880e4f">Mempalace 插件 / 归档</text>
+  <text x="626" y="848" font-size="11.5" fill="#546e7a">记忆宫殿 + 知识图谱 kg.db</text>
+  <text x="626" y="864" font-size="11.5" fill="#546e7a">Retention：TTL 过期→archive→删除</text>
+
+  <!-- ===== 外部依赖 ===== -->
+  <rect x="60" y="915" width="820" height="70" rx="10" fill="#eceff1" stroke="#607d8b" stroke-width="2" stroke-dasharray="6 4"/>
+  <text x="80" y="942" font-size="15" font-weight="bold" fill="#37474f">外部依赖</text>
+  <text x="80" y="966" font-size="12.5" fill="#546e7a">LLM 提供方（MaxTokens=16384，Timeout=600s，FallbackModels 降级）｜ fractalmem-mcp（分形记忆 MCP 进程）｜ 本地 llama（ContextSize）</text>
+
+  <!-- ===== 右侧旁路治理列 ===== -->
+  <rect x="920" y="95" width="360" height="890" rx="10" fill="#f3e5f5" stroke="#8e24aa" stroke-width="2"/>
+  <text x="940" y="124" font-size="16" font-weight="bold" fill="#6a1b9a">旁路治理与自学习（挂在 L2 网关层）</text>
+
+  <rect x="940" y="140" width="320" height="190" rx="6" fill="#ffffff" stroke="#ba68c8"/>
+  <text x="956" y="164" font-size="13.5" font-weight="bold" fill="#6a1b9a">PlanExecuteVerifyService　#1 #6</text>
+  <text x="956" y="186" font-size="11.5" fill="#37474f">EvaluateTool → HarnessContract（目标/成功标准/</text>
+  <text x="956" y="203" font-size="11.5" fill="#37474f">验证计划/回滚计划），高风险强制审批</text>
+  <text x="956" y="223" font-size="11.5" fill="#37474f">CompleteTool → 5 个 Verifier：</text>
+  <text x="956" y="241" font-size="11.5" fill="#546e7a">ToolOutcome / Approval / ContractCompleteness /</text>
+  <text x="956" y="258" font-size="11.5" fill="#546e7a">SecurityPosture / Regression</text>
+  <text x="956" y="280" font-size="11.5" fill="#c62828">验证失败 → Escalate / Rollback（不静默放行）</text>
+  <text x="956" y="298" font-size="11.5" fill="#c62828">验证跳过 → 状态 Escalated（防假性成功）</text>
+  <text x="956" y="318" font-size="11.5" fill="#546e7a">配套：EvidenceBundle 证据包 + GovernanceLedger 台账</text>
+
+  <rect x="940" y="350" width="320" height="230" rx="6" fill="#ffffff" stroke="#ba68c8"/>
+  <text x="956" y="374" font-size="13.5" font-weight="bold" fill="#6a1b9a">LearningService　学习闭环 #5</text>
+  <text x="956" y="396" font-size="11.5" fill="#37474f">① 观察：同一多工具序列重复 ≥ 阈值</text>
+  <text x="956" y="414" font-size="11.5" fill="#37474f">② 起草：LLM 生成 SKILL.md（10s 超时→模板回退）</text>
+  <text x="956" y="432" font-size="11.5" fill="#37474f">③ 校验：拒绝隐藏推理标记 / 内容哈希 / 风险分级</text>
+  <text x="956" y="450" font-size="11.5" fill="#37474f">④ 提案：Pending，指纹去重，绝不自动生效</text>
+  <text x="956" y="468" font-size="11.5" fill="#37474f">⑤ 审批：二次校验 + 冲突检查 → 写盘 + 热加载</text>
+  <text x="956" y="486" font-size="11.5" fill="#37474f">⑥ 回滚：RollbackAsync 删除托管技能并重载</text>
+  <text x="956" y="510" font-size="11.5" fill="#546e7a">落盘：skills/&lt;名称&gt;/SKILL.md</text>
+  <text x="956" y="528" font-size="11.5" fill="#546e7a">　　　+ .openclaw-learning.json 元数据</text>
+  <text x="956" y="550" font-size="11.5" fill="#546e7a">底座：OpenClaw.SkillKit（技能包装载/热加载）</text>
+  <text x="956" y="568" font-size="11.5" fill="#c62828">reload 失败 → metadata 记录 reloadFailed，不装成功</text>
+
+  <rect x="940" y="600" width="320" height="120" rx="6" fill="#ffffff" stroke="#ba68c8"/>
+  <text x="956" y="624" font-size="13.5" font-weight="bold" fill="#6a1b9a">RuntimePulseService　心跳巡检 #6</text>
+  <text x="956" y="646" font-size="11.5" fill="#37474f">BackgroundService 周期读 HEARTBEAT.md 任务清单</text>
+  <text x="956" y="664" font-size="11.5" fill="#37474f">驱动 LLM 自查 → HEARTBEAT_OK 或告警（≤20 条）</text>
+  <text x="956" y="682" font-size="11.5" fill="#546e7a">对抗长期任务"无声停摆"</text>
+  <text x="956" y="702" font-size="11.5" fill="#546e7a">配套：RuntimeEventStore 全链路事件 / PluginHealth</text>
+
+  <rect x="940" y="750" width="320" height="110" rx="6" fill="#fff8e1" stroke="#f9a825"/>
+  <text x="956" y="774" font-size="13.5" font-weight="bold" fill="#f57f17">⚠ 已识别薄弱点</text>
+  <text x="956" y="796" font-size="11.5" fill="#5d4037">· 无"相同工具+参数连续 N 次"死循环语义检测</text>
+  <text x="956" y="814" font-size="11.5" fill="#5d4037">· MaxToolCalls / SessionTokenBudget 默认 0（不限制）</text>
+  <text x="956" y="832" font-size="11.5" fill="#5d4037">· 纯文本回答不进 PEV；压缩摘要无二次校验</text>
+  <text x="956" y="850" font-size="11.5" fill="#5d4037">· appsettings.json 明文 API Key 已入库</text>
+
+  <rect x="940" y="890" width="320" height="80" rx="6" fill="#ffffff" stroke="#ba68c8"/>
+  <text x="956" y="914" font-size="13" font-weight="bold" fill="#6a1b9a">图例</text>
+  <text x="956" y="936" font-size="11.5" fill="#546e7a">实线箭头：同步调用方向（自上而下）</text>
+  <text x="956" y="954" font-size="11.5" fill="#8e24aa">紫色虚线：旁路挂载（钩子/后台服务）</text>
+
+  <!-- 主链路箭头 -->
+  <line x1="470" y1="185" x2="470" y2="215" stroke="#546e7a" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <line x1="470" y1="345" x2="470" y2="375" stroke="#546e7a" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <line x1="470" y1="575" x2="470" y2="605" stroke="#546e7a" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <line x1="470" y1="735" x2="470" y2="765" stroke="#546e7a" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <line x1="470" y1="885" x2="470" y2="915" stroke="#546e7a" stroke-width="2.5" marker-end="url(#arrow)"/>
+
+  <!-- 旁路虚线 -->
+  <line x1="880" y1="280" x2="940" y2="235" stroke="#8e24aa" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrowSide)"/>
+  <line x1="880" y1="300" x2="940" y2="460" stroke="#8e24aa" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrowSide)"/>
+  <line x1="880" y1="320" x2="940" y2="655" stroke="#8e24aa" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrowSide)"/>
+
+  <text x="660" y="1030" text-anchor="middle" font-size="12" fill="#90a4ae">生成日期：2026-07-02 ｜ 配套文档：docs/kingcrab智能体可靠性六大机制分析.md</text>
+</svg>

@@ -1,0 +1,163 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1560" height="1130" viewBox="0 0 1560 1130" font-family="'Microsoft YaHei','PingFang SC','Noto Sans CJK SC',sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 z" fill="#4a5568"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1560" height="1130" fill="#ffffff"/>
+
+  <!-- 标题 -->
+  <text x="780" y="38" text-anchor="middle" font-size="24" font-weight="bold" fill="#1a202c">openclaw.net 与 kingcrab 调用堆栈层次对比图</text>
+  <text x="780" y="62" text-anchor="middle" font-size="13" fill="#718096">中间为两者共享的同源调用堆栈；左侧为 openclaw.net（上游开源版）特有；右侧为 kingcrab（企业定制版）特有 · 2026-07-04</text>
+
+  <!-- 图例 -->
+  <rect x="480" y="76" width="18" height="14" rx="3" fill="#eaf2fb" stroke="#2b6cb0"/>
+  <text x="504" y="88" font-size="13" fill="#2d3748">共享同源模块</text>
+  <rect x="630" y="76" width="18" height="14" rx="3" fill="#fff4e5" stroke="#dd6b20"/>
+  <text x="654" y="88" font-size="13" fill="#2d3748">openclaw.net 特有</text>
+  <rect x="810" y="76" width="18" height="14" rx="3" fill="#e6f6ec" stroke="#2f855a"/>
+  <text x="834" y="88" font-size="13" fill="#2d3748">kingcrab 特有</text>
+
+  <!-- ===== 第 1 层 客户端层 ===== -->
+  <rect x="470" y="108" width="620" height="106" rx="10" fill="#eaf2fb" stroke="#2b6cb0" stroke-width="1.6"/>
+  <text x="780" y="132" text-anchor="middle" font-size="16" font-weight="bold" fill="#2b6cb0">① 客户端层（共享）</text>
+  <text x="780" y="156" text-anchor="middle" font-size="13" fill="#2d3748">OpenClaw.Cli（命令行） · OpenClaw.Companion（Avalonia 桌面）</text>
+  <text x="780" y="176" text-anchor="middle" font-size="13" fill="#2d3748">OpenClaw.Dashboard（Blazor WASM 运维台） · OpenClaw.Tui（终端 UI）</text>
+  <text x="780" y="196" text-anchor="middle" font-size="13" fill="#2d3748">WebChat（/chat 浏览器界面） · OpenClaw.Client（类型化 SDK）</text>
+
+  <line x1="780" y1="214" x2="780" y2="244" stroke="#4a5568" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- ===== 第 2 层 编排与身份层 ===== -->
+  <rect x="470" y="248" width="620" height="106" rx="10" fill="#eaf2fb" stroke="#2b6cb0" stroke-width="1.6"/>
+  <text x="780" y="272" text-anchor="middle" font-size="16" font-weight="bold" fill="#2b6cb0">② 部署编排与身份层</text>
+  <text x="780" y="298" text-anchor="middle" font-size="13" fill="#2d3748">共享：docker-compose · NativeAOT 自包含二进制</text>
+  <text x="780" y="318" text-anchor="middle" font-size="13" fill="#2d3748">aot / jit 双运行时车道（Runtime.Mode）</text>
+
+  <rect x="20" y="248" width="420" height="106" rx="10" fill="#fff4e5" stroke="#dd6b20" stroke-width="1.6"/>
+  <text x="230" y="272" text-anchor="middle" font-size="14" font-weight="bold" fill="#c05621">openclaw.net：开源发布设施</text>
+  <text x="230" y="296" text-anchor="middle" font-size="12.5" fill="#2d3748">deploy/ 云部署配置 · Dockerfile 单镜像</text>
+  <text x="230" y="316" text-anchor="middle" font-size="12.5" fill="#2d3748">eng/ 50+ AOT×MAF 冒烟验证矩阵脚本</text>
+  <text x="230" y="336" text-anchor="middle" font-size="12.5" fill="#2d3748">compat/ 公共冒烟契约 · AUDIT_REPORT</text>
+
+  <rect x="1120" y="248" width="420" height="106" rx="10" fill="#e6f6ec" stroke="#2f855a" stroke-width="1.6"/>
+  <text x="1330" y="272" text-anchor="middle" font-size="14" font-weight="bold" fill="#276749">kingcrab：Aspire + Keycloak</text>
+  <text x="1330" y="296" text-anchor="middle" font-size="12.5" fill="#2d3748">Kingcrab.AppHost（.NET Aspire 编排宿主）</text>
+  <text x="1330" y="316" text-anchor="middle" font-size="12.5" fill="#2d3748">Keycloak 资源 + Realm 导入（OIDC 统一认证）</text>
+  <text x="1330" y="336" text-anchor="middle" font-size="12.5" fill="#2d3748">Kingcrab.ServiceDefaults（OTel/健康检查/弹性）</text>
+
+  <line x1="440" y1="301" x2="470" y2="301" stroke="#dd6b20" stroke-width="1.6" stroke-dasharray="5,4"/>
+  <line x1="1120" y1="301" x2="1090" y2="301" stroke="#2f855a" stroke-width="1.6" stroke-dasharray="5,4"/>
+  <line x1="780" y1="354" x2="780" y2="384" stroke="#4a5568" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- ===== 第 3 层 网关层 ===== -->
+  <rect x="470" y="388" width="620" height="106" rx="10" fill="#eaf2fb" stroke="#2b6cb0" stroke-width="1.6"/>
+  <text x="780" y="412" text-anchor="middle" font-size="16" font-weight="bold" fill="#2b6cb0">③ 网关层 OpenClaw.Gateway（共享）</text>
+  <text x="780" y="436" text-anchor="middle" font-size="13" fill="#2d3748">Bootstrap → Composition（DI）→ Profiles（车道差异）→ Pipeline / Endpoints</text>
+  <text x="780" y="456" text-anchor="middle" font-size="13" fill="#2d3748">OpenAI 兼容端点（/v1/chat/completions、/v1/responses） · /mcp JSON-RPC 门面</text>
+  <text x="780" y="476" text-anchor="middle" font-size="13" fill="#2d3748">/api/integration 集成 API · 治理台账 / 证据包 / 审批 / 提示词缓存</text>
+
+  <rect x="20" y="388" width="420" height="106" rx="10" fill="#fff4e5" stroke="#dd6b20" stroke-width="1.6"/>
+  <text x="230" y="412" text-anchor="middle" font-size="14" font-weight="bold" fill="#c05621">openclaw.net：网关增强</text>
+  <text x="230" y="436" text-anchor="middle" font-size="12.5" fill="#2d3748">Background/：后台执行限流器、会话恢复 Worker</text>
+  <text x="230" y="456" text-anchor="middle" font-size="12.5" fill="#2d3748">Routing/：动态回合路由配置归一化</text>
+  <text x="230" y="476" text-anchor="middle" font-size="12.5" fill="#2d3748">OpenSquilla ONNX 模型包加载器</text>
+
+  <rect x="1120" y="388" width="420" height="106" rx="10" fill="#e6f6ec" stroke="#2f855a" stroke-width="1.6"/>
+  <text x="1330" y="412" text-anchor="middle" font-size="14" font-weight="bold" fill="#276749">kingcrab：网关增强</text>
+  <text x="1330" y="436" text-anchor="middle" font-size="12.5" fill="#2d3748">Keycloak/OIDC 接入（SecurityServicesExtensions）</text>
+  <text x="1330" y="456" text-anchor="middle" font-size="12.5" fill="#2d3748">CorrelationId 解析：外部 Trace ID 注入、按 Profile 配置</text>
+  <text x="1330" y="476" text-anchor="middle" font-size="12.5" fill="#2d3748">McpWorkspaceWatcherService（MCP 工作区监视）</text>
+
+  <line x1="440" y1="441" x2="470" y2="441" stroke="#dd6b20" stroke-width="1.6" stroke-dasharray="5,4"/>
+  <line x1="1120" y1="441" x2="1090" y2="441" stroke="#2f855a" stroke-width="1.6" stroke-dasharray="5,4"/>
+  <line x1="780" y1="494" x2="780" y2="524" stroke="#4a5568" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- ===== 第 4 层 运行时层 ===== -->
+  <rect x="470" y="528" width="620" height="106" rx="10" fill="#eaf2fb" stroke="#2b6cb0" stroke-width="1.6"/>
+  <text x="780" y="552" text-anchor="middle" font-size="16" font-weight="bold" fill="#2b6cb0">④ 智能体运行时层 OpenClaw.Agent（共享）</text>
+  <text x="780" y="576" text-anchor="middle" font-size="13" fill="#2d3748">回合（Turn）执行 · 工具调用循环 · 流式输出 · 取消/重试</text>
+  <text x="780" y="596" text-anchor="middle" font-size="13" fill="#2d3748">CircuitBreaker 熔断 · AuditLogHook 审计 · AutonomyHook 自治钩子</text>
+  <text x="780" y="616" text-anchor="middle" font-size="13" fill="#2d3748">ContractScopeHook 契约域 · A2A 智能体互联</text>
+
+  <rect x="20" y="528" width="420" height="106" rx="10" fill="#fff4e5" stroke="#dd6b20" stroke-width="1.6"/>
+  <text x="230" y="548" text-anchor="middle" font-size="14" font-weight="bold" fill="#c05621">openclaw.net：多编排器 + 自主任务</text>
+  <text x="230" y="570" text-anchor="middle" font-size="12.5" fill="#2d3748">native 默认编排器 + 可选适配工程：</text>
+  <text x="230" y="588" text-anchor="middle" font-size="12.5" fill="#2d3748">MAF 适配器 · SemanticKernel 适配器 · MEAI Provider</text>
+  <text x="230" y="606" text-anchor="middle" font-size="12.5" fill="#2d3748">Goal/（/goal 自动续跑） · Routing.Onnx（动态选模型）</text>
+  <text x="230" y="624" text-anchor="middle" font-size="12.5" fill="#2d3748">Core/Loops（/loop 周期任务，TickerQ 定时注入）</text>
+
+  <rect x="1120" y="528" width="420" height="106" rx="10" fill="#e6f6ec" stroke="#2f855a" stroke-width="1.6"/>
+  <text x="1330" y="548" text-anchor="middle" font-size="14" font-weight="bold" fill="#276749">kingcrab：MAF 内置 + 用量观察者</text>
+  <text x="1330" y="570" text-anchor="middle" font-size="12.5" fill="#2d3748">MAF 合并进 Agent（Maf* 12 文件），唯一编排路径</text>
+  <text x="1330" y="588" text-anchor="middle" font-size="12.5" fill="#2d3748">TokenUsageEventMapper（用量事件映射）</text>
+  <text x="1330" y="606" text-anchor="middle" font-size="12.5" fill="#2d3748">Observability/TokenHubSinkTurnTokenUsageObserver</text>
+  <text x="1330" y="624" text-anchor="middle" font-size="12.5" fill="#2d3748">（Token 用量旁路事件下沉为观察者链成员）</text>
+
+  <line x1="440" y1="581" x2="470" y2="581" stroke="#dd6b20" stroke-width="1.6" stroke-dasharray="5,4"/>
+  <line x1="1120" y1="581" x2="1090" y2="581" stroke="#2f855a" stroke-width="1.6" stroke-dasharray="5,4"/>
+  <line x1="780" y1="634" x2="780" y2="664" stroke="#4a5568" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- ===== 第 5 层 核心层 ===== -->
+  <rect x="470" y="668" width="620" height="106" rx="10" fill="#eaf2fb" stroke="#2b6cb0" stroke-width="1.6"/>
+  <text x="780" y="692" text-anchor="middle" font-size="16" font-weight="bold" fill="#2b6cb0">⑤ 核心层 OpenClaw.Core（共享）</text>
+  <text x="780" y="716" text-anchor="middle" font-size="13" fill="#2d3748">Memory（File/Sqlite 双存储 + 上下文预算） · Sessions 会话 · Skills 技能</text>
+  <text x="780" y="736" text-anchor="middle" font-size="13" fill="#2d3748">Security（ToolPathPolicy 等） · Governance 治理 · Plugins 插件抽象</text>
+  <text x="780" y="756" text-anchor="middle" font-size="13" fill="#2d3748">Observability：ITurnTokenUsageObserver 观察者链 · TurnContext · 用量审计</text>
+
+  <rect x="20" y="668" width="420" height="70" rx="10" fill="#fff4e5" stroke="#dd6b20" stroke-width="1.6"/>
+  <text x="230" y="692" text-anchor="middle" font-size="14" font-weight="bold" fill="#c05621">openclaw.net：核心扩展</text>
+  <text x="230" y="716" text-anchor="middle" font-size="12.5" fill="#2d3748">Core/Loops（周期任务） · Core/Services</text>
+
+  <rect x="1120" y="668" width="420" height="70" rx="10" fill="#e6f6ec" stroke="#2f855a" stroke-width="1.6"/>
+  <text x="1330" y="692" text-anchor="middle" font-size="14" font-weight="bold" fill="#276749">kingcrab：可靠性加固</text>
+  <text x="1330" y="716" text-anchor="middle" font-size="12.5" fill="#2d3748">PEV 闭环 / 防假性成功 / 主动巡检等持续补丁</text>
+
+  <line x1="440" y1="703" x2="470" y2="703" stroke="#dd6b20" stroke-width="1.6" stroke-dasharray="5,4"/>
+  <line x1="1120" y1="703" x2="1090" y2="703" stroke="#2f855a" stroke-width="1.6" stroke-dasharray="5,4"/>
+  <line x1="780" y1="774" x2="780" y2="804" stroke="#4a5568" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- ===== 第 6 层 通道层 ===== -->
+  <rect x="470" y="808" width="620" height="106" rx="10" fill="#eaf2fb" stroke="#2b6cb0" stroke-width="1.6"/>
+  <text x="780" y="832" text-anchor="middle" font-size="16" font-weight="bold" fill="#2b6cb0">⑥ 通道层 OpenClaw.Channels（共享 11 通道）</text>
+  <text x="780" y="856" text-anchor="middle" font-size="13" fill="#2d3748">Telegram · Discord · Slack · Teams · Email · Signal · Twilio SMS</text>
+  <text x="780" y="876" text-anchor="middle" font-size="13" fill="#2d3748">WhatsApp（官方 Webhook + Baileys 桥双路） · WebSocket · Cron</text>
+
+  <rect x="20" y="808" width="420" height="70" rx="10" fill="#fff4e5" stroke="#dd6b20" stroke-width="1.6"/>
+  <text x="230" y="832" text-anchor="middle" font-size="14" font-weight="bold" fill="#c05621">openclaw.net：额外桥接</text>
+  <text x="230" y="856" text-anchor="middle" font-size="12.5" fill="#2d3748">whatsapp-whatsmeow-worker（Go 实现第二桥）</text>
+
+  <rect x="1120" y="808" width="420" height="86" rx="10" fill="#e6f6ec" stroke="#2f855a" stroke-width="1.6"/>
+  <text x="1330" y="832" text-anchor="middle" font-size="14" font-weight="bold" fill="#276749">kingcrab：中国办公生态通道</text>
+  <text x="1330" y="856" text-anchor="middle" font-size="12.5" fill="#2d3748">飞书 FeishuChannel（含 FeishuMessageDedup 去重）</text>
+  <text x="1330" y="876" text-anchor="middle" font-size="12.5" fill="#2d3748">钉钉 DingTalkChannel · 企业微信 WeComChannel</text>
+
+  <line x1="440" y1="843" x2="470" y2="843" stroke="#dd6b20" stroke-width="1.6" stroke-dasharray="5,4"/>
+  <line x1="1120" y1="843" x2="1090" y2="843" stroke="#2f855a" stroke-width="1.6" stroke-dasharray="5,4"/>
+  <line x1="780" y1="914" x2="780" y2="944" stroke="#4a5568" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- ===== 第 7 层 外部设施层 ===== -->
+  <rect x="470" y="948" width="620" height="106" rx="10" fill="#eaf2fb" stroke="#2b6cb0" stroke-width="1.6"/>
+  <text x="780" y="972" text-anchor="middle" font-size="16" font-weight="bold" fill="#2b6cb0">⑦ 外部设施与生态层（共享）</text>
+  <text x="780" y="996" text-anchor="middle" font-size="13" fill="#2d3748">LLM Providers（OpenAI/Anthropic 兼容等） · Node.js JSON-RPC 插件桥</text>
+  <text x="780" y="1016" text-anchor="middle" font-size="13" fill="#2d3748">OpenSandbox 沙箱（shell/code_exec/browser 高危工具路由）</text>
+  <text x="780" y="1036" text-anchor="middle" font-size="13" fill="#2d3748">Stripe Link 支付 · SkillKit 技能包体系</text>
+
+  <rect x="20" y="948" width="420" height="106" rx="10" fill="#fff4e5" stroke="#dd6b20" stroke-width="1.6"/>
+  <text x="230" y="972" text-anchor="middle" font-size="14" font-weight="bold" fill="#c05621">openclaw.net：生态扩展工程</text>
+  <text x="230" y="996" text-anchor="middle" font-size="12.5" fill="#2d3748">mcpapp（一等 MCP App：清单发现/生命周期/UI 资源）</text>
+  <text x="230" y="1016" text-anchor="middle" font-size="12.5" fill="#2d3748">Protocols.Mqtt · Protocols.Browser 独立协议工程</text>
+  <text x="230" y="1036" text-anchor="middle" font-size="12.5" fill="#2d3748">Plugins.TokenJuice（工具输出压缩省 token） · models/</text>
+
+  <rect x="1120" y="948" width="420" height="106" rx="10" fill="#e6f6ec" stroke="#2f855a" stroke-width="1.6"/>
+  <text x="1330" y="972" text-anchor="middle" font-size="14" font-weight="bold" fill="#276749">kingcrab：企业计量与业务链路</text>
+  <text x="1330" y="996" text-anchor="middle" font-size="12.5" fill="#2d3748">TokenHubSink → TokenHub 采集器 → Kafka → Doris</text>
+  <text x="1330" y="1016" text-anchor="middle" font-size="12.5" fill="#2d3748">（Token 用量计费/审计分析，HTTP 异步旁路上报）</text>
+  <text x="1330" y="1036" text-anchor="middle" font-size="12.5" fill="#2d3748">EmploymentCoachWorkflow 数字员工工作流插件</text>
+
+  <line x1="440" y1="1001" x2="470" y2="1001" stroke="#dd6b20" stroke-width="1.6" stroke-dasharray="5,4"/>
+  <line x1="1120" y1="1001" x2="1090" y2="1001" stroke="#2f855a" stroke-width="1.6" stroke-dasharray="5,4"/>
+
+  <!-- 页脚 -->
+  <text x="780" y="1102" text-anchor="middle" font-size="12" fill="#a0aec0">血缘：kingcrab 于 2026-03-05 结构性合并 openclaw.net（截至 2026-03-04 版本）后独立演进 · 约 85% 代码同源</text>
+</svg>

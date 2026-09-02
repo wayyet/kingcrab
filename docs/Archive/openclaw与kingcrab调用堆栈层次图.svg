@@ -1,0 +1,139 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1760" height="1560" viewBox="0 0 1760 1560" font-family="'Microsoft YaHei','PingFang SC',sans-serif">
+  <defs>
+    <marker id="arrowK" markerWidth="10" markerHeight="10" refX="5" refY="8" orient="auto">
+      <path d="M1,1 L5,9 L9,1" fill="none" stroke="#512BD4" stroke-width="2"/>
+    </marker>
+    <marker id="arrowO" markerWidth="10" markerHeight="10" refX="5" refY="8" orient="auto">
+      <path d="M1,1 L5,9 L9,1" fill="none" stroke="#C2410C" stroke-width="2"/>
+    </marker>
+  </defs>
+
+  <rect width="1760" height="1560" fill="#FAFAF7"/>
+  <text x="880" y="52" text-anchor="middle" font-size="30" font-weight="bold" fill="#1F2328">openclaw 与 kingcrab 调用堆栈层次对比图</text>
+  <text x="880" y="84" text-anchor="middle" font-size="15" fill="#6B7280">左:kingcrab(OpenClaw.NET,.NET 实现) | 右:openclaw(TypeScript 原版) | ◆ 表示该侧独有能力</text>
+
+  <!-- ===================== 左栏:kingcrab ===================== -->
+  <text x="440" y="128" text-anchor="middle" font-size="22" font-weight="bold" fill="#512BD4">kingcrab(OpenClaw.NET)调用堆栈</text>
+
+  <!-- L1 客户端层 -->
+  <rect x="60" y="148" width="760" height="150" rx="12" fill="#EDE9FE" stroke="#512BD4" stroke-width="2"/>
+  <text x="80" y="178" font-size="18" font-weight="bold" fill="#3B1D8F">① 客户端 / 接入层</text>
+  <text x="80" y="204" font-size="14" fill="#1F2328">WebChat(/chat) · CLI(OpenClaw.Cli) · TUI(OpenClaw.Tui)</text>
+  <text x="80" y="228" font-size="14" fill="#1F2328">◆ Avalonia 桌面 Companion · ◆ Blazor WASM 运维 Dashboard</text>
+  <text x="80" y="252" font-size="14" fill="#1F2328">Webhook 通道:Telegram / Twilio / WhatsApp / ◆飞书 / ◆钉钉 / ◆企业微信 …</text>
+  <text x="80" y="276" font-size="14" fill="#1F2328">◆ OpenAI 兼容客户端(把网关当模型服务调用 /v1/*)</text>
+  <line x1="440" y1="298" x2="440" y2="330" stroke="#512BD4" stroke-width="2" marker-end="url(#arrowK)"/>
+
+  <!-- L2 网关层 -->
+  <rect x="60" y="334" width="760" height="172" rx="12" fill="#EDE9FE" stroke="#512BD4" stroke-width="2"/>
+  <text x="80" y="364" font-size="18" font-weight="bold" fill="#3B1D8F">② 网关层 OpenClaw.Gateway(ASP.NET Core)</text>
+  <text x="80" y="390" font-size="14" fill="#1F2328">启动四段式:Bootstrap → Composition → Profiles(aot/jit 车道)→ Pipeline/Endpoints</text>
+  <text x="80" y="414" font-size="14" fill="#1F2328">鉴权(Bearer Token)· 限流 · ◆公网绑定强化(不加固拒绝启动)</text>
+  <text x="80" y="438" font-size="14" fill="#1F2328">端点:WS / Webhook / ◆OpenAI 兼容(ChatCompletions、Responses)</text>
+  <text x="80" y="462" font-size="14" fill="#1F2328">◆管理域:治理台账 / 证据包 / 自动化建议 / 数字员工 / 支付审批</text>
+  <text x="80" y="486" font-size="14" fill="#1F2328">OpenClaw.Channels:内置 C# 通道类(一文件一通道,含 CronChannel)</text>
+  <line x1="440" y1="506" x2="440" y2="538" stroke="#512BD4" stroke-width="2" marker-end="url(#arrowK)"/>
+
+  <!-- L3 智能体运行时 -->
+  <rect x="60" y="542" width="760" height="150" rx="12" fill="#EDE9FE" stroke="#512BD4" stroke-width="2"/>
+  <text x="80" y="572" font-size="18" font-weight="bold" fill="#3B1D8F">③ 智能体运行时 OpenClaw.Agent</text>
+  <text x="80" y="598" font-size="14" fill="#1F2328">双编排器:native(默认)/ ◆MAF(Microsoft Agent Framework,可选构件)</text>
+  <text x="80" y="622" font-size="14" fill="#1F2328">推理循环 · 系统提示词构建 · CircuitBreaker 熔断 · 审计/自治 Hook</text>
+  <text x="80" y="646" font-size="14" fill="#1F2328">调用 LLM 提供商 API · TokenUsageEventMapper 用量映射</text>
+  <text x="80" y="670" font-size="14" fill="#1F2328">A2A 智能体互联 · 工具审批回调(ToolApprovalCallback)</text>
+  <line x1="440" y1="692" x2="440" y2="724" stroke="#512BD4" stroke-width="2" marker-end="url(#arrowK)"/>
+
+  <!-- L4 工具与插件层 -->
+  <rect x="60" y="728" width="760" height="172" rx="12" fill="#EDE9FE" stroke="#512BD4" stroke-width="2"/>
+  <text x="80" y="758" font-size="18" font-weight="bold" fill="#3B1D8F">④ 工具与插件层</text>
+  <text x="80" y="784" font-size="14" fill="#1F2328">内置 C# 工具 40+:Shell / 文件 / Git / 浏览器 / ◆HomeAssistant / ◆MQTT</text>
+  <text x="80" y="808" font-size="14" fill="#1F2328">◆Notion / ◆MinerU PDF / ◆Database / Email / 记忆系列 / MCP 原生工具</text>
+  <text x="80" y="832" font-size="14" fill="#1F2328">◆OpenSandbox 沙箱路由:shell / code_exec / browser(Prefer 回退 · Require 关闭)</text>
+  <text x="80" y="856" font-size="14" fill="#1F2328">JS/TS 插件 → Node.js JSON-RPC 桥(进程外,按 aot/jit 车道限能力,快速失败)</text>
+  <text x="80" y="880" font-size="14" fill="#1F2328">◆PluginKit 原生 .NET 动态插件(仅 jit)· SkillKit(SKILL.md 原生,不走桥)</text>
+  <line x1="440" y1="900" x2="440" y2="932" stroke="#512BD4" stroke-width="2" marker-end="url(#arrowK)"/>
+
+  <!-- L5 核心与存储层 -->
+  <rect x="60" y="936" width="760" height="150" rx="12" fill="#EDE9FE" stroke="#512BD4" stroke-width="2"/>
+  <text x="80" y="966" font-size="18" font-weight="bold" fill="#3B1D8F">⑤ 核心与存储层 OpenClaw.Core</text>
+  <text x="80" y="992" font-size="14" fill="#1F2328">Memory:Sqlite/File 双 Store · ContextBudgetPlanner · ◆保留清扫(TTL 归档)</text>
+  <text x="80" y="1016" font-size="14" fill="#1F2328">Sessions · Skills · Security(secret refs)· ◆Governance · Observability(OTel)</text>
+  <text x="80" y="1040" font-size="14" fill="#1F2328">存储策略:SQLite + 原子 JSON 文件混用(AtomicJsonFileStore、File*Store)</text>
+  <text x="80" y="1064" font-size="14" fill="#1F2328">◆Payments.*(Stripe Link)· Compatibility 兼容诊断</text>
+  <line x1="440" y1="1086" x2="440" y2="1118" stroke="#512BD4" stroke-width="2" marker-end="url(#arrowK)"/>
+
+  <!-- L6 旁路/外部 -->
+  <rect x="60" y="1122" width="760" height="128" rx="12" fill="#F5F3FF" stroke="#512BD4" stroke-width="2" stroke-dasharray="6 4"/>
+  <text x="80" y="1152" font-size="18" font-weight="bold" fill="#3B1D8F">⑥ 旁路与外部设施</text>
+  <text x="80" y="1178" font-size="14" fill="#1F2328">◆ TokenHubSink(Observer 链旁路)→ TokenCollector → Kafka → Doris(计量/计费)</text>
+  <text x="80" y="1202" font-size="14" fill="#1F2328">◆ .NET Aspire(Kingcrab.AppHost / ServiceDefaults)一键编排本地多服务</text>
+  <text x="80" y="1226" font-size="14" fill="#1F2328">部署:NativeAOT 单文件(约 23MB)· Docker Chiseled · Caddy TLS</text>
+
+  <!-- ===================== 右栏:openclaw ===================== -->
+  <text x="1320" y="128" text-anchor="middle" font-size="22" font-weight="bold" fill="#C2410C">openclaw(TypeScript 原版)调用堆栈</text>
+
+  <!-- R1 客户端层 -->
+  <rect x="940" y="148" width="760" height="128" rx="12" fill="#FFEDD5" stroke="#C2410C" stroke-width="2"/>
+  <text x="960" y="178" font-size="18" font-weight="bold" fill="#7C2D12">① 客户端 / 接入层</text>
+  <text x="960" y="204" font-size="14" fill="#1F2328">Web UI(ui/,Vite)· CLI(src/entry.ts → openclaw 命令)</text>
+  <text x="960" y="228" font-size="14" fill="#1F2328">◆ 原生 App:iOS / Android / macOS(apps/,含 MLX TTS)</text>
+  <text x="960" y="252" font-size="14" fill="#1F2328">聊天平台用户:Telegram / Discord / ◆iMessage / ◆Matrix / ◆IRC / ◆Nostr …</text>
+  <line x1="1320" y1="276" x2="1320" y2="308" stroke="#C2410C" stroke-width="2" marker-end="url(#arrowO)"/>
+
+  <!-- R2 通道插件层 -->
+  <rect x="940" y="312" width="760" height="128" rx="12" fill="#FFEDD5" stroke="#C2410C" stroke-width="2"/>
+  <text x="960" y="342" font-size="18" font-weight="bold" fill="#7C2D12">② 通道插件层 extensions/*(transport-only)</text>
+  <text x="960" y="368" font-size="14" fill="#1F2328">◆ 130+ 插件生态:通道插件只做传输,渲染可移植表现与原生回调映射</text>
+  <text x="960" y="392" font-size="14" fill="#1F2328">telegram / discord / slack / whatsapp / msteams / feishu / line / qqbot / zalo …</text>
+  <text x="960" y="416" font-size="14" fill="#1F2328">插件仅经 plugin-sdk 进入核心(公开 barrel,禁止深入内部)</text>
+  <line x1="1320" y1="440" x2="1320" y2="472" stroke="#C2410C" stroke-width="2" marker-end="url(#arrowO)"/>
+
+  <!-- R3 通道机制层 -->
+  <rect x="940" y="476" width="760" height="128" rx="12" fill="#FFEDD5" stroke="#C2410C" stroke-width="2"/>
+  <text x="960" y="506" font-size="18" font-weight="bold" fill="#7C2D12">③ 通道通用机制层 src/channels</text>
+  <text x="960" y="532" font-size="14" fill="#1F2328">允许名单 / 提及与命令门禁 / 入站去抖 / 会话与线程绑定策略</text>
+  <text x="960" y="556" font-size="14" fill="#1F2328">◆ 精细聊天体验:流式草稿(draft streaming)· 状态回应 · 打字生命周期</text>
+  <text x="960" y="580" font-size="14" fill="#1F2328">路由投影(route-projection)· 运行状态机(run-state-machine)</text>
+  <line x1="1320" y1="604" x2="1320" y2="636" stroke="#C2410C" stroke-width="2" marker-end="url(#arrowO)"/>
+
+  <!-- R4 网关层 -->
+  <rect x="940" y="640" width="760" height="128" rx="12" fill="#FFEDD5" stroke="#C2410C" stroke-width="2"/>
+  <text x="960" y="670" font-size="18" font-weight="bold" fill="#7C2D12">④ 网关层 src/gateway + packages/gateway-protocol</text>
+  <text x="960" y="696" font-size="14" fill="#1F2328">daemon 常驻进程 · boot 引导 · 鉴权与限流 · 通道健康监控</text>
+  <text x="960" y="720" font-size="14" fill="#1F2328">◆ 类型化自有协议包(gateway-protocol / gateway-client),变更先增量</text>
+  <text x="960" y="744" font-size="14" fill="#1F2328">会话调度 · agent 运行身份令牌 · 聊天附件与中止控制</text>
+  <line x1="1320" y1="768" x2="1320" y2="800" stroke="#C2410C" stroke-width="2" marker-end="url(#arrowO)"/>
+
+  <!-- R5 智能体层 -->
+  <rect x="940" y="804" width="760" height="150" rx="12" fill="#FFEDD5" stroke="#C2410C" stroke-width="2"/>
+  <text x="960" y="834" font-size="18" font-weight="bold" fill="#7C2D12">⑤ 智能体层 src/agents(自研 agent loop)</text>
+  <text x="960" y="860" font-size="14" fill="#1F2328">回合循环 · steering queue 转向队列 · 上下文压缩(compaction)</text>
+  <text x="960" y="884" font-size="14" fill="#1F2328">工具:cron / gateway / 目标管理 / ◆图像生成 / ◆MCP·LSP 捆绑运行时</text>
+  <text x="960" y="908" font-size="14" fill="#1F2328">◆ 外部编码智能体挂具:codex / codex-supervisor / opencode(托管后端)</text>
+  <text x="960" y="932" font-size="14" fill="#1F2328">回合终态归一(agent-run-terminal-outcome)</text>
+  <line x1="1320" y1="954" x2="1320" y2="986" stroke="#C2410C" stroke-width="2" marker-end="url(#arrowO)"/>
+
+  <!-- R6 提供商/能力层 -->
+  <rect x="940" y="990" width="760" height="150" rx="12" fill="#FFEDD5" stroke="#C2410C" stroke-width="2"/>
+  <text x="960" y="1020" font-size="18" font-weight="bold" fill="#7C2D12">⑥ 提供商与能力插件层</text>
+  <text x="960" y="1046" font-size="14" fill="#1F2328">◆ 40+ 模型提供商:anthropic / openai / google / bedrock / deepseek / qwen / ollama …</text>
+  <text x="960" y="1070" font-size="14" fill="#1F2328">◆ 多媒体全家桶:图像 / 视频 / 音乐生成 · TTS · 实时转写 · 媒体理解</text>
+  <text x="960" y="1094" font-size="14" fill="#1F2328">◆ MCP + ACP 协议(src/mcp、src/acp、packages/acp-core)</text>
+  <text x="960" y="1118" font-size="14" fill="#1F2328">◆ 浏览器接管 / 电话控制 / 语音通话 / ClawHub 技能市场</text>
+  <line x1="1320" y1="1140" x2="1320" y2="1172" stroke="#C2410C" stroke-width="2" marker-end="url(#arrowO)"/>
+
+  <!-- R7 存储层 -->
+  <rect x="940" y="1176" width="760" height="106" rx="12" fill="#FFF7ED" stroke="#C2410C" stroke-width="2" stroke-dasharray="6 4"/>
+  <text x="960" y="1206" font-size="18" font-weight="bold" fill="#7C2D12">⑦ 存储层(SQLite-only 政策)</text>
+  <text x="960" y="1232" font-size="14" fill="#1F2328">共享库 state/openclaw.sqlite + 每 agent 库 openclaw-agent.sqlite(Kysely 访问)</text>
+  <text x="960" y="1256" font-size="14" fill="#1F2328">严禁 JSON/JSONL 旁路状态文件 · 旧格式仅由 openclaw doctor --fix 迁移</text>
+
+  <!-- ===================== 底部对照区 ===================== -->
+  <rect x="60" y="1310" width="1640" height="200" rx="12" fill="#F1F5F9" stroke="#64748B" stroke-width="1.5"/>
+  <text x="90" y="1344" font-size="18" font-weight="bold" fill="#334155">关键分化点速览</text>
+  <text x="90" y="1376" font-size="14" fill="#1F2328">1. 插件模型:openclaw 插件是一等公民(130+ 内置);kingcrab 经 Node JSON-RPC 桥兼容 JS 插件,按 aot/jit 车道限能力、不支持即快速失败。</text>
+  <text x="90" y="1402" font-size="14" fill="#1F2328">2. 通道架构:kingcrab 通道为内置 C# 类(独有飞书/钉钉/企业微信);openclaw 核心只留通用机制,具体通道全部下沉为插件(种类更多)。</text>
+  <text x="90" y="1428" font-size="14" fill="#1F2328">3. 企业纵深:支付、Token 计量(Kafka+Doris)、治理台账、证据包、数字员工、OpenSandbox 沙箱、公网强化——均为 kingcrab 独有。</text>
+  <text x="90" y="1454" font-size="14" fill="#1F2328">4. 生态广度:模型提供商、多媒体生成、MCP/ACP、原生多端 App、ClawHub 市场——均为 openclaw 独有。</text>
+  <text x="90" y="1480" font-size="14" fill="#1F2328">5. 部署形态:kingcrab 主打 NativeAOT 单文件 + Aspire 编排;openclaw 主打 Node 进程 + npm 分发 + 云平台配置。</text>
+</svg>
